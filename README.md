@@ -41,6 +41,11 @@ Development bootstrap account:
 - Username: `admin`
 - Password: `admin12345`
 
+Admin users page:
+
+- http://localhost:3100/ru/admin/users
+- Only `superadmin` and `admin` users can access it.
+
 Important auth environment variables:
 
 - `APP_SECRET_KEY` - development placeholder is included in `.env.example`; change it for any shared or production deployment.

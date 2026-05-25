@@ -36,7 +36,49 @@
     "displayName": "Отображаемое имя",
     "username": "Имя пользователя",
     "role": "Роль",
+    "adminUsers": "Управление пользователями",
     "logout": "Выйти"
+  },
+  "adminUsers": {
+    "ariaLabel": "Управление пользователями",
+    "title": "Управление пользователями",
+    "backToDashboard": "Назад к панели",
+    "loading": "Загрузка пользователей...",
+    "accessDenied": "Доступ запрещен. Управлять пользователями могут только superadmin и admin.",
+    "createTitle": "Создать пользователя",
+    "usersTitle": "Пользователи",
+    "createSubmit": "Создать",
+    "creating": "Создание",
+    "createSuccess": "Пользователь создан.",
+    "createError": "Не удалось создать пользователя.",
+    "yes": "Да",
+    "no": "Нет",
+    "emptyValue": "-",
+    "fields": {
+      "username": "Имя пользователя",
+      "displayName": "Отображаемое имя",
+      "email": "Email",
+      "password": "Пароль",
+      "role": "Роль",
+      "active": "Активен"
+    },
+    "columns": {
+      "displayName": "Отображаемое имя",
+      "username": "Имя пользователя",
+      "email": "Email",
+      "role": "Роль",
+      "authProvider": "Auth provider",
+      "active": "Активен",
+      "createdAt": "Создан"
+    },
+    "roles": {
+      "superadmin": "superadmin",
+      "admin": "admin",
+      "group_owner": "group_owner",
+      "moderator": "moderator",
+      "user": "user",
+      "bot": "bot"
+    }
   },
   "links": {
     "docsHref": "http://localhost:8100/docs"

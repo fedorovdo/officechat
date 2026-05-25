@@ -35,6 +35,10 @@ docker compose up -d --build
 
 Страница входа: http://localhost:3100/ru/login
 
+Страница управления пользователями: http://localhost:3100/ru/admin/users
+
+Доступ к управлению пользователями есть только у ролей `superadmin` и `admin`.
+
 ## Проверка сервисов
 
 ```powershell

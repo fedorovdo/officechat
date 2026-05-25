@@ -36,7 +36,49 @@
     "displayName": "Display name",
     "username": "Username",
     "role": "Role",
+    "adminUsers": "Manage users",
     "logout": "Logout"
+  },
+  "adminUsers": {
+    "ariaLabel": "Admin user management",
+    "title": "User management",
+    "backToDashboard": "Back to dashboard",
+    "loading": "Loading users...",
+    "accessDenied": "Access denied. Only superadmins and admins can manage users.",
+    "createTitle": "Create user",
+    "usersTitle": "Users",
+    "createSubmit": "Create user",
+    "creating": "Creating",
+    "createSuccess": "User created successfully.",
+    "createError": "Could not create user.",
+    "yes": "Yes",
+    "no": "No",
+    "emptyValue": "-",
+    "fields": {
+      "username": "Username",
+      "displayName": "Display name",
+      "email": "Email",
+      "password": "Password",
+      "role": "Role",
+      "active": "Active"
+    },
+    "columns": {
+      "displayName": "Display name",
+      "username": "Username",
+      "email": "Email",
+      "role": "Role",
+      "authProvider": "Auth provider",
+      "active": "Active",
+      "createdAt": "Created at"
+    },
+    "roles": {
+      "superadmin": "superadmin",
+      "admin": "admin",
+      "group_owner": "group_owner",
+      "moderator": "moderator",
+      "user": "user",
+      "bot": "bot"
+    }
   },
   "links": {
     "docsHref": "http://localhost:8100/docs"

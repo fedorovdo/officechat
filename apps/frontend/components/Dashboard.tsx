@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { clearStoredAccessToken, getCurrentUser, getStoredAccessToken, isAdminRole } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 
 type DashboardProps = {
@@ -22,37 +24,27 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("officechat.access_token");
+    const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
       return;
     }
+    const accessToken = token;
 
     async function loadUser() {
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        if (!response.ok) {
-          localStorage.removeItem("officechat.access_token");
-          router.replace(`/${locale}/login`);
-          return;
-        }
-
-        setUser((await response.json()) as CurrentUser);
+        setUser((await getCurrentUser(accessToken)) as CurrentUser);
       } catch {
-        setError(dictionary.dashboard.loadError);
+        clearStoredAccessToken();
+        router.replace(`/${locale}/login`);
       }
     }
 
     void loadUser();
-  }, [dictionary.dashboard.loadError, locale, router]);
+  }, [locale, router]);
 
   async function logout() {
-    const token = localStorage.getItem("officechat.access_token");
+    const token = getStoredAccessToken();
     if (token) {
       await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/logout`, {
         method: "POST",
@@ -62,7 +54,7 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
       }).catch(() => undefined);
     }
 
-    localStorage.removeItem("officechat.access_token");
+    clearStoredAccessToken();
     router.replace(`/${locale}/login`);
   }
 
@@ -96,6 +88,11 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
               <span className="status-label">{dictionary.dashboard.role}</span>
               <strong>{user.role}</strong>
             </div>
+            {isAdminRole(user.role) ? (
+              <Link className="primary-button dashboard-admin-link" href={`/${locale}/admin/users`}>
+                {dictionary.dashboard.adminUsers}
+              </Link>
+            ) : null}
           </div>
         ) : null}
       </section>

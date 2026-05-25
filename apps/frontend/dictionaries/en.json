@@ -103,6 +103,26 @@
       "member": "member"
     }
   },
+  "messages": {
+    "ariaLabel": "Group messages",
+    "title": "Messages",
+    "refresh": "Refresh",
+    "loadError": "Could not load messages.",
+    "sendSuccess": "Message sent.",
+    "sendError": "Could not send message.",
+    "editSuccess": "Message updated.",
+    "editError": "Could not update message.",
+    "deleteSuccess": "Message deleted.",
+    "deleteError": "Could not delete message.",
+    "edited": "edited",
+    "body": "Message",
+    "sending": "Sending",
+    "send": "Send",
+    "saveEdit": "Save",
+    "cancelEdit": "Cancel",
+    "edit": "Edit",
+    "delete": "Delete"
+  },
   "adminUsers": {
     "ariaLabel": "Admin user management",
     "title": "User management",

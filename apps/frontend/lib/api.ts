@@ -53,6 +53,19 @@ export type OfficeChatGroupMember = {
   user: OfficeChatUser;
 };
 
+export type OfficeChatMessage = {
+  id: string;
+  group_id: string;
+  sender_user_id: string;
+  body: string;
+  message_type: string;
+  is_deleted: boolean;
+  edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+  sender: OfficeChatUser;
+};
+
 export type CreateGroupPayload = {
   name: string;
   slug: string;
@@ -190,6 +203,30 @@ export function updateGroupMember(token: string, groupId: string, memberId: stri
 
 export function removeGroupMember(token: string, groupId: string, memberId: string) {
   return apiFetch<void>(`/api/groups/${groupId}/members/${memberId}`, token, {
+    method: "DELETE"
+  });
+}
+
+export function getGroupMessages(token: string, groupId: string, limit = 50) {
+  return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages?limit=${limit}`, token);
+}
+
+export function sendGroupMessage(token: string, groupId: string, body: string) {
+  return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ body, message_type: "text" })
+  });
+}
+
+export function editGroupMessage(token: string, groupId: string, messageId: string, body: string) {
+  return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages/${messageId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ body })
+  });
+}
+
+export function deleteGroupMessage(token: string, groupId: string, messageId: string) {
+  return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages/${messageId}`, token, {
     method: "DELETE"
   });
 }

@@ -28,6 +28,7 @@ docker compose up -d --build
 - `BOOTSTRAP_SUPERADMIN_USERNAME`
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
+- `MESSAGE_MAX_LENGTH`
 
 Локальная учетная запись из `.env.example`:
 
@@ -46,7 +47,13 @@ docker compose up -d --build
 
 Страница групп: http://localhost:3100/ru/groups
 
-`superadmin` и `admin` могут создавать группы. Владельцы групп могут управлять участниками своей группы. Сообщения, WebSocket и вложения пока не реализованы.
+`superadmin` и `admin` могут создавать группы. Владельцы групп могут управлять участниками своей группы.
+
+## Messages
+
+Сообщения в группах доступны через REST API и блок на странице деталей группы. Участники группы могут читать и отправлять текстовые сообщения. Автор может редактировать и удалять свои сообщения. Владельцы, модераторы группы, `admin` и `superadmin` могут удалять сообщения.
+
+WebSocket, realtime-доставка, файлы, реакции и статусы прочтения пока не реализованы.
 
 ## Проверка сервисов
 

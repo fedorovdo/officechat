@@ -7,17 +7,22 @@ import { useRouter } from "next/navigation";
 import {
   addGroupMember,
   clearStoredAccessToken,
+  deleteGroupMessage,
+  editGroupMessage,
   getCurrentUser,
   getGroup,
   getGroupMembers,
+  getGroupMessages,
   getStoredAccessToken,
   isAdminRole,
   removeGroupMember,
+  sendGroupMessage,
   updateGroup,
   updateGroupMember,
   type GroupRole,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
+  type OfficeChatMessage,
   type OfficeChatUser,
   type UpdateGroupPayload
 } from "../lib/api";
@@ -36,6 +41,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [group, setGroup] = useState<OfficeChatGroup | null>(null);
   const [members, setMembers] = useState<OfficeChatGroupMember[]>([]);
+  const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
   const [groupForm, setGroupForm] = useState<UpdateGroupPayload>({
     name: "",
     description: "",
@@ -44,9 +50,13 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   });
   const [memberUsername, setMemberUsername] = useState("");
   const [memberRole, setMemberRole] = useState<GroupRole>("member");
+  const [messageBody, setMessageBody] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessageBody, setEditingMessageBody] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -65,14 +75,22 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   const canManage = Boolean(
     currentUser && (isAdminRole(currentUser.role) || currentMembership?.role === "owner")
   );
+  const canModerateMessages = Boolean(
+    currentUser &&
+      (isAdminRole(currentUser.role) ||
+        currentMembership?.role === "owner" ||
+        currentMembership?.role === "moderator")
+  );
 
   async function reload(token: string) {
-    const [loadedGroup, loadedMembers] = await Promise.all([
+    const [loadedGroup, loadedMembers, loadedMessages] = await Promise.all([
       getGroup(token, groupId),
-      getGroupMembers(token, groupId)
+      getGroupMembers(token, groupId),
+      getGroupMessages(token, groupId)
     ]);
     setGroup(loadedGroup);
     setMembers(loadedMembers);
+    setMessages(loadedMessages);
     setGroupForm({
       name: loadedGroup.name,
       description: loadedGroup.description ?? "",
@@ -187,6 +205,83 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
       setSuccess(dictionary.groupDetails.memberRemoveSuccess);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.groupDetails.memberRemoveError);
+    }
+  }
+
+  async function handleRefreshMessages() {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    try {
+      setMessages(await getGroupMessages(token, groupId));
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.loadError);
+    }
+  }
+
+  async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setIsSending(true);
+    try {
+      await sendGroupMessage(token, groupId, messageBody);
+      setMessageBody("");
+      setMessages(await getGroupMessages(token, groupId));
+      setSuccess(dictionary.messages.sendSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.sendError);
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  async function handleEditMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = getStoredAccessToken();
+    if (!token || !editingMessageId) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    try {
+      await editGroupMessage(token, groupId, editingMessageId, editingMessageBody);
+      setEditingMessageId(null);
+      setEditingMessageBody("");
+      setMessages(await getGroupMessages(token, groupId));
+      setSuccess(dictionary.messages.editSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.editError);
+    }
+  }
+
+  async function handleDeleteMessage(messageId: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    try {
+      await deleteGroupMessage(token, groupId, messageId);
+      setMessages(await getGroupMessages(token, groupId));
+      setSuccess(dictionary.messages.deleteSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.deleteError);
     }
   }
 
@@ -358,6 +453,101 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                 </div>
               </div>
             </div>
+
+            <section className="messages-panel" aria-label={dictionary.messages.ariaLabel}>
+              <div className="dashboard-header">
+                <h2 className="section-title">{dictionary.messages.title}</h2>
+                <button className="secondary-link" onClick={() => void handleRefreshMessages()} type="button">
+                  {dictionary.messages.refresh}
+                </button>
+              </div>
+
+              <div className="messages-list">
+                {messages.map((message) => {
+                  const canEdit = currentUser?.id === message.sender_user_id && !message.is_deleted;
+                  const canDelete = (canEdit || canModerateMessages) && !message.is_deleted;
+                  return (
+                    <article className="message-item" key={message.id}>
+                      <div className="message-meta">
+                        <strong>{message.sender.display_name}</strong>
+                        <span>{message.sender.username}</span>
+                        <span>{dateFormatter.format(new Date(message.created_at))}</span>
+                        {message.edited_at ? <span>{dictionary.messages.edited}</span> : null}
+                      </div>
+                      {editingMessageId === message.id ? (
+                        <form className="message-edit-form" onSubmit={handleEditMessage}>
+                          <textarea
+                            className="field-input textarea-input"
+                            onChange={(event) => setEditingMessageBody(event.target.value)}
+                            required
+                            value={editingMessageBody}
+                          />
+                          <div className="actions">
+                            <button className="primary-button" type="submit">
+                              {dictionary.messages.saveEdit}
+                            </button>
+                            <button
+                              className="secondary-link"
+                              onClick={() => {
+                                setEditingMessageId(null);
+                                setEditingMessageBody("");
+                              }}
+                              type="button"
+                            >
+                              {dictionary.messages.cancelEdit}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
+                          {message.body}
+                        </p>
+                      )}
+                      {!message.is_deleted ? (
+                        <div className="message-actions">
+                          {canEdit ? (
+                            <button
+                              className="table-action"
+                              onClick={() => {
+                                setEditingMessageId(message.id);
+                                setEditingMessageBody(message.body);
+                              }}
+                              type="button"
+                            >
+                              {dictionary.messages.edit}
+                            </button>
+                          ) : null}
+                          {canDelete ? (
+                            <button
+                              className="table-action"
+                              onClick={() => void handleDeleteMessage(message.id)}
+                              type="button"
+                            >
+                              {dictionary.messages.delete}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+
+              <form className="admin-form message-compose" onSubmit={handleSendMessage}>
+                <label className="field">
+                  <span className="field-label">{dictionary.messages.body}</span>
+                  <textarea
+                    className="field-input textarea-input"
+                    onChange={(event) => setMessageBody(event.target.value)}
+                    required
+                    value={messageBody}
+                  />
+                </label>
+                <button className="primary-button" disabled={isSending} type="submit">
+                  {isSending ? dictionary.messages.sending : dictionary.messages.send}
+                </button>
+              </form>
+            </section>
           </>
         ) : null}
       </section>

@@ -2,7 +2,7 @@
 
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
-Current status: early development. This repository currently contains the initial Dockerized scaffold only. Full chat, authentication, WebSocket messaging, LDAP/AD, and production nginx configuration are not implemented yet.
+Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, and REST-only group messages. WebSocket realtime messaging, file attachments, direct messages, LDAP/AD, and production nginx configuration are not implemented yet.
 
 ## Tech Stack
 
@@ -49,7 +49,16 @@ Admin users page:
 - Admins can create users, edit display name/email/role/active state, and reset local user passwords.
 - Only `superadmin` can edit or promote `superadmin` users.
 
-Groups foundation is available without chat messages yet. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
+Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
+
+Messages foundation is available in REST-only form on group detail pages:
+
+- `GET /api/groups/{group_id}/messages`
+- `POST /api/groups/{group_id}/messages`
+- `PATCH /api/groups/{group_id}/messages/{message_id}`
+- `DELETE /api/groups/{group_id}/messages/{message_id}`
+
+Members can read and send messages in their groups. Message authors can edit and delete their own messages. Group owners, group moderators, `admin`, and `superadmin` users can delete messages according to the current permission model. Realtime WebSocket delivery, attachments, reactions, and read receipts are planned later.
 
 Important auth environment variables:
 
@@ -58,6 +67,7 @@ Important auth environment variables:
 - `BOOTSTRAP_SUPERADMIN_USERNAME`
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
+- `MESSAGE_MAX_LENGTH` - maximum text message length, default `4000`.
 
 ## Useful Docker Compose Commands
 

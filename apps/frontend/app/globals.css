@@ -487,6 +487,65 @@ a {
   margin-bottom: 28px;
 }
 
+.messages-panel {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+.messages-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.message-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.message-meta strong {
+  color: var(--foreground);
+}
+
+.message-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.deleted-message {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.message-actions,
+.message-edit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.message-actions {
+  grid-template-columns: repeat(auto-fit, minmax(88px, max-content));
+}
+
+.message-compose {
+  margin-top: 18px;
+}
+
 .table-select {
   min-height: 34px;
   padding: 0 8px;

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.schemas.group import (
     GroupPublic,
     GroupUpdate,
 )
+from app.schemas.message import MessageCreate, MessagePublic, MessageUpdate
 from app.services.groups import (
     add_group_member,
     create_group,
@@ -29,6 +30,14 @@ from app.services.groups import (
     remove_group_member,
     update_group,
     update_group_member,
+)
+from app.services.messages import (
+    create_group_message,
+    delete_group_message,
+    ensure_group_message_access,
+    get_group_message,
+    list_group_messages,
+    update_group_message,
 )
 
 router = APIRouter()
@@ -183,3 +192,85 @@ async def delete_member(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{group_id}/messages", response_model=list[MessagePublic])
+async def get_messages(
+    group_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: UUID | None = None,
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    return await list_group_messages(session, group, limit=limit, before=before)
+
+
+@router.post("/{group_id}/messages", response_model=MessagePublic, status_code=status.HTTP_201_CREATED)
+async def post_message(
+    group_id: UUID,
+    payload: MessageCreate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+        return await create_group_message(session, group, current_user, payload)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.patch("/{group_id}/messages/{message_id}", response_model=MessagePublic)
+async def patch_message(
+    group_id: UUID,
+    message_id: UUID,
+    payload: MessageUpdate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    message = await get_group_message(session, group, message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    try:
+        return await update_group_message(session, message, current_user, payload)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/{group_id}/messages/{message_id}", response_model=MessagePublic)
+async def delete_message(
+    group_id: UUID,
+    message_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    message = await get_group_message(session, group, message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    try:
+        return await delete_group_message(session, group, message, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)

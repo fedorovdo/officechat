@@ -77,6 +77,8 @@ File attachments are available for group messages:
 - Allowed extensions default to `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`.
 - Antivirus scanning, previews, thumbnails, drag-and-drop, S3, and retention cleanup are not implemented yet.
 
+Planned UX features include standard emoji support in chat messages, user profile pages, avatar/profile photo upload, and avatar display in messages and user lists. These are roadmap items and are not implemented yet.
+
 Important auth environment variables:
 
 - `APP_SECRET_KEY` - development placeholder is included in `.env.example`; change it for any shared or production deployment.

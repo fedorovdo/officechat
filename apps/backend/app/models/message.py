@@ -31,3 +31,7 @@ class Message(Base):
 
     group: Mapped[Group] = relationship()
     sender: Mapped[User] = relationship()
+    attachments: Mapped[list["MessageAttachment"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )

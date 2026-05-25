@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 1440
     message_max_length: int = 4000
+    max_upload_size_mb: int = 25
+    allowed_upload_extensions: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["pdf", "doc", "docx", "xls", "xlsx", "png", "jpg", "jpeg", "txt", "zip"]
+    )
     bootstrap_superadmin_username: str = "admin"
     bootstrap_superadmin_password: str = "admin12345"
     bootstrap_superadmin_display_name: str = "OfficeChat Admin"
@@ -52,6 +56,21 @@ class Settings(BaseSettings):
             return [str(origin).strip() for origin in value if str(origin).strip()]
 
         raise ValueError("BACKEND_CORS_ORIGINS must be a list or comma-separated string")
+
+    @field_validator("allowed_upload_extensions", mode="before")
+    @classmethod
+    def parse_upload_extensions(cls, value: object) -> list[str]:
+        if isinstance(value, str):
+            return [extension.strip().lower().lstrip(".") for extension in value.split(",") if extension.strip()]
+
+        if isinstance(value, list):
+            return [str(extension).strip().lower().lstrip(".") for extension in value if str(extension).strip()]
+
+        raise ValueError("ALLOWED_UPLOAD_EXTENSIONS must be a list or comma-separated string")
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.max_upload_size_mb * 1024 * 1024
 
     @property
     def database_url(self) -> str:

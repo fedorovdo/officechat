@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -8,6 +8,7 @@ import {
   addGroupMember,
   clearStoredAccessToken,
   deleteGroupMessage,
+  downloadAttachment,
   editGroupMessage,
   getCurrentUser,
   getGroup,
@@ -18,6 +19,7 @@ import {
   isAdminRole,
   removeGroupMember,
   sendGroupMessage,
+  sendGroupMessageWithAttachment,
   updateGroup,
   updateGroupMember,
   type GroupMessageEvent,
@@ -41,6 +43,7 @@ type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
 export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps) {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [group, setGroup] = useState<OfficeChatGroup | null>(null);
   const [members, setMembers] = useState<OfficeChatGroupMember[]>([]);
@@ -54,6 +57,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   const [memberUsername, setMemberUsername] = useState("");
   const [memberRole, setMemberRole] = useState<GroupRole>("member");
   const [messageBody, setMessageBody] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageBody, setEditingMessageBody] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -85,6 +89,16 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
         currentMembership?.role === "owner" ||
         currentMembership?.role === "moderator")
   );
+
+  function formatFileSize(sizeBytes: number) {
+    if (sizeBytes < 1024) {
+      return `${sizeBytes} B`;
+    }
+    if (sizeBytes < 1024 * 1024) {
+      return `${(sizeBytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   const refreshMessages = useCallback(
     async (token: string) => {
@@ -315,8 +329,16 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
     setSuccess("");
     setIsSending(true);
     try {
-      await sendGroupMessage(token, groupId, messageBody);
+      if (selectedFile) {
+        await sendGroupMessageWithAttachment(token, groupId, messageBody, selectedFile);
+      } else {
+        await sendGroupMessage(token, groupId, messageBody);
+      }
       setMessageBody("");
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       setMessages(await getGroupMessages(token, groupId));
       setSuccess(dictionary.messages.sendSuccess);
     } catch (caughtError) {
@@ -362,6 +384,29 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
       setSuccess(dictionary.messages.deleteSuccess);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.deleteError);
+    }
+  }
+
+  async function handleDownloadAttachment(downloadUrl: string, filename: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    try {
+      const blob = await downloadAttachment(token, downloadUrl);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.downloadError);
     }
   }
 
@@ -589,6 +634,26 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                           {message.body}
                         </p>
                       )}
+                      {message.attachments.length > 0 ? (
+                        <div className="attachments-list">
+                          {message.attachments.map((attachment) => (
+                            <button
+                              className="attachment-button"
+                              key={attachment.id}
+                              onClick={() =>
+                                void handleDownloadAttachment(
+                                  attachment.download_url,
+                                  attachment.original_filename
+                                )
+                              }
+                              type="button"
+                            >
+                              <span>{attachment.original_filename}</span>
+                              <span>{formatFileSize(attachment.size_bytes)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                       {!message.is_deleted ? (
                         <div className="message-actions">
                           {canEdit ? (
@@ -625,12 +690,25 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                   <textarea
                     className="field-input textarea-input"
                     onChange={(event) => setMessageBody(event.target.value)}
-                    required
+                    required={!selectedFile}
                     value={messageBody}
                   />
                 </label>
+                <label className="field">
+                  <span className="field-label">{dictionary.messages.attachment}</span>
+                  <input
+                    className="field-input file-input"
+                    onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                    ref={fileInputRef}
+                    type="file"
+                  />
+                </label>
                 <button className="primary-button" disabled={isSending} type="submit">
-                  {isSending ? dictionary.messages.sending : dictionary.messages.send}
+                  {isSending
+                    ? dictionary.messages.sending
+                    : selectedFile
+                      ? dictionary.messages.sendWithAttachment
+                      : dictionary.messages.send}
                 </button>
               </form>
             </section>

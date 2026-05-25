@@ -258,6 +258,10 @@ a {
   resize: vertical;
 }
 
+.file-input {
+  padding: 10px 12px;
+}
+
 .form-error {
   margin: 0;
   color: #b42318;
@@ -544,6 +548,38 @@ a {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+
+.attachments-list {
+  display: grid;
+  gap: 8px;
+}
+
+.attachment-button {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.attachment-button span:first-child {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.attachment-button span:last-child {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .deleted-message {

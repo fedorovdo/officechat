@@ -64,6 +64,17 @@ export type OfficeChatMessage = {
   created_at: string;
   updated_at: string;
   sender: OfficeChatUser;
+  attachments: OfficeChatMessageAttachment[];
+};
+
+export type OfficeChatMessageAttachment = {
+  id: string;
+  group_id: string;
+  original_filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  created_at: string;
+  download_url: string;
 };
 
 export type GroupMessageEvent = {
@@ -225,6 +236,42 @@ export function sendGroupMessage(token: string, groupId: string, body: string) {
   });
 }
 
+export async function sendGroupMessageWithAttachment(
+  token: string,
+  groupId: string,
+  body: string,
+  file: File
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (body.trim()) {
+    formData.append("body", body);
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/groups/${groupId}/messages/with-attachment`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const responseBody = (await response.json()) as { detail?: unknown };
+      if (typeof responseBody.detail === "string") {
+        message = responseBody.detail;
+      }
+    } catch {
+      message = response.statusText;
+    }
+    throw new Error(message);
+  }
+
+  return (await response.json()) as OfficeChatMessage;
+}
+
 export function editGroupMessage(token: string, groupId: string, messageId: string, body: string) {
   return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages/${messageId}`, token, {
     method: "PATCH",
@@ -245,4 +292,22 @@ export function getGroupWebSocketUrl(token: string, groupId: string) {
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
   backendUrl.search = new URLSearchParams({ token }).toString();
   return backendUrl.toString();
+}
+
+export function buildAttachmentDownloadUrl(downloadUrl: string) {
+  return `${apiBaseUrl}${downloadUrl}`;
+}
+
+export async function downloadAttachment(token: string, downloadUrl: string) {
+  const response = await fetch(buildAttachmentDownloadUrl(downloadUrl), {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(response.statusText);
+  }
+
+  return response.blob();
 }

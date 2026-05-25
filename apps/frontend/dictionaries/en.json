@@ -122,6 +122,9 @@
       "reconnecting": "reconnecting"
     },
     "body": "Message",
+    "attachment": "Attachment",
+    "sendWithAttachment": "Send with file",
+    "downloadError": "Could not download attachment.",
     "sending": "Sending",
     "send": "Send",
     "saveEdit": "Save",

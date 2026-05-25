@@ -1,7 +1,8 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,11 @@ from app.schemas.group import (
     GroupUpdate,
 )
 from app.schemas.message import MessageCreate, MessagePublic, MessageUpdate
+from app.services.attachments import (
+    create_message_with_attachment,
+    get_group_attachment,
+    resolve_attachment_path,
+)
 from app.services.groups import (
     add_group_member,
     create_group,
@@ -245,6 +251,29 @@ async def post_message(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
+@router.post("/{group_id}/messages/with-attachment", response_model=MessagePublic, status_code=status.HTTP_201_CREATED)
+async def post_message_with_attachment(
+    group_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    body: Annotated[str | None, Form()] = None,
+    file: UploadFile = File(...),
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+        message = await create_message_with_attachment(session, group, current_user, body, file)
+        await group_websocket_manager.broadcast_to_group(
+            group_id,
+            message_event_payload("message.created", group_id, message),
+        )
+        return message
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
 @router.patch("/{group_id}/messages/{message_id}", response_model=MessagePublic)
 async def patch_message(
     group_id: UUID,
@@ -274,6 +303,38 @@ async def patch_message(
         raise_for_permission_error(exc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{group_id}/attachments/{attachment_id}/download")
+async def download_attachment(
+    group_id: UUID,
+    attachment_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    attachment = await get_group_attachment(session, group, attachment_id)
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    try:
+        attachment_path = resolve_attachment_path(attachment)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if not attachment_path.exists() or not attachment_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file not found")
+
+    return FileResponse(
+        path=attachment_path,
+        media_type=attachment.content_type or "application/octet-stream",
+        filename=attachment.original_filename,
+    )
 
 
 @router.delete("/{group_id}/messages/{message_id}", response_model=MessagePublic)

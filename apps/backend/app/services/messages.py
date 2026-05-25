@@ -43,7 +43,7 @@ async def list_group_messages(
 ) -> list[Message]:
     query = (
         select(Message)
-        .options(selectinload(Message.sender))
+        .options(selectinload(Message.sender), selectinload(Message.attachments))
         .where(Message.group_id == group.id)
         .order_by(Message.created_at.desc())
         .limit(limit)
@@ -79,7 +79,7 @@ async def create_group_message(
 async def get_group_message(session: AsyncSession, group: Group, message_id: UUID) -> Message | None:
     result = await session.execute(
         select(Message)
-        .options(selectinload(Message.sender))
+        .options(selectinload(Message.sender), selectinload(Message.attachments))
         .where(Message.id == message_id, Message.group_id == group.id)
     )
     return result.scalar_one_or_none()
@@ -87,7 +87,9 @@ async def get_group_message(session: AsyncSession, group: Group, message_id: UUI
 
 async def load_message_with_sender(session: AsyncSession, message_id: UUID) -> Message:
     result = await session.execute(
-        select(Message).options(selectinload(Message.sender)).where(Message.id == message_id)
+        select(Message)
+        .options(selectinload(Message.sender), selectinload(Message.attachments))
+        .where(Message.id == message_id)
     )
     return result.scalar_one()
 

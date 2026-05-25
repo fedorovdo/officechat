@@ -122,6 +122,9 @@
       "reconnecting": "переподключение"
     },
     "body": "Сообщение",
+    "attachment": "Вложение",
+    "sendWithAttachment": "Отправить с файлом",
+    "downloadError": "Не удалось скачать вложение.",
     "sending": "Отправка",
     "send": "Отправить",
     "saveEdit": "Сохранить",

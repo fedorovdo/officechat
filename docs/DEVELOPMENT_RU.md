@@ -29,6 +29,9 @@ docker compose up -d --build
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
 - `MESSAGE_MAX_LENGTH`
+- `MAX_UPLOAD_SIZE_MB`
+- `ALLOWED_UPLOAD_EXTENSIONS`
+- `UPLOADS_DIR`
 
 Локальная учетная запись из `.env.example`:
 
@@ -55,7 +58,19 @@ docker compose up -d --build
 
 WebSocket-подключение для онлайн-обновлений сообщений доступно по адресу `ws://localhost:8100/api/ws/groups/{groupId}?token=...`. Отправка, редактирование и удаление сообщений остаются REST-операциями. Текущая реализация WebSocket рассчитана на один backend-инстанс; для нескольких инстансов позже нужен Valkey pub/sub или другой брокер.
 
-Файлы, реакции, typing indicators, read receipts и личные сообщения пока не реализованы.
+Реакции, typing indicators, read receipts и личные сообщения пока не реализованы.
+
+## Files
+
+Вложения для сообщений в группах сохраняются локально в Docker volume backend. В контейнере путь по умолчанию:
+
+```text
+/data/uploads
+```
+
+Отправка файла выполняется через `POST /api/groups/{groupId}/messages/with-attachment`. Скачивание выполняется через `GET /api/groups/{groupId}/attachments/{attachmentId}/download` и требует доступ к группе.
+
+По умолчанию разрешены расширения `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`, лимит размера - `25` MB. Antivirus scanning, S3, previews, thumbnails, drag-and-drop и retention cleanup пока не реализованы.
 
 ## Проверка сервисов
 

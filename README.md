@@ -2,7 +2,7 @@
 
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
-Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, REST group messages, and basic WebSocket real-time updates for group messages. File attachments, direct messages, LDAP/AD, and production nginx configuration are not implemented yet.
+Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, REST group messages, basic WebSocket real-time updates, and local file attachments for group messages. Direct messages, LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
 
 ## Tech Stack
 
@@ -66,7 +66,16 @@ WebSocket real-time updates are available for group messages:
 - Development clients pass the JWT token in the query string.
 - Sending still happens through REST; WebSocket only receives `message.created`, `message.updated`, and `message.deleted` events.
 - Current WebSocket manager is single-instance only. Multi-instance production should use Valkey pub/sub or another broker later.
-- Typing indicators, read receipts, direct messages, reactions, and file attachments are not implemented yet.
+- Typing indicators, read receipts, direct messages, and reactions are not implemented yet.
+
+File attachments are available for group messages:
+
+- `POST /api/groups/{group_id}/messages/with-attachment`
+- `GET /api/groups/{group_id}/attachments/{attachment_id}/download`
+- Files are stored in the backend uploads Docker volume mounted at `/data/uploads`.
+- Upload defaults: `MAX_UPLOAD_SIZE_MB=25`.
+- Allowed extensions default to `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`.
+- Antivirus scanning, previews, thumbnails, drag-and-drop, S3, and retention cleanup are not implemented yet.
 
 Important auth environment variables:
 
@@ -76,6 +85,9 @@ Important auth environment variables:
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
 - `MESSAGE_MAX_LENGTH` - maximum text message length, default `4000`.
+- `MAX_UPLOAD_SIZE_MB` - maximum upload size in MB, default `25`.
+- `ALLOWED_UPLOAD_EXTENSIONS` - comma-separated allowlist for upload extensions.
+- `UPLOADS_DIR` - backend storage path for local uploads, default `/data/uploads`.
 
 ## Useful Docker Compose Commands
 

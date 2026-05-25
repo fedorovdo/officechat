@@ -1,4 +1,5 @@
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
+export type GroupRole = "owner" | "moderator" | "member";
 
 export type OfficeChatUser = {
   id: string;
@@ -28,6 +29,49 @@ export type UpdateAdminUserPayload = {
   email?: string | null;
   role: UserRole;
   is_active: boolean;
+};
+
+export type OfficeChatGroup = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  is_private: boolean;
+  is_system: boolean;
+  is_active: boolean;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OfficeChatGroupMember = {
+  id: string;
+  group_id: string;
+  user_id: string;
+  role: GroupRole;
+  joined_at: string;
+  user: OfficeChatUser;
+};
+
+export type CreateGroupPayload = {
+  name: string;
+  slug: string;
+  description?: string | null;
+  is_private: boolean;
+  is_active: boolean;
+};
+
+export type UpdateGroupPayload = {
+  name: string;
+  description?: string | null;
+  is_private: boolean;
+  is_active: boolean;
+};
+
+export type AddGroupMemberPayload = {
+  username?: string;
+  user_id?: string;
+  role: GroupRole;
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -64,6 +108,10 @@ async function apiFetch<T>(path: string, token: string, init: RequestInit = {}):
     throw new Error(message);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return (await response.json()) as T;
 }
 
@@ -98,4 +146,50 @@ export function resetAdminUserPassword(token: string, userId: string, newPasswor
 
 export function isAdminRole(role: string) {
   return role === "superadmin" || role === "admin";
+}
+
+export function getGroups(token: string) {
+  return apiFetch<OfficeChatGroup[]>("/api/groups", token);
+}
+
+export function createGroup(token: string, payload: CreateGroupPayload) {
+  return apiFetch<OfficeChatGroup>("/api/groups", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getGroup(token: string, groupId: string) {
+  return apiFetch<OfficeChatGroup>(`/api/groups/${groupId}`, token);
+}
+
+export function updateGroup(token: string, groupId: string, payload: UpdateGroupPayload) {
+  return apiFetch<OfficeChatGroup>(`/api/groups/${groupId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getGroupMembers(token: string, groupId: string) {
+  return apiFetch<OfficeChatGroupMember[]>(`/api/groups/${groupId}/members`, token);
+}
+
+export function addGroupMember(token: string, groupId: string, payload: AddGroupMemberPayload) {
+  return apiFetch<OfficeChatGroupMember>(`/api/groups/${groupId}/members`, token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateGroupMember(token: string, groupId: string, memberId: string, role: GroupRole) {
+  return apiFetch<OfficeChatGroupMember>(`/api/groups/${groupId}/members/${memberId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ role })
+  });
+}
+
+export function removeGroupMember(token: string, groupId: string, memberId: string) {
+  return apiFetch<void>(`/api/groups/${groupId}/members/${memberId}`, token, {
+    method: "DELETE"
+  });
 }

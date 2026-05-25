@@ -1,0 +1,185 @@
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user, get_db
+from app.models.group import Group, GroupMember
+from app.models.user import User
+from app.schemas.group import (
+    GroupCreate,
+    GroupMemberCreate,
+    GroupMemberPublic,
+    GroupMemberUpdate,
+    GroupPublic,
+    GroupUpdate,
+)
+from app.services.groups import (
+    add_group_member,
+    create_group,
+    ensure_group_manageable,
+    ensure_group_visible,
+    get_group,
+    get_group_member,
+    is_global_group_admin,
+    list_group_members,
+    list_visible_groups,
+    remove_group_member,
+    update_group,
+    update_group_member,
+)
+
+router = APIRouter()
+
+
+async def load_group_or_404(session: AsyncSession, group_id: UUID) -> Group:
+    group = await get_group(session, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    return group
+
+
+def raise_for_permission_error(exc: PermissionError) -> None:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@router.get("", response_model=list[GroupPublic])
+async def list_groups(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[Group]:
+    return await list_visible_groups(session, current_user)
+
+
+@router.post("", response_model=GroupPublic, status_code=status.HTTP_201_CREATED)
+async def post_group(
+    payload: GroupCreate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Group:
+    if not is_global_group_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+
+    try:
+        return await create_group(session, payload, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Group slug already exists") from exc
+
+
+@router.get("/{group_id}", response_model=GroupPublic)
+async def get_group_by_id(
+    group_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Group:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_visible(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    return group
+
+
+@router.patch("/{group_id}", response_model=GroupPublic)
+async def patch_group(
+    group_id: UUID,
+    payload: GroupUpdate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Group:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_manageable(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    return await update_group(session, group, payload)
+
+
+@router.get("/{group_id}/members", response_model=list[GroupMemberPublic])
+async def get_members(
+    group_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[GroupMember]:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_visible(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    return await list_group_members(session, group)
+
+
+@router.post("/{group_id}/members", response_model=GroupMemberPublic, status_code=status.HTTP_201_CREATED)
+async def post_member(
+    group_id: UUID,
+    payload: GroupMemberCreate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> GroupMember:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_manageable(session, group, current_user)
+        return await add_group_member(session, group, payload)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already a group member") from exc
+
+
+@router.patch("/{group_id}/members/{member_id}", response_model=GroupMemberPublic)
+async def patch_member(
+    group_id: UUID,
+    member_id: UUID,
+    payload: GroupMemberUpdate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> GroupMember:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_manageable(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    member = await get_group_member(session, group_id, member_id)
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group member not found")
+
+    try:
+        return await update_group_member(session, member, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/{group_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_member(
+    group_id: UUID,
+    member_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_manageable(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    member = await get_group_member(session, group_id, member_id)
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group member not found")
+
+    try:
+        await remove_group_member(session, member)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -31,6 +31,7 @@ docker compose up -d --build
 - Backend API: http://localhost:8100
 - Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
+- Groups page: http://localhost:3100/ru/groups
 
 ## Authentication
 
@@ -47,6 +48,8 @@ Admin users page:
 - Only `superadmin` and `admin` users can access it.
 - Admins can create users, edit display name/email/role/active state, and reset local user passwords.
 - Only `superadmin` can edit or promote `superadmin` users.
+
+Groups foundation is available without chat messages yet. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
 Important auth environment variables:
 

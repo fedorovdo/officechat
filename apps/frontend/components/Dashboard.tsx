@@ -88,6 +88,9 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
               <span className="status-label">{dictionary.dashboard.role}</span>
               <strong>{user.role}</strong>
             </div>
+            <Link className="primary-button dashboard-admin-link" href={`/${locale}/groups`}>
+              {dictionary.dashboard.groups}
+            </Link>
             {isAdminRole(user.role) ? (
               <Link className="primary-button dashboard-admin-link" href={`/${locale}/admin/users`}>
                 {dictionary.dashboard.adminUsers}

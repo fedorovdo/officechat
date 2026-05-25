@@ -252,6 +252,12 @@ a {
   font: inherit;
 }
 
+.textarea-input {
+  min-height: 96px;
+  padding: 12px;
+  resize: vertical;
+}
+
 .form-error {
   margin: 0;
   color: #b42318;
@@ -450,6 +456,45 @@ a {
   background: #ffffff;
   font-weight: 700;
   cursor: pointer;
+}
+
+.groups-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.group-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.group-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.group-detail-header {
+  margin-top: 20px;
+  margin-bottom: 28px;
+}
+
+.table-select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--foreground);
+  font: inherit;
 }
 
 .secondary-link:disabled,

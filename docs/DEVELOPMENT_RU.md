@@ -15,6 +15,7 @@ docker compose up -d --build
 - Backend: http://localhost:8100
 - Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
+- Groups: http://localhost:3100/ru/groups
 
 ## Auth
 
@@ -40,6 +41,12 @@ docker compose up -d --build
 Доступ к управлению пользователями есть только у ролей `superadmin` и `admin`.
 
 На странице управления можно создавать пользователей, менять отображаемое имя, email, роль, активность и сбрасывать пароль локальным пользователям. Роль `superadmin` может редактировать только другой `superadmin`.
+
+## Groups
+
+Страница групп: http://localhost:3100/ru/groups
+
+`superadmin` и `admin` могут создавать группы. Владельцы групп могут управлять участниками своей группы. Сообщения, WebSocket и вложения пока не реализованы.
 
 ## Проверка сервисов
 

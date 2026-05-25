@@ -13,12 +13,14 @@ docker compose up -d --build
 
 - Frontend: http://localhost:3100
 - Backend: http://localhost:8100
+- Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
 
 ## Проверка сервисов
 
 ```powershell
 docker compose ps
+curl http://localhost:8100/
 curl http://localhost:8100/health
 curl http://localhost:8100/api/system/info
 curl http://localhost:8100/api/db-check

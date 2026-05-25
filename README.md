@@ -29,6 +29,7 @@ docker compose up -d --build
 
 - Frontend: http://localhost:3100
 - Backend API: http://localhost:8100
+- Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
 
 ## Useful Docker Compose Commands
@@ -44,6 +45,7 @@ docker compose down
 ## Verification
 
 ```powershell
+curl http://localhost:8100/
 curl http://localhost:8100/health
 curl http://localhost:8100/api/system/info
 curl http://localhost:8100/api/db-check

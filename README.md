@@ -79,6 +79,17 @@ File attachments are available for group messages:
 
 Planned UX features include standard emoji support in chat messages, user profile pages, avatar/profile photo upload, and avatar display in messages and user lists. These are roadmap items and are not implemented yet.
 
+Bot foundation is available for incoming webhooks:
+
+- Admin page: http://localhost:3100/ru/admin/bots
+- `GET /api/admin/bots`
+- `POST /api/admin/bots`
+- `PATCH /api/admin/bots/{bot_id}`
+- `POST /api/admin/bots/{bot_id}/rotate-token`
+- `POST /api/bots/incoming/{token}`
+
+Each bot has a linked user with role `bot`. Add that bot user to a group by username, then external systems can post messages into the group with the bot token. Full bot tokens are shown only once on create/rotate; only hashes are stored. Outgoing webhooks, AI providers, bot file uploads, direct messages, and per-bot scoped permissions beyond group membership are not implemented yet.
+
 Important auth environment variables:
 
 - `APP_SECRET_KEY` - development placeholder is included in `.env.example`; change it for any shared or production deployment.

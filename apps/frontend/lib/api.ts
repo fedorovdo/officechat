@@ -77,6 +77,40 @@ export type OfficeChatMessageAttachment = {
   download_url: string;
 };
 
+export type OfficeChatBot = {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  token_preview: string;
+  is_active: boolean;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+  user: OfficeChatUser;
+};
+
+export type CreateAdminBotPayload = {
+  name: string;
+  description?: string | null;
+};
+
+export type UpdateAdminBotPayload = {
+  name?: string;
+  description?: string | null;
+  is_active?: boolean;
+};
+
+export type OfficeChatBotTokenResponse = OfficeChatBot & {
+  token: string;
+};
+
+export type OfficeChatBotRotateTokenResponse = {
+  bot: OfficeChatBot;
+  token: string;
+};
+
 export type GroupMessageEvent = {
   type: "message.created" | "message.updated" | "message.deleted";
   group_id: string;
@@ -172,6 +206,30 @@ export function resetAdminUserPassword(token: string, userId: string, newPasswor
   return apiFetch<OfficeChatUser>(`/api/admin/users/${userId}/reset-password`, token, {
     method: "POST",
     body: JSON.stringify({ new_password: newPassword })
+  });
+}
+
+export function getAdminBots(token: string) {
+  return apiFetch<OfficeChatBot[]>("/api/admin/bots", token);
+}
+
+export function createAdminBot(token: string, payload: CreateAdminBotPayload) {
+  return apiFetch<OfficeChatBotTokenResponse>("/api/admin/bots", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateAdminBot(token: string, botId: string, payload: UpdateAdminBotPayload) {
+  return apiFetch<OfficeChatBot>(`/api/admin/bots/${botId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function rotateAdminBotToken(token: string, botId: string) {
+  return apiFetch<OfficeChatBotRotateTokenResponse>(`/api/admin/bots/${botId}/rotate-token`, token, {
+    method: "POST"
   });
 }
 

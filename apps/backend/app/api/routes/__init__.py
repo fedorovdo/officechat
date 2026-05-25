@@ -1,7 +1,9 @@
 from fastapi import APIRouter
 
+from app.api.routes.admin_bots import router as admin_bots_router
 from app.api.routes.admin_users import router as admin_users_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.bots import router as bots_router
 from app.api.routes.cache import router as cache_router
 from app.api.routes.db import router as db_router
 from app.api.routes.groups import router as groups_router
@@ -13,6 +15,8 @@ api_router.include_router(system_router, prefix="/system", tags=["system"])
 api_router.include_router(db_router, tags=["infrastructure"])
 api_router.include_router(cache_router, tags=["infrastructure"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(bots_router, prefix="/bots", tags=["bots"])
+api_router.include_router(admin_bots_router, prefix="/admin/bots", tags=["admin"])
 api_router.include_router(admin_users_router, prefix="/admin/users", tags=["admin"])
 api_router.include_router(groups_router, prefix="/groups", tags=["groups"])
 api_router.include_router(ws_router, prefix="/ws", tags=["websocket"])

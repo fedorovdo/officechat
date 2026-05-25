@@ -72,6 +72,28 @@ WebSocket-подключение для онлайн-обновлений соо
 
 По умолчанию разрешены расширения `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`, лимит размера - `25` MB. Antivirus scanning, S3, previews, thumbnails, drag-and-drop и retention cleanup пока не реализованы.
 
+## Bots
+
+Страница управления ботами: http://localhost:3100/ru/admin/bots
+
+`superadmin` и `admin` могут создавать ботов, отключать их и перевыпускать токены. При создании бот получает связанного пользователя с ролью `bot` и `auth_provider="bot"`. Полный токен показывается только один раз при создании или перевыпуске.
+
+Чтобы бот мог отправлять сообщения в группу, добавьте bot user в группу по username на странице деталей группы.
+
+Incoming webhook:
+
+```text
+POST /api/bots/incoming/{token}
+```
+
+Пример:
+
+```powershell
+curl.exe -X POST http://localhost:8100/api/bots/incoming/PASTE_TOKEN_HERE -H "Content-Type: application/json" -d "{\"group_slug\":\"alerts\",\"title\":\"Zabbix alert\",\"severity\":\"high\",\"body\":\"CPU usage is above threshold\"}"
+```
+
+Outgoing webhooks, AI provider, вложения от бота, direct messages и отдельные scoped permissions для ботов пока не реализованы.
+
 ## Проверка сервисов
 
 ```powershell

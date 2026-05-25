@@ -38,6 +38,7 @@
     "role": "Role",
     "groups": "Groups",
     "adminUsers": "Manage users",
+    "adminBots": "Manage bots",
     "logout": "Logout"
   },
   "groups": {
@@ -185,6 +186,52 @@
       "moderator": "moderator",
       "user": "user",
       "bot": "bot"
+    }
+  },
+  "adminBots": {
+    "ariaLabel": "Admin bot management",
+    "title": "Bot management",
+    "backToDashboard": "Back to dashboard",
+    "loading": "Loading bots...",
+    "accessDenied": "Access denied. Only superadmins and admins can manage bots.",
+    "createTitle": "Create bot",
+    "editTitle": "Edit bot",
+    "botsTitle": "Bots",
+    "selectBotHelp": "Select a bot in the table to edit settings or rotate its token.",
+    "createSubmit": "Create bot",
+    "creating": "Creating",
+    "saveSubmit": "Save changes",
+    "saving": "Saving",
+    "createSuccess": "Bot created successfully.",
+    "createError": "Could not create bot.",
+    "updateSuccess": "Bot updated successfully.",
+    "updateError": "Could not update bot.",
+    "rotateSuccess": "Bot token rotated successfully.",
+    "rotateError": "Could not rotate bot token.",
+    "tokenTitle": "Token shown once",
+    "tokenWarning": "Store this token now. It will not be shown again for",
+    "exampleTitle": "Webhook example",
+    "editAction": "Edit",
+    "enableAction": "Enable",
+    "disableAction": "Disable",
+    "rotateAction": "Rotate token",
+    "yes": "Yes",
+    "no": "No",
+    "emptyValue": "-",
+    "fields": {
+      "name": "Name",
+      "description": "Description",
+      "active": "Active"
+    },
+    "columns": {
+      "name": "Name",
+      "username": "Username",
+      "description": "Description",
+      "tokenPreview": "Token",
+      "active": "Active",
+      "lastUsedAt": "Last used",
+      "createdAt": "Created at",
+      "actions": "Actions"
     }
   },
   "links": {

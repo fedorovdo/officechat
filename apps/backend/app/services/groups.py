@@ -31,6 +31,11 @@ async def get_group(session: AsyncSession, group_id: UUID) -> Group | None:
     return result.scalar_one_or_none()
 
 
+async def get_group_by_slug(session: AsyncSession, slug: str) -> Group | None:
+    result = await session.execute(select(Group).where(Group.slug == normalize_slug(slug)))
+    return result.scalar_one_or_none()
+
+
 async def get_group_membership(
     session: AsyncSession,
     group_id: UUID,

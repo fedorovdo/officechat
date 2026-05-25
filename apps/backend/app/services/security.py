@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import secrets
 from uuid import UUID
 
 import jwt
@@ -18,6 +19,22 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     if not password_hash:
         return False
     return password_context.verify(password, password_hash)
+
+
+def generate_secure_token() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def hash_token(token: str) -> str:
+    return password_context.hash(token)
+
+
+def verify_token(token: str, token_hash: str) -> bool:
+    return password_context.verify(token, token_hash)
+
+
+def token_preview(token: str) -> str:
+    return f"{token[:6]}...{token[-4:]}"
 
 
 def create_access_token(user_id: UUID, username: str, role: str) -> str:

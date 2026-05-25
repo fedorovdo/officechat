@@ -1,10 +1,73 @@
 # Боты и AI в OfficeChat
 
-OfficeChat должен иметь архитектурную основу для ботов, но не обязан реализовывать их в первом MVP.
+OfficeChat имеет базовую основу для ботов: администратор создает бота, backend создает связанного пользователя с ролью `bot`, а внешняя система отправляет сообщения через incoming webhook.
 
-## Bot foundation
+## Bot foundation v0.1
 
-Будущие боты должны быть отдельным слоем интеграций, а не частью core-логики сообщений. Это позволит добавлять системных ботов, webhook-ботов и AI-ботов без переписывания модели чатов.
+Бот состоит из двух сущностей:
+
+- запись `bots` с настройками, token hash и status;
+- связанный пользователь `users` с ролью `bot`, `auth_provider="bot"` и `password_hash=null`.
+
+Токен генерируется при создании бота и показывается только один раз. В базе хранится только `token_hash` и короткий `token_preview`. При перевыпуске токена старый токен перестает работать.
+
+Страница управления ботами:
+
+```text
+http://localhost:3100/ru/admin/bots
+```
+
+Доступ есть только у `superadmin` и `admin`.
+
+## Incoming webhook
+
+Endpoint:
+
+```text
+POST /api/bots/incoming/{token}
+```
+
+Простой payload:
+
+```json
+{
+  "group_id": "...",
+  "body": "Backup finished",
+  "message_type": "text"
+}
+```
+
+Friendly payload:
+
+```json
+{
+  "group_slug": "alerts",
+  "title": "Backup failed",
+  "severity": "high",
+  "body": "Check server backup-01"
+}
+```
+
+Если переданы `title` и `severity`, OfficeChat формирует читаемый текст:
+
+```text
+[HIGH] Backup failed
+Check server backup-01
+```
+
+Если переданы и `group_id`, и `group_slug`, используется `group_id`.
+
+## Как добавить бота в группу
+
+После создания бота скопируйте username связанного bot user на странице управления ботами. На странице группы добавьте этого пользователя как обычного участника по username. Бот сможет отправлять webhook-сообщения только в группы, где он состоит участником.
+
+Пример curl:
+
+```powershell
+curl.exe -X POST http://localhost:8100/api/bots/incoming/PASTE_TOKEN_HERE -H "Content-Type: application/json" -d "{\"group_slug\":\"alerts\",\"title\":\"Zabbix alert\",\"severity\":\"high\",\"body\":\"CPU usage is above threshold\"}"
+```
+
+После успешной отправки сообщение создается от имени bot user и рассылается в группу через текущий WebSocket `message.created`.
 
 ## AI providers
 
@@ -22,3 +85,11 @@ AI-поддержка должна учитывать два класса про
 - Изолировать credentials в переменных окружения или secrets.
 - Логировать системные действия ботов.
 - Позволять отключать ботов на уровне deployment или workspace.
+
+## Ограничения v0.1
+
+- Нет outgoing webhooks.
+- Нет AI provider.
+- Нет file attachments from bot.
+- Нет per-bot scoped permissions beyond group membership.
+- Нет direct messages.

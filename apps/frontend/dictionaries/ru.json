@@ -38,6 +38,7 @@
     "role": "Роль",
     "groups": "Группы",
     "adminUsers": "Управление пользователями",
+    "adminBots": "Управление ботами",
     "logout": "Выйти"
   },
   "groups": {
@@ -185,6 +186,52 @@
       "moderator": "moderator",
       "user": "user",
       "bot": "bot"
+    }
+  },
+  "adminBots": {
+    "ariaLabel": "Управление ботами",
+    "title": "Управление ботами",
+    "backToDashboard": "Назад к панели",
+    "loading": "Загрузка ботов...",
+    "accessDenied": "Доступ запрещен. Управлять ботами могут только superadmin и admin.",
+    "createTitle": "Создать бота",
+    "editTitle": "Редактировать бота",
+    "botsTitle": "Боты",
+    "selectBotHelp": "Выберите бота в таблице, чтобы изменить настройки или перевыпустить токен.",
+    "createSubmit": "Создать бота",
+    "creating": "Создание",
+    "saveSubmit": "Сохранить",
+    "saving": "Сохранение",
+    "createSuccess": "Бот создан.",
+    "createError": "Не удалось создать бота.",
+    "updateSuccess": "Бот обновлен.",
+    "updateError": "Не удалось обновить бота.",
+    "rotateSuccess": "Токен бота перевыпущен.",
+    "rotateError": "Не удалось перевыпустить токен бота.",
+    "tokenTitle": "Токен показан один раз",
+    "tokenWarning": "Сохраните этот токен сейчас. Он больше не будет показан для",
+    "exampleTitle": "Пример webhook",
+    "editAction": "Изменить",
+    "enableAction": "Включить",
+    "disableAction": "Отключить",
+    "rotateAction": "Перевыпустить токен",
+    "yes": "Да",
+    "no": "Нет",
+    "emptyValue": "-",
+    "fields": {
+      "name": "Название",
+      "description": "Описание",
+      "active": "Активен"
+    },
+    "columns": {
+      "name": "Название",
+      "username": "Username",
+      "description": "Описание",
+      "tokenPreview": "Токен",
+      "active": "Активен",
+      "lastUsedAt": "Последнее использование",
+      "createdAt": "Создан",
+      "actions": "Действия"
     }
   },
   "links": {

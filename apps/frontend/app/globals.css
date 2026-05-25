@@ -366,6 +366,26 @@ a {
   gap: 16px;
 }
 
+.admin-side {
+  display: grid;
+  gap: 22px;
+}
+
+.edit-panel {
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.reset-form {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.compact-title {
+  margin: 0;
+  font-size: 16px;
+}
+
 .section-title {
   margin: 0;
   font-size: 20px;
@@ -419,6 +439,23 @@ a {
 
 .users-table tr:last-child td {
   border-bottom: 0;
+}
+
+.table-action {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  background: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.secondary-link:disabled,
+.table-action:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 @media (max-width: 760px) {

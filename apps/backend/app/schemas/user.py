@@ -30,3 +30,14 @@ class AdminUserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=256)
     role: UserRole = "user"
     is_active: bool = True
+
+
+class AdminUserUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=160)
+    email: EmailStr | None = None
+    role: UserRole | None = None
+    is_active: bool | None = None
+
+
+class AdminPasswordReset(BaseModel):
+    new_password: str = Field(min_length=8, max_length=256)

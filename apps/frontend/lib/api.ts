@@ -23,6 +23,13 @@ export type CreateAdminUserPayload = {
   is_active: boolean;
 };
 
+export type UpdateAdminUserPayload = {
+  display_name: string;
+  email?: string | null;
+  role: UserRole;
+  is_active: boolean;
+};
+
 const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 // TODO: Move production auth storage to secure cookies or a stronger session mechanism.
@@ -72,6 +79,20 @@ export function createAdminUser(token: string, payload: CreateAdminUserPayload) 
   return apiFetch<OfficeChatUser>("/api/admin/users", token, {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export function updateAdminUser(token: string, userId: string, payload: UpdateAdminUserPayload) {
+  return apiFetch<OfficeChatUser>(`/api/admin/users/${userId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function resetAdminUserPassword(token: string, userId: string, newPassword: string) {
+  return apiFetch<OfficeChatUser>(`/api/admin/users/${userId}/reset-password`, token, {
+    method: "POST",
+    body: JSON.stringify({ new_password: newPassword })
   });
 }
 

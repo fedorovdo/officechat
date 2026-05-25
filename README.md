@@ -45,6 +45,8 @@ Admin users page:
 
 - http://localhost:3100/ru/admin/users
 - Only `superadmin` and `admin` users can access it.
+- Admins can create users, edit display name/email/role/active state, and reset local user passwords.
+- Only `superadmin` can edit or promote `superadmin` users.
 
 Important auth environment variables:
 

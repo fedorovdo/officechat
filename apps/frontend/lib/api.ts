@@ -66,6 +66,13 @@ export type OfficeChatMessage = {
   sender: OfficeChatUser;
 };
 
+export type GroupMessageEvent = {
+  type: "message.created" | "message.updated" | "message.deleted";
+  group_id: string;
+  message: OfficeChatMessage;
+  message_id?: string;
+};
+
 export type CreateGroupPayload = {
   name: string;
   slug: string;
@@ -87,7 +94,7 @@ export type AddGroupMemberPayload = {
   role: GroupRole;
 };
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
 
 // TODO: Move production auth storage to secure cookies or a stronger session mechanism.
 export function getStoredAccessToken() {
@@ -229,4 +236,13 @@ export function deleteGroupMessage(token: string, groupId: string, messageId: st
   return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages/${messageId}`, token, {
     method: "DELETE"
   });
+}
+
+export function getGroupWebSocketUrl(token: string, groupId: string) {
+  const backendUrl = new URL(apiBaseUrl);
+  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
+  backendUrl.pathname = `/api/ws/groups/${groupId}`;
+  // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
+  backendUrl.search = new URLSearchParams({ token }).toString();
+  return backendUrl.toString();
 }

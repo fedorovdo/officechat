@@ -520,6 +520,25 @@ a {
   color: var(--foreground);
 }
 
+.live-status {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.live-status-connected {
+  color: var(--success);
+}
+
+.live-status-reconnecting {
+  color: #92400e;
+}
+
+.live-status-disconnected {
+  color: #b42318;
+}
+
 .message-body {
   margin: 0;
   white-space: pre-wrap;

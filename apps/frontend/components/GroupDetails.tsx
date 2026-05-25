@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -13,12 +13,14 @@ import {
   getGroup,
   getGroupMembers,
   getGroupMessages,
+  getGroupWebSocketUrl,
   getStoredAccessToken,
   isAdminRole,
   removeGroupMember,
   sendGroupMessage,
   updateGroup,
   updateGroupMember,
+  type GroupMessageEvent,
   type GroupRole,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
@@ -35,6 +37,7 @@ type GroupDetailsProps = {
 };
 
 const groupRoles: GroupRole[] = ["owner", "moderator", "member"];
+type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
 export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps) {
   const router = useRouter();
@@ -57,6 +60,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   const [isSaving, setIsSaving] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [liveUpdateStatus, setLiveUpdateStatus] = useState<LiveUpdateStatus>("disconnected");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -80,6 +84,13 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
       (isAdminRole(currentUser.role) ||
         currentMembership?.role === "owner" ||
         currentMembership?.role === "moderator")
+  );
+
+  const refreshMessages = useCallback(
+    async (token: string) => {
+      setMessages(await getGroupMessages(token, groupId));
+    },
+    [groupId]
   );
 
   async function reload(token: string) {
@@ -121,6 +132,75 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
 
     void loadPage();
   }, [groupId, locale, router]);
+
+  useEffect(() => {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    const accessToken = token;
+
+    let websocket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let shouldReconnect = true;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 10;
+
+    function scheduleReconnect() {
+      if (!shouldReconnect) {
+        return;
+      }
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        setLiveUpdateStatus("disconnected");
+        return;
+      }
+
+      reconnectAttempts += 1;
+      setLiveUpdateStatus("reconnecting");
+      reconnectTimer = setTimeout(connect, 3000);
+    }
+
+    function connect() {
+      websocket = new WebSocket(getGroupWebSocketUrl(accessToken, groupId));
+      websocket.onopen = () => {
+        reconnectAttempts = 0;
+        setLiveUpdateStatus("connected");
+      };
+      websocket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data as string) as GroupMessageEvent;
+          if (payload.type.startsWith("message.")) {
+            void refreshMessages(accessToken);
+          }
+        } catch {
+          void refreshMessages(accessToken);
+        }
+      };
+      websocket.onclose = (event) => {
+        websocket = null;
+        if (event.code === 1008) {
+          setLiveUpdateStatus("disconnected");
+          return;
+        }
+        scheduleReconnect();
+      };
+      websocket.onerror = () => {
+        websocket?.close();
+      };
+    }
+
+    setLiveUpdateStatus("reconnecting");
+    connect();
+
+    return () => {
+      shouldReconnect = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      websocket?.close();
+    };
+  }, [groupId, locale, refreshMessages, router]);
 
   async function handleGroupSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -217,7 +297,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
 
     setError("");
     try {
-      setMessages(await getGroupMessages(token, groupId));
+      await refreshMessages(token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.loadError);
     }
@@ -456,7 +536,13 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
 
             <section className="messages-panel" aria-label={dictionary.messages.ariaLabel}>
               <div className="dashboard-header">
-                <h2 className="section-title">{dictionary.messages.title}</h2>
+                <div>
+                  <h2 className="section-title">{dictionary.messages.title}</h2>
+                  <p className={`live-status live-status-${liveUpdateStatus}`}>
+                    {dictionary.messages.liveStatusLabel}{" "}
+                    {dictionary.messages.liveStatuses[liveUpdateStatus]}
+                  </p>
+                </div>
                 <button className="secondary-link" onClick={() => void handleRefreshMessages()} type="button">
                   {dictionary.messages.refresh}
                 </button>

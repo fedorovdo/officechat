@@ -2,7 +2,7 @@
 
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
-Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, and REST-only group messages. WebSocket realtime messaging, file attachments, direct messages, LDAP/AD, and production nginx configuration are not implemented yet.
+Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, REST group messages, and basic WebSocket real-time updates for group messages. File attachments, direct messages, LDAP/AD, and production nginx configuration are not implemented yet.
 
 ## Tech Stack
 
@@ -51,14 +51,22 @@ Admin users page:
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
-Messages foundation is available in REST-only form on group detail pages:
+Messages foundation is available on group detail pages. REST API remains the source of truth:
 
 - `GET /api/groups/{group_id}/messages`
 - `POST /api/groups/{group_id}/messages`
 - `PATCH /api/groups/{group_id}/messages/{message_id}`
 - `DELETE /api/groups/{group_id}/messages/{message_id}`
 
-Members can read and send messages in their groups. Message authors can edit and delete their own messages. Group owners, group moderators, `admin`, and `superadmin` users can delete messages according to the current permission model. Realtime WebSocket delivery, attachments, reactions, and read receipts are planned later.
+Members can read and send messages in their groups. Message authors can edit and delete their own messages. Group owners, group moderators, `admin`, and `superadmin` users can delete messages according to the current permission model.
+
+WebSocket real-time updates are available for group messages:
+
+- `WS /api/ws/groups/{group_id}?token=...`
+- Development clients pass the JWT token in the query string.
+- Sending still happens through REST; WebSocket only receives `message.created`, `message.updated`, and `message.deleted` events.
+- Current WebSocket manager is single-instance only. Multi-instance production should use Valkey pub/sub or another broker later.
+- Typing indicators, read receipts, direct messages, reactions, and file attachments are not implemented yet.
 
 Important auth environment variables:
 

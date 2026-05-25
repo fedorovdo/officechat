@@ -115,6 +115,12 @@
     "deleteSuccess": "Message deleted.",
     "deleteError": "Could not delete message.",
     "edited": "edited",
+    "liveStatusLabel": "Live updates:",
+    "liveStatuses": {
+      "connected": "connected",
+      "disconnected": "disconnected",
+      "reconnecting": "reconnecting"
+    },
     "body": "Message",
     "sending": "Sending",
     "send": "Send",

@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     environment: str = "development"
     self_registration_enabled: bool = False
+    app_secret_key: str = "change-me-in-production"
+    access_token_expire_minutes: int = 1440
+    bootstrap_superadmin_username: str = "admin"
+    bootstrap_superadmin_password: str = "admin12345"
+    bootstrap_superadmin_display_name: str = "OfficeChat Admin"
 
     postgres_db: str = "officechat"
     postgres_user: str = "officechat"

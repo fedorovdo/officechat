@@ -16,6 +16,28 @@
     "login": "Войти",
     "apiDocs": "API docs"
   },
+  "login": {
+    "ariaLabel": "Вход в OfficeChat",
+    "back": "Назад",
+    "title": "Вход",
+    "description": "Используйте учетную запись, созданную администратором.",
+    "username": "Имя пользователя",
+    "password": "Пароль",
+    "submit": "Войти",
+    "submitting": "Вход",
+    "invalidCredentials": "Неверное имя пользователя или пароль.",
+    "networkError": "Не удалось подключиться к backend."
+  },
+  "dashboard": {
+    "ariaLabel": "Панель OfficeChat",
+    "title": "Панель",
+    "loading": "Загрузка профиля...",
+    "loadError": "Не удалось загрузить текущего пользователя.",
+    "displayName": "Отображаемое имя",
+    "username": "Имя пользователя",
+    "role": "Роль",
+    "logout": "Выйти"
+  },
   "links": {
     "docsHref": "http://localhost:8100/docs"
   },

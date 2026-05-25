@@ -32,6 +32,23 @@ docker compose up -d --build
 - Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
 
+## Authentication
+
+Local authentication foundation is available in early form. Self-registration is disabled; users are created by an administrator.
+
+Development bootstrap account:
+
+- Username: `admin`
+- Password: `admin12345`
+
+Important auth environment variables:
+
+- `APP_SECRET_KEY` - development placeholder is included in `.env.example`; change it for any shared or production deployment.
+- `ACCESS_TOKEN_EXPIRE_MINUTES` - local bearer token lifetime.
+- `BOOTSTRAP_SUPERADMIN_USERNAME`
+- `BOOTSTRAP_SUPERADMIN_PASSWORD`
+- `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
+
 ## Useful Docker Compose Commands
 
 ```powershell
@@ -50,6 +67,7 @@ curl http://localhost:8100/health
 curl http://localhost:8100/api/system/info
 curl http://localhost:8100/api/db-check
 curl http://localhost:8100/api/cache-check
+curl.exe -X POST http://localhost:8100/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"admin12345\"}"
 ```
 
 ## License

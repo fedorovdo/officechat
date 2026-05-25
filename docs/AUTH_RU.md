@@ -1,0 +1,58 @@
+# Auth Foundation OfficeChat
+
+OfficeChat Auth Foundation v0.1 добавляет локальную основу аутентификации без реализации чатов, WebSocket и LDAP/AD.
+
+## Локальная аутентификация
+
+В MVP используется локальная аутентификация по имени пользователя и паролю. Пароли хранятся только в виде bcrypt-хеша через `passlib`.
+
+API использует bearer token:
+
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+
+Токен подписывается `APP_SECRET_KEY` и имеет срок действия из `ACCESS_TOKEN_EXPIRE_MINUTES`.
+
+## Bootstrap superadmin
+
+При старте backend проверяет таблицу пользователей. Если пользователей нет, создается первый superadmin из переменных окружения:
+
+- `BOOTSTRAP_SUPERADMIN_USERNAME`
+- `BOOTSTRAP_SUPERADMIN_PASSWORD`
+- `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
+
+Если пользователи уже существуют, bootstrap не создает и не перезаписывает учетные записи.
+
+Локальные значения по умолчанию:
+
+- username: `admin`
+- password: `admin12345`
+- display name: `OfficeChat Admin`
+
+Эти значения подходят только для разработки.
+
+## Роли
+
+Роли подготовлены с начала проекта:
+
+- `superadmin`
+- `admin`
+- `group_owner`
+- `moderator`
+- `user`
+- `bot`
+
+На этапе v0.1 endpoints `/api/admin/users` доступны только ролям `superadmin` и `admin`.
+
+## Почему нет саморегистрации
+
+OfficeChat ориентирован на корпоративные и закрытые self-hosted среды. По умолчанию пользователей создает администратор, чтобы избежать случайного доступа в локальных сетях и при будущей публикации в интернет.
+
+Публичный endpoint регистрации намеренно не добавлен.
+
+## Будущий LDAP/AD
+
+LDAP/AD не входит в MVP. Модель пользователя уже содержит поля `auth_provider` и `external_id`, чтобы позже добавить внешние провайдеры без переписывания бизнес-логики.
+
+Для внешних пользователей `password_hash` может быть `NULL`, а вход будет делегирован соответствующему provider.

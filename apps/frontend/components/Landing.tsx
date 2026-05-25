@@ -32,9 +32,9 @@ export function Landing({ dictionary, locale }: LandingProps) {
           </div>
 
           <div className="actions">
-            <button className="primary-button" disabled type="button">
+            <Link className="primary-button" href={`/${locale}/login`}>
               {dictionary.actions.login}
-            </button>
+            </Link>
             <Link className="secondary-link" href={dictionary.links.docsHref}>
               {dictionary.actions.apiDocs}
             </Link>

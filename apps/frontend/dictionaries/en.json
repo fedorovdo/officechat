@@ -16,6 +16,28 @@
     "login": "Login",
     "apiDocs": "API docs"
   },
+  "login": {
+    "ariaLabel": "OfficeChat login",
+    "back": "Back",
+    "title": "Login",
+    "description": "Use the account created by an administrator.",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in",
+    "invalidCredentials": "Invalid username or password.",
+    "networkError": "Could not reach the backend."
+  },
+  "dashboard": {
+    "ariaLabel": "OfficeChat dashboard",
+    "title": "Dashboard",
+    "loading": "Loading profile...",
+    "loadError": "Could not load current user.",
+    "displayName": "Display name",
+    "username": "Username",
+    "role": "Role",
+    "logout": "Logout"
+  },
   "links": {
     "docsHref": "http://localhost:8100/docs"
   },

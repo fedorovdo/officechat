@@ -16,6 +16,25 @@ docker compose up -d --build
 - Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
 
+## Auth
+
+Саморегистрация отключена. Первый локальный superadmin создается при старте backend, если в базе еще нет пользователей.
+
+Переменные окружения:
+
+- `APP_SECRET_KEY`
+- `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `BOOTSTRAP_SUPERADMIN_USERNAME`
+- `BOOTSTRAP_SUPERADMIN_PASSWORD`
+- `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
+
+Локальная учетная запись из `.env.example`:
+
+- username: `admin`
+- password: `admin12345`
+
+Страница входа: http://localhost:3100/ru/login
+
 ## Проверка сервисов
 
 ```powershell
@@ -25,6 +44,7 @@ curl http://localhost:8100/health
 curl http://localhost:8100/api/system/info
 curl http://localhost:8100/api/db-check
 curl http://localhost:8100/api/cache-check
+curl.exe -X POST http://localhost:8100/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"admin12345\"}"
 ```
 
 ## Backend

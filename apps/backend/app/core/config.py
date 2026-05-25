@@ -1,0 +1,67 @@
+import json
+from functools import lru_cache
+from typing import Annotated
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    app_name: str = "OfficeChat"
+    app_version: str = "0.1.0"
+    environment: str = "development"
+    self_registration_enabled: bool = False
+
+    postgres_db: str = "officechat"
+    postgres_user: str = "officechat"
+    postgres_password: str = "officechat_dev_password"
+    postgres_host: str = "postgres"
+    postgres_port: int = 5432
+
+    valkey_host: str = "valkey"
+    valkey_port: int = 6379
+    valkey_db: int = 0
+
+    backend_cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3100"]
+    )
+    uploads_dir: str = "/data/uploads"
+
+    @field_validator("backend_cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: object) -> list[str]:
+        if isinstance(value, str):
+            stripped_value = value.strip()
+            if stripped_value.startswith("["):
+                parsed_value = json.loads(stripped_value)
+                if not isinstance(parsed_value, list):
+                    raise ValueError("BACKEND_CORS_ORIGINS JSON value must be a list")
+                return [str(origin).strip() for origin in parsed_value if str(origin).strip()]
+
+            return [origin.strip() for origin in stripped_value.split(",") if origin.strip()]
+
+        if isinstance(value, list):
+            return [str(origin).strip() for origin in value if str(origin).strip()]
+
+        raise ValueError("BACKEND_CORS_ORIGINS must be a list or comma-separated string")
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
+    @property
+    def valkey_url(self) -> str:
+        return f"redis://{self.valkey_host}:{self.valkey_port}/{self.valkey_db}"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

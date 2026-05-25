@@ -1,0 +1,31 @@
+{
+  "app": {
+    "name": "OfficeChat",
+    "tagline": "Self-hosted collaboration",
+    "description": "Local corporate chat for LAN and offline environments, designed for a secure internet deployment path later.",
+    "ariaLabel": "OfficeChat landing page"
+  },
+  "language": {
+    "switcherLabel": "Language",
+    "options": {
+      "ru": "RU",
+      "en": "EN"
+    }
+  },
+  "actions": {
+    "login": "Login",
+    "apiDocs": "API docs"
+  },
+  "links": {
+    "docsHref": "http://localhost:8100/docs"
+  },
+  "status": {
+    "ariaLabel": "System status",
+    "title": "Backend status",
+    "backend": "Backend API",
+    "database": "PostgreSQL",
+    "cache": "Valkey",
+    "placeholder": "Ready",
+    "note": "Live status checks will be connected after the API client layer is added."
+  }
+}

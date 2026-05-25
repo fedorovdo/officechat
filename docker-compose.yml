@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: officechat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-officechat}
+      POSTGRES_USER: ${POSTGRES_USER:-officechat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-officechat_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-officechat} -d ${POSTGRES_DB:-officechat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: officechat-valkey
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./apps/backend
+    container_name: officechat-backend
+    restart: unless-stopped
+    environment:
+      APP_NAME: ${APP_NAME:-OfficeChat}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SELF_REGISTRATION_ENABLED: ${SELF_REGISTRATION_ENABLED:-false}
+      POSTGRES_DB: ${POSTGRES_DB:-officechat}
+      POSTGRES_USER: ${POSTGRES_USER:-officechat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-officechat_dev_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      VALKEY_DB: ${VALKEY_DB:-0}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3100}
+      UPLOADS_DIR: ${UPLOADS_DIR:-/data/uploads}
+    ports:
+      - "8100:8000"
+    volumes:
+      - uploads:/data/uploads
+      - ./apps/backend/app:/app/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./apps/frontend
+    container_name: officechat-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8100}
+    ports:
+      - "3100:3000"
+    volumes:
+      - ./apps/frontend:/app
+      - frontend-node-modules:/app/node_modules
+      - frontend-next:/app/.next
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
+  valkey-data:
+  uploads:
+  frontend-node-modules:
+  frontend-next:

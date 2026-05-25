@@ -1,0 +1,57 @@
+# OfficeChat
+
+OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
+
+Current status: early development. This repository currently contains the initial Dockerized scaffold only. Full chat, authentication, WebSocket messaging, LDAP/AD, and production nginx configuration are not implemented yet.
+
+## Tech Stack
+
+- Backend: FastAPI and Python
+- Frontend: Next.js, React, and TypeScript
+- Database: PostgreSQL
+- Cache, presence, and future queue foundation: Valkey
+- Deployment: Docker Compose
+- Future reverse proxy: nginx
+
+## Required Tools
+
+- Git
+- Docker Desktop with Docker Compose
+
+## Local Development Quick Start
+
+```powershell
+copy .env.example .env
+docker compose up -d --build
+```
+
+## Local URLs
+
+- Frontend: http://localhost:3100
+- Backend API: http://localhost:8100
+- Backend docs: http://localhost:8100/docs
+
+## Useful Docker Compose Commands
+
+```powershell
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose down
+```
+
+## Verification
+
+```powershell
+curl http://localhost:8100/health
+curl http://localhost:8100/api/system/info
+curl http://localhost:8100/api/db-check
+curl http://localhost:8100/api/cache-check
+```
+
+## License
+
+OfficeChat is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+The core project should prefer permissive dependencies such as MIT, Apache-2.0, BSD, and PostgreSQL License. AGPL, SSPL, unclear source-available licenses, and unclear commercial licenses should be avoided in the core project.

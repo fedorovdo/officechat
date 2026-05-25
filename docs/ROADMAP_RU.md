@@ -1,0 +1,47 @@
+# Roadmap OfficeChat
+
+## Этап 0: Scaffold
+
+- Monorepo структура.
+- Docker Compose.
+- FastAPI backend.
+- Next.js frontend.
+- PostgreSQL и Valkey.
+- Базовая документация.
+
+## Этап 1: Основа продукта
+
+- Пользователи, роли и локальная аутентификация.
+- Административное создание пользователей.
+- Простые личные и групповые чаты.
+- REST API для базовых сущностей.
+- Миграции базы данных.
+
+## Этап 2: Realtime
+
+- WebSocket messaging.
+- Presence через Valkey.
+- Доставка и статусы сообщений.
+- Базовые уведомления в интерфейсе.
+
+## Этап 3: Файлы и администрирование
+
+- Загрузка файлов в локальный volume.
+- Ограничения размера и типа файлов.
+- Административные настройки.
+- Audit log для важных действий.
+
+## Этап 4: Боты и интеграции
+
+- Bot API foundation.
+- Системные webhooks.
+- Локальные AI-провайдеры, включая Ollama.
+- OpenAI-compatible провайдеры с явным включением администратором.
+
+## Этап 5: Production hardening
+
+- nginx reverse proxy.
+- TLS.
+- Безопасные cookie и headers.
+- Backup/restore documentation.
+- LDAP/AD provider.

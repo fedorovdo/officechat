@@ -1,0 +1,1 @@
+"""OfficeChat backend application package."""

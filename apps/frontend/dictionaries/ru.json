@@ -1,0 +1,31 @@
+{
+  "app": {
+    "name": "OfficeChat",
+    "tagline": "Корпоративная связь на своем сервере",
+    "description": "Локальный корпоративный чат для LAN и offline-сред, спроектированный с возможностью безопасного интернет-развертывания позже.",
+    "ariaLabel": "Стартовая страница OfficeChat"
+  },
+  "language": {
+    "switcherLabel": "Язык",
+    "options": {
+      "ru": "RU",
+      "en": "EN"
+    }
+  },
+  "actions": {
+    "login": "Войти",
+    "apiDocs": "API docs"
+  },
+  "links": {
+    "docsHref": "http://localhost:8100/docs"
+  },
+  "status": {
+    "ariaLabel": "Статус системы",
+    "title": "Статус backend",
+    "backend": "Backend API",
+    "database": "PostgreSQL",
+    "cache": "Valkey",
+    "placeholder": "Готово",
+    "note": "Живые проверки статуса будут подключены после добавления API-клиента."
+  }
+}

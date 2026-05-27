@@ -433,6 +433,10 @@ a {
   font-size: 14px;
 }
 
+.group-members-table {
+  min-width: 680px;
+}
+
 .users-table th,
 .users-table td {
   padding: 12px;
@@ -527,29 +531,76 @@ a {
 
 .messages-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   margin-top: 16px;
 }
 
 .message-item {
+  width: min(100%, 760px);
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  justify-self: start;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: #ffffff;
+}
+
+.message-item-own {
+  justify-self: end;
+  background: #eef6ff;
+  border-color: #bfdbfe;
+}
+
+.message-item-deleted {
+  background: #f7f8fb;
 }
 
 .message-meta {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 6px 10px;
   color: var(--muted);
   font-size: 13px;
+  line-height: 1.35;
 }
 
 .message-meta strong {
   color: var(--foreground);
+}
+
+.message-author {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.message-username,
+.message-time {
+  overflow-wrap: anywhere;
+}
+
+.bot-badge,
+.role-badge {
+  min-height: 20px;
+  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fbfcfe;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.bot-badge {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
 }
 
 .live-status {
@@ -575,6 +626,7 @@ a {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
   line-height: 1.5;
 }
 
@@ -623,10 +675,33 @@ a {
 
 .message-actions {
   grid-template-columns: repeat(auto-fit, minmax(88px, max-content));
+  justify-content: start;
+  padding-top: 2px;
+}
+
+.message-item-own .message-actions {
+  justify-content: end;
 }
 
 .message-compose {
   margin-top: 18px;
+}
+
+.new-messages-button {
+  position: sticky;
+  bottom: 16px;
+  justify-self: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--accent);
+  box-shadow: 0 10px 30px rgb(25 103 210 / 15%);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .table-select {

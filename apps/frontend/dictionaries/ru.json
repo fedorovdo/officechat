@@ -131,7 +131,10 @@
     "saveEdit": "Сохранить",
     "cancelEdit": "Отмена",
     "edit": "Изменить",
-    "delete": "Удалить"
+    "delete": "Удалить",
+    "botBadge": "BOT",
+    "deletedMessage": "Сообщение удалено",
+    "newMessages": "Новые сообщения"
   },
   "adminUsers": {
     "ariaLabel": "Управление пользователями",

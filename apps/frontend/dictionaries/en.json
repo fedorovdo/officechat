@@ -131,7 +131,10 @@
     "saveEdit": "Save",
     "cancelEdit": "Cancel",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "botBadge": "BOT",
+    "deletedMessage": "Message deleted",
+    "newMessages": "New messages"
   },
   "adminUsers": {
     "ariaLabel": "Admin user management",

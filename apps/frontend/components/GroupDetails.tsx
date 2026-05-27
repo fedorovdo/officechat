@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -44,6 +44,10 @@ type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composeFormRef = useRef<HTMLFormElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const shouldScrollToBottomRef = useRef(false);
+  const hasInitialMessageScrollRef = useRef(false);
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [group, setGroup] = useState<OfficeChatGroup | null>(null);
   const [members, setMembers] = useState<OfficeChatGroupMember[]>([]);
@@ -65,6 +69,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   const [isAdding, setIsAdding] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [liveUpdateStatus, setLiveUpdateStatus] = useState<LiveUpdateStatus>("disconnected");
+  const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -98,6 +103,19 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
       return `${(sizeBytes / 1024).toFixed(1)} KB`;
     }
     return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function isNearPageBottom() {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    const scrollBottom = window.scrollY + window.innerHeight;
+    return document.documentElement.scrollHeight - scrollBottom < 240;
+  }
+
+  function scrollToLatestMessage(behavior: ScrollBehavior = "smooth") {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    setShowNewMessagesButton(false);
   }
 
   const refreshMessages = useCallback(
@@ -148,6 +166,23 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   }, [groupId, locale, router]);
 
   useEffect(() => {
+    if (isLoading || messages.length === 0) {
+      return;
+    }
+
+    if (!hasInitialMessageScrollRef.current) {
+      hasInitialMessageScrollRef.current = true;
+      requestAnimationFrame(() => scrollToLatestMessage("auto"));
+      return;
+    }
+
+    if (shouldScrollToBottomRef.current) {
+      shouldScrollToBottomRef.current = false;
+      requestAnimationFrame(() => scrollToLatestMessage());
+    }
+  }, [isLoading, messages]);
+
+  useEffect(() => {
     const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
@@ -185,9 +220,19 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
         try {
           const payload = JSON.parse(event.data as string) as GroupMessageEvent;
           if (payload.type.startsWith("message.")) {
+            if (isNearPageBottom()) {
+              shouldScrollToBottomRef.current = true;
+            } else {
+              setShowNewMessagesButton(true);
+            }
             void refreshMessages(accessToken);
           }
         } catch {
+          if (isNearPageBottom()) {
+            shouldScrollToBottomRef.current = true;
+          } else {
+            setShowNewMessagesButton(true);
+          }
           void refreshMessages(accessToken);
         }
       };
@@ -311,6 +356,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
 
     setError("");
     try {
+      shouldScrollToBottomRef.current = true;
       await refreshMessages(token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.loadError);
@@ -339,6 +385,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      shouldScrollToBottomRef.current = true;
       setMessages(await getGroupMessages(token, groupId));
       setSuccess(dictionary.messages.sendSuccess);
     } catch (caughtError) {
@@ -412,6 +459,13 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
 
   function updateGroupForm<Key extends keyof UpdateGroupPayload>(key: Key, value: UpdateGroupPayload[Key]) {
     setGroupForm((currentForm) => ({ ...currentForm, [key]: value }));
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && event.ctrlKey && !isSending) {
+      event.preventDefault();
+      composeFormRef.current?.requestSubmit();
+    }
   }
 
   return (
@@ -523,7 +577,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
               <div className="admin-table-wrap">
                 <h2 className="section-title">{dictionary.groupDetails.membersTitle}</h2>
                 <div className="table-scroll">
-                  <table className="users-table">
+                  <table className="users-table group-members-table">
                     <thead>
                       <tr>
                         <th>{dictionary.groupDetails.columns.displayName}</th>
@@ -597,12 +651,28 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                 {messages.map((message) => {
                   const canEdit = currentUser?.id === message.sender_user_id && !message.is_deleted;
                   const canDelete = (canEdit || canModerateMessages) && !message.is_deleted;
+                  const isOwnMessage = currentUser?.id === message.sender_user_id;
+                  const isBotMessage = message.sender.role === "bot";
+                  const messageItemClasses = [
+                    "message-item",
+                    isOwnMessage ? "message-item-own" : "",
+                    message.is_deleted ? "message-item-deleted" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
                   return (
-                    <article className="message-item" key={message.id}>
+                    <article className={messageItemClasses} key={message.id}>
                       <div className="message-meta">
-                        <strong>{message.sender.display_name}</strong>
-                        <span>{message.sender.username}</span>
-                        <span>{dateFormatter.format(new Date(message.created_at))}</span>
+                        <span className="message-author">
+                          <strong>{message.sender.display_name}</strong>
+                          {isBotMessage ? (
+                            <span className="bot-badge">{dictionary.messages.botBadge}</span>
+                          ) : (
+                            <span className="role-badge">{message.sender.role}</span>
+                          )}
+                        </span>
+                        <span className="message-username">@{message.sender.username}</span>
+                        <span className="message-time">{dateFormatter.format(new Date(message.created_at))}</span>
                         {message.edited_at ? <span>{dictionary.messages.edited}</span> : null}
                       </div>
                       {editingMessageId === message.id ? (
@@ -631,7 +701,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                         </form>
                       ) : (
                         <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
-                          {message.body}
+                          {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
                         </p>
                       )}
                       {message.attachments.length > 0 ? (
@@ -682,13 +752,25 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                     </article>
                   );
                 })}
+                <div ref={messagesEndRef} />
               </div>
 
-              <form className="admin-form message-compose" onSubmit={handleSendMessage}>
+              {showNewMessagesButton ? (
+                <button
+                  className="new-messages-button"
+                  onClick={() => scrollToLatestMessage()}
+                  type="button"
+                >
+                  {dictionary.messages.newMessages}
+                </button>
+              ) : null}
+
+              <form className="admin-form message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
                 <label className="field">
                   <span className="field-label">{dictionary.messages.body}</span>
                   <textarea
                     className="field-input textarea-input"
+                    onKeyDown={handleComposerKeyDown}
                     onChange={(event) => setMessageBody(event.target.value)}
                     required={!selectedFile}
                     value={messageBody}

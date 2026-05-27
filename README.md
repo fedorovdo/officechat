@@ -60,6 +60,8 @@ Messages foundation is available on group detail pages. REST API remains the sou
 
 Members can read and send messages in their groups. Message authors can edit and delete their own messages. Group owners, group moderators, `admin`, and `superadmin` users can delete messages according to the current permission model.
 
+The group chat UI includes live update status, readable wrapped multi-line messages, a BOT badge for bot-authored messages, compact message actions, and Ctrl+Enter sending from the composer.
+
 WebSocket real-time updates are available for group messages:
 
 - `WS /api/ws/groups/{group_id}?token=...`

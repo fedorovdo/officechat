@@ -155,6 +155,12 @@
     "deleteError": "Could not delete direct message.",
     "attachmentsLater": "Direct message attachments will be added later"
   },
+  "sidebarActivity": {
+    "newMessages": "New messages",
+    "noRecentMessages": "No recent messages",
+    "attachment": "Attachment",
+    "unread": "Unread"
+  },
   "appShell": {
     "title": "Chat",
     "loading": "Loading OfficeChat...",

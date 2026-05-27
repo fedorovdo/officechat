@@ -87,10 +87,16 @@ http://localhost:3100/ru/app
 
 В боковой панели раздел Users показывает активных обычных пользователей. При выборе пользователя frontend создает или открывает личный разговор и показывает чат в основной области.
 
+В Sidebar Notifications v0.1 для direct users добавлены локальные индикаторы непрочитанных сообщений, preview последнего сообщения, короткое время активности и сортировка по недавней активности. Состояние хранится в `localStorage` текущего браузера.
+
+Если разговор уже известен frontend, WebSocket `direct.message.*` обновляет preview и unread indicator. Для новых разговоров используется простой refresh списка direct conversations примерно раз в 20 секунд. Полноценные backend read receipts и server-side unread counters запланированы позже.
+
 ## Ограничения v0.1
 
 - Нет вложений в личных сообщениях.
 - Нет read receipts.
+- Нет server-side unread counters.
+- Нет синхронизации unread state между браузерами/устройствами.
 - Нет typing indicators.
 - Нет direct messages для bot users.
 - Нет специального admin-доступа к чужим личным перепискам.

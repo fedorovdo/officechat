@@ -856,6 +856,7 @@ a {
 }
 
 .user-app-nav-item {
+  position: relative;
   width: 100%;
   min-height: 52px;
   padding: 10px;
@@ -870,10 +871,55 @@ a {
   text-align: left;
 }
 
-.user-app-nav-item span {
+.user-app-nav-item-unread strong {
+  font-weight: 800;
+}
+
+.sidebar-unread-dot {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 18%, transparent);
+}
+
+.sidebar-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 14px;
+}
+
+.sidebar-item-top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-item-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sidebar-item-meta,
+.sidebar-item-preview {
   color: var(--muted);
   font-size: 13px;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-item-preview {
+  color: #596173;
 }
 
 .user-app-nav-item:hover,

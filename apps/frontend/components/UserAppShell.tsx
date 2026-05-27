@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -9,15 +9,22 @@ import {
   createDirectConversation,
   getCurrentUser,
   getDirectConversations,
+  getDirectWebSocketUrl,
   getGroups,
   getGroupMembers,
+  getGroupMessages,
+  getGroupWebSocketUrl,
   getStoredAccessToken,
   getUsers,
   isAdminRole,
+  type DirectMessageEvent,
+  type GroupMessageEvent,
   type OfficeChatDirectoryUser,
   type OfficeChatDirectConversation,
+  type OfficeChatDirectMessage,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
+  type OfficeChatMessage,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
@@ -44,12 +51,29 @@ type AppSettings = {
   sidebarSide: SidebarSide;
 };
 
+type SidebarActivityItem = {
+  preview: string;
+  timestamp: string;
+  unread: boolean;
+};
+
+type SidebarActivityState = {
+  groups: Record<string, SidebarActivityItem>;
+  directUsers: Record<string, SidebarActivityItem>;
+};
+
 const settingsKey = "officechat.user_settings";
+const sidebarActivityKeyPrefix = "officechat.sidebar_activity";
 const defaultSettings: AppSettings = {
   accentColor: "default",
   fontSize: "normal",
   language: "ru",
   sidebarSide: "left"
+};
+
+const emptySidebarActivity: SidebarActivityState = {
+  groups: {},
+  directUsers: {}
 };
 
 function readSettings(locale: Locale): AppSettings {
@@ -74,6 +98,30 @@ function readSettings(locale: Locale): AppSettings {
   }
 }
 
+function readSidebarActivity(userId: string): SidebarActivityState {
+  if (typeof window === "undefined") {
+    return emptySidebarActivity;
+  }
+
+  try {
+    const saved = localStorage.getItem(`${sidebarActivityKeyPrefix}.${userId}`);
+    if (!saved) {
+      return emptySidebarActivity;
+    }
+    const parsed = JSON.parse(saved) as Partial<SidebarActivityState>;
+    return {
+      groups: parsed.groups ?? {},
+      directUsers: parsed.directUsers ?? {}
+    };
+  } catch {
+    return emptySidebarActivity;
+  }
+}
+
+function getActivityTime(activity?: SidebarActivityItem) {
+  return activity?.timestamp ? Date.parse(activity.timestamp) || 0 : 0;
+}
+
 export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
@@ -82,6 +130,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [directConversations, setDirectConversations] = useState<OfficeChatDirectConversation[]>([]);
   const [selected, setSelected] = useState<AppSelection>({ type: "empty" });
   const [selectedMembers, setSelectedMembers] = useState<OfficeChatGroupMember[]>([]);
+  const [sidebarActivity, setSidebarActivity] = useState<SidebarActivityState>(emptySidebarActivity);
   const [settings, setSettings] = useState<AppSettings>(() => ({ ...defaultSettings, language: locale }));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,6 +144,32 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const directMessageUsers = currentUser
     ? users.filter((user) => user.id !== currentUser.id && user.role !== "bot" && user.is_active)
     : [];
+  const orderedGroups = useMemo(
+    () =>
+      groups
+        .map((group, index) => ({ group, index }))
+        .sort((left, right) => {
+          const timeDifference =
+            getActivityTime(sidebarActivity.groups[right.group.id]) -
+            getActivityTime(sidebarActivity.groups[left.group.id]);
+          return timeDifference || left.index - right.index;
+        })
+        .map(({ group }) => group),
+    [groups, sidebarActivity.groups]
+  );
+  const orderedDirectMessageUsers = useMemo(
+    () =>
+      directMessageUsers
+        .map((user, index) => ({ user, index }))
+        .sort((left, right) => {
+          const timeDifference =
+            getActivityTime(sidebarActivity.directUsers[right.user.id]) -
+            getActivityTime(sidebarActivity.directUsers[left.user.id]);
+          return timeDifference || left.index - right.index;
+        })
+        .map(({ user }) => user),
+    [directMessageUsers, sidebarActivity.directUsers]
+  );
   const currentMembership = currentUser
     ? selectedMembers.find((member) => member.user_id === currentUser.id)
     : undefined;
@@ -119,10 +194,134 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     [settings]
   );
 
+  const shortTimeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        hour: "2-digit",
+        minute: "2-digit"
+      }),
+    [locale]
+  );
+
+  function formatActivityTime(timestamp?: string) {
+    if (!timestamp) {
+      return "";
+    }
+    return shortTimeFormatter.format(new Date(timestamp));
+  }
+
+  function getGroupMessagePreview(message: OfficeChatMessage) {
+    if (message.is_deleted) {
+      return dictionary.messages.deletedMessage;
+    }
+    const body = message.body.trim();
+    if (body) {
+      return body;
+    }
+    if (message.attachments.length > 0) {
+      return dictionary.sidebarActivity.attachment;
+    }
+    return dictionary.sidebarActivity.noRecentMessages;
+  }
+
+  function getDirectMessagePreview(message: OfficeChatDirectMessage) {
+    if (message.is_deleted) {
+      return dictionary.messages.deletedMessage;
+    }
+    return message.body.trim() || dictionary.sidebarActivity.noRecentMessages;
+  }
+
+  const updateGroupActivity = useCallback(
+    (groupId: string, message: OfficeChatMessage, markUnread: boolean) => {
+      const nextActivity = {
+        preview: getGroupMessagePreview(message),
+        timestamp: message.updated_at ?? message.created_at,
+        unread: markUnread
+      };
+      setSidebarActivity((currentActivity) => ({
+        ...currentActivity,
+        groups: {
+          ...currentActivity.groups,
+          [groupId]: {
+            ...currentActivity.groups[groupId],
+            ...nextActivity,
+            unread: markUnread || currentActivity.groups[groupId]?.unread || false
+          }
+        }
+      }));
+    },
+    [dictionary.messages.deletedMessage, dictionary.sidebarActivity.attachment, dictionary.sidebarActivity.noRecentMessages]
+  );
+
+  const updateDirectUserActivity = useCallback(
+    (userId: string, message: OfficeChatDirectMessage, markUnread: boolean) => {
+      const nextActivity = {
+        preview: getDirectMessagePreview(message),
+        timestamp: message.updated_at ?? message.created_at,
+        unread: markUnread
+      };
+      setSidebarActivity((currentActivity) => ({
+        ...currentActivity,
+        directUsers: {
+          ...currentActivity.directUsers,
+          [userId]: {
+            ...currentActivity.directUsers[userId],
+            ...nextActivity,
+            unread: markUnread || currentActivity.directUsers[userId]?.unread || false
+          }
+        }
+      }));
+    },
+    [dictionary.messages.deletedMessage, dictionary.sidebarActivity.noRecentMessages]
+  );
+
+  function markGroupRead(groupId: string) {
+    setSidebarActivity((currentActivity) => ({
+      ...currentActivity,
+      groups: {
+        ...currentActivity.groups,
+        [groupId]: {
+          ...(currentActivity.groups[groupId] ?? {
+            preview: dictionary.sidebarActivity.noRecentMessages,
+            timestamp: "",
+            unread: false
+          }),
+          unread: false
+        }
+      }
+    }));
+  }
+
+  function markDirectUserRead(userId: string) {
+    setSidebarActivity((currentActivity) => ({
+      ...currentActivity,
+      directUsers: {
+        ...currentActivity.directUsers,
+        [userId]: {
+          ...(currentActivity.directUsers[userId] ?? {
+            preview: dictionary.sidebarActivity.noRecentMessages,
+            timestamp: "",
+            unread: false
+          }),
+          unread: false
+        }
+      }
+    }));
+  }
+
   useEffect(() => {
     const loadedSettings = readSettings(locale);
     setSettings({ ...loadedSettings, language: locale });
   }, [locale]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    // TODO: Replace localStorage sidebar activity with backend read receipts and server-side unread counters.
+    localStorage.setItem(`${sidebarActivityKeyPrefix}.${currentUser.id}`, JSON.stringify(sidebarActivity));
+  }, [currentUser, sidebarActivity]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -144,6 +343,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         setGroups(loadedGroups);
         setUsers(loadedUsers);
         setDirectConversations(loadedDirectConversations);
+        setSidebarActivity(readSidebarActivity(loadedUser.id));
         setSelected(loadedGroups[0] ? { type: "group", groupId: loadedGroups[0].id } : { type: "empty" });
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.loadError);
@@ -171,6 +371,179 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       .then(setSelectedMembers)
       .catch(() => setSelectedMembers([]));
   }, [locale, router, selected]);
+
+  useEffect(() => {
+    if (selected.type === "group") {
+      markGroupRead(selected.groupId);
+      return;
+    }
+
+    if (selectedDirectConversation) {
+      markDirectUserRead(selectedDirectConversation.other_user.id);
+    }
+  }, [selected, selectedDirectConversation]);
+
+  useEffect(() => {
+    if (!currentUser || groups.length === 0) {
+      return;
+    }
+
+    const token = getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+
+    let isCancelled = false;
+    for (const group of groups) {
+      void getGroupMessages(token, group.id, 1)
+        .then((messages) => {
+          if (!isCancelled && messages[0]) {
+            updateGroupActivity(group.id, messages[0], false);
+          }
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentUser, groups, updateGroupActivity]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    for (const conversation of directConversations) {
+      if (conversation.last_message) {
+        updateDirectUserActivity(conversation.other_user.id, conversation.last_message, false);
+      }
+    }
+  }, [currentUser, directConversations, updateDirectUserActivity]);
+
+  useEffect(() => {
+    if (!currentUser || groups.length === 0) {
+      return;
+    }
+
+    const token = getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+
+    const sockets = groups.map((group) => {
+      const websocket = new WebSocket(getGroupWebSocketUrl(token, group.id));
+      websocket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data as string) as GroupMessageEvent;
+          if (!payload.type.startsWith("message.")) {
+            return;
+          }
+          const isSelectedGroup = selected.type === "group" && selected.groupId === payload.group_id;
+          const isOwnMessage = payload.message.sender_user_id === currentUser.id;
+          updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
+        } catch {
+          return;
+        }
+      };
+      return websocket;
+    });
+
+    return () => {
+      for (const socket of sockets) {
+        socket.close();
+      }
+    };
+  }, [currentUser, groups, selected, updateGroupActivity]);
+
+  useEffect(() => {
+    if (!currentUser || directConversations.length === 0) {
+      return;
+    }
+
+    const token = getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+
+    const sockets = directConversations.map((conversation) => {
+      const websocket = new WebSocket(getDirectWebSocketUrl(token, conversation.id));
+      websocket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data as string) as DirectMessageEvent;
+          if (!payload.type.startsWith("direct.message.")) {
+            return;
+          }
+          const isSelectedConversation =
+            selected.type === "direct" && selected.conversationId === payload.conversation_id;
+          const isOwnMessage = payload.message.sender_user_id === currentUser.id;
+          updateDirectUserActivity(conversation.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
+        } catch {
+          return;
+        }
+      };
+      return websocket;
+    });
+
+    return () => {
+      for (const socket of sockets) {
+        socket.close();
+      }
+    };
+  }, [currentUser, directConversations, selected, updateDirectUserActivity]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    const currentUserId = currentUser.id;
+
+    const token = getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+    const accessToken = token;
+
+    async function refreshDirectConversations() {
+      try {
+        const loadedConversations = await getDirectConversations(accessToken);
+        setDirectConversations(loadedConversations);
+        setSidebarActivity((currentActivity) => {
+          const nextDirectUsers = { ...currentActivity.directUsers };
+          for (const conversation of loadedConversations) {
+            const lastMessage = conversation.last_message;
+            if (!lastMessage) {
+              continue;
+            }
+            const existingActivity = nextDirectUsers[conversation.other_user.id];
+            const lastMessageTime = Date.parse(lastMessage.updated_at ?? lastMessage.created_at) || 0;
+            const existingTime = getActivityTime(existingActivity);
+            const isSelectedConversation =
+              selected.type === "direct" && selected.conversationId === conversation.id;
+            const shouldMarkUnread =
+              lastMessageTime > existingTime &&
+              !isSelectedConversation &&
+              lastMessage.sender_user_id !== currentUserId;
+            nextDirectUsers[conversation.other_user.id] = {
+              ...existingActivity,
+              preview: getDirectMessagePreview(lastMessage),
+              timestamp: lastMessage.updated_at ?? lastMessage.created_at,
+              unread: shouldMarkUnread || existingActivity?.unread || false
+            };
+          }
+          return {
+            ...currentActivity,
+            directUsers: nextDirectUsers
+          };
+        });
+      } catch {
+        return;
+      }
+    }
+
+    const timer = setInterval(() => void refreshDirectConversations(), 20000);
+    return () => clearInterval(timer);
+  }, [currentUser, selected, dictionary.messages.deletedMessage, dictionary.sidebarActivity.noRecentMessages]);
 
   function updateSettings(nextSettings: AppSettings) {
     setSettings(nextSettings);
@@ -254,21 +627,46 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           <section>
             <h2 className="compact-title">{dictionary.appShell.groups}</h2>
             <div className="user-app-nav-list">
-              {groups.map((group) => (
-                <button
-                  className={
-                    selected.type === "group" && selected.groupId === group.id
-                      ? "user-app-nav-item user-app-nav-item-active"
-                      : "user-app-nav-item"
-                  }
-                  key={group.id}
-                  onClick={() => setSelected({ type: "group", groupId: group.id })}
-                  type="button"
-                >
-                  <strong>{group.name}</strong>
-                  <span>{group.slug}</span>
-                </button>
-              ))}
+              {orderedGroups.map((group) => {
+                const activity = sidebarActivity.groups[group.id];
+                const isSelected = selected.type === "group" && selected.groupId === group.id;
+                const itemClassName = [
+                  "user-app-nav-item",
+                  isSelected ? "user-app-nav-item-active" : "",
+                  activity?.unread ? "user-app-nav-item-unread" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                return (
+                  <button
+                    className={itemClassName}
+                    key={group.id}
+                    onClick={() => {
+                      setSelected({ type: "group", groupId: group.id });
+                      markGroupRead(group.id);
+                    }}
+                    type="button"
+                  >
+                    {activity?.unread ? (
+                      <span
+                        aria-label={dictionary.sidebarActivity.unread}
+                        className="sidebar-unread-dot"
+                        title={dictionary.sidebarActivity.newMessages}
+                      />
+                    ) : null}
+                    <span className="sidebar-item-top">
+                      <strong>{group.name}</strong>
+                      {activity?.timestamp ? (
+                        <span className="sidebar-item-time">{formatActivityTime(activity.timestamp)}</span>
+                      ) : null}
+                    </span>
+                    <span className="sidebar-item-meta">{group.slug}</span>
+                    <span className="sidebar-item-preview">
+                      {activity?.preview || dictionary.sidebarActivity.noRecentMessages}
+                    </span>
+                  </button>
+                );
+              })}
               {!isLoading && groups.length === 0 ? (
                 <p className="muted">{dictionary.appShell.noGroups}</p>
               ) : null}
@@ -278,19 +676,40 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           <section>
             <h2 className="compact-title">{dictionary.appShell.users}</h2>
             <div className="user-app-nav-list">
-              {directMessageUsers.map((user) => {
+              {orderedDirectMessageUsers.map((user) => {
+                const activity = sidebarActivity.directUsers[user.id];
                 const isSelected =
                   selected.type === "direct" && selectedDirectConversation?.other_user.id === user.id;
+                const itemClassName = [
+                  "user-app-nav-item",
+                  isSelected ? "user-app-nav-item-active" : "",
+                  activity?.unread ? "user-app-nav-item-unread" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ");
                 return (
                   <button
-                    className={isSelected ? "user-app-nav-item user-app-nav-item-active" : "user-app-nav-item"}
+                    className={itemClassName}
                     key={user.id}
                     onClick={() => void handleOpenDirectUser(user)}
                     type="button"
                   >
+                    {activity?.unread ? (
+                      <span
+                        aria-label={dictionary.sidebarActivity.unread}
+                        className="sidebar-unread-dot"
+                        title={dictionary.sidebarActivity.newMessages}
+                      />
+                    ) : null}
                     <strong>{user.display_name}</strong>
-                    <span>
-                      @{user.username} · {user.role}
+                    {activity?.timestamp ? (
+                      <span className="sidebar-item-time">{formatActivityTime(activity.timestamp)}</span>
+                    ) : null}
+                    <span className="sidebar-item-preview">
+                      {activity?.preview || dictionary.sidebarActivity.noRecentMessages}
+                    </span>
+                    <span className="sidebar-item-meta">
+                      @{user.username} - {user.role}
                     </span>
                   </button>
                 );

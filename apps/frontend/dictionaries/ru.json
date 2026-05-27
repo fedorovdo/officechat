@@ -155,6 +155,12 @@
     "deleteError": "Не удалось удалить личное сообщение.",
     "attachmentsLater": "Вложения в личных сообщениях будут добавлены позже"
   },
+  "sidebarActivity": {
+    "newMessages": "Новые сообщения",
+    "noRecentMessages": "Нет недавних сообщений",
+    "attachment": "Вложение",
+    "unread": "Непрочитано"
+  },
   "appShell": {
     "title": "Чат",
     "loading": "Загрузка OfficeChat...",

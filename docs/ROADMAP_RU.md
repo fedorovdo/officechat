@@ -19,12 +19,14 @@
 - User app shell: отдельный пользовательский интерфейс `/ru/app` рядом с admin routes `/ru/admin/*`.
 - Локальные настройки интерфейса: язык, сторона sidebar, размер шрифта, accent color.
 - Базовые direct messages между пользователями: REST API, WebSocket updates, UI в `/ru/app`.
+- Локальные sidebar notifications: unread indicators, last message previews, recent activity ordering через frontend `localStorage`.
 
 ## Этап 2: Realtime
 
 - WebSocket messaging.
 - Presence через Valkey.
 - Доставка и статусы сообщений.
+- Backend read receipts и server-side unread counters.
 - Базовые уведомления в интерфейсе.
 - Стандартная поддержка emoji в сообщениях чата.
 - Вложения в direct messages.

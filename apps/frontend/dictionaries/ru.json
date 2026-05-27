@@ -191,7 +191,21 @@
     "accentDefault": "По умолчанию",
     "accentBlue": "Синий",
     "accentGreen": "Зеленый",
-    "accentPurple": "Фиолетовый"
+    "accentPurple": "Фиолетовый",
+    "browserNotifications": "Уведомления браузера",
+    "enableNotifications": "Разрешить уведомления",
+    "notificationsPreference": "Показывать уведомления о новых сообщениях",
+    "notificationsEnabled": "Включены",
+    "notificationsDisabled": "Выключены",
+    "notificationsNote": "Уведомления работают, когда OfficeChat открыт в браузере.",
+    "notificationsDeniedHint": "Доступ запрещен. Разрешение нужно изменить вручную в настройках браузера.",
+    "notificationPermission": "Разрешение",
+    "notificationPermissions": {
+      "granted": "granted",
+      "denied": "denied",
+      "default": "default",
+      "unsupported": "unsupported"
+    }
   },
   "adminUsers": {
     "ariaLabel": "Управление пользователями",

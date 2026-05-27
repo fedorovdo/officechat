@@ -55,6 +55,8 @@ User-facing app shell is available at http://localhost:3100/ru/app. It shows a t
 
 Sidebar activity indicators are available in early frontend form. Groups and direct users can show local unread dots, last message previews, short activity timestamps, and recent-activity ordering. This state is stored in browser `localStorage` for now. Backend read receipts, server-side unread counters, and cross-device unread synchronization are planned later.
 
+Browser notifications are available in early frontend form. Users can enable them in the app shell settings; they work only while OfficeChat is open in a browser tab/window and only after the browser grants notification permission. Server push notifications, service workers, email notifications, and mobile push are planned later.
+
 Current development uses one frontend on port `3100`. User routes live under `/ru/app`, while admin routes remain under `/ru/admin/*`. Future production deployment can split user/admin surfaces with nginx hostnames or separate frontend entrypoints.
 
 User app settings are stored in browser `localStorage` for now. Future versions should persist language, sidebar side, font size, accent color, and profile preferences in backend user preferences.

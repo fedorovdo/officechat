@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -62,8 +62,11 @@ type SidebarActivityState = {
   directUsers: Record<string, SidebarActivityItem>;
 };
 
+type BrowserNotificationPermission = NotificationPermission | "unsupported";
+
 const settingsKey = "officechat.user_settings";
 const sidebarActivityKeyPrefix = "officechat.sidebar_activity";
+const notificationPreferenceKey = "officechat.notifications.enabled";
 const defaultSettings: AppSettings = {
   accentColor: "default",
   fontSize: "normal",
@@ -122,8 +125,29 @@ function getActivityTime(activity?: SidebarActivityItem) {
   return activity?.timestamp ? Date.parse(activity.timestamp) || 0 : 0;
 }
 
+function getBrowserNotificationPermission(): BrowserNotificationPermission {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "unsupported";
+  }
+  return Notification.permission;
+}
+
+function readNotificationPreference() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return localStorage.getItem(notificationPreferenceKey) === "true";
+}
+
+function truncateNotificationPreview(preview: string) {
+  return preview.length > 120 ? `${preview.slice(0, 117)}...` : preview;
+}
+
 export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const router = useRouter();
+  const notifiedMessageIdsRef = useRef<string[]>([]);
+  const browserNotificationsEnabledRef = useRef(false);
+  const notificationPermissionRef = useRef<BrowserNotificationPermission>("default");
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [groups, setGroups] = useState<OfficeChatGroup[]>([]);
   const [users, setUsers] = useState<OfficeChatDirectoryUser[]>([]);
@@ -132,6 +156,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [selectedMembers, setSelectedMembers] = useState<OfficeChatGroupMember[]>([]);
   const [sidebarActivity, setSidebarActivity] = useState<SidebarActivityState>(emptySidebarActivity);
   const [settings, setSettings] = useState<AppSettings>(() => ({ ...defaultSettings, language: locale }));
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<BrowserNotificationPermission>("default");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
@@ -232,6 +259,42 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     return message.body.trim() || dictionary.sidebarActivity.noRecentMessages;
   }
 
+  function shouldShowBrowserNotification(messageId: string, senderUserId: string) {
+    if (!currentUser || senderUserId === currentUser.id) {
+      return false;
+    }
+    if (!browserNotificationsEnabledRef.current || notificationPermissionRef.current !== "granted") {
+      return false;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return false;
+    }
+    if (document.visibilityState === "visible" && document.hasFocus()) {
+      return false;
+    }
+    if (notifiedMessageIdsRef.current.includes(messageId)) {
+      return false;
+    }
+
+    notifiedMessageIdsRef.current = [messageId, ...notifiedMessageIdsRef.current].slice(0, 80);
+    return true;
+  }
+
+  function showBrowserNotification(messageId: string, senderUserId: string, body: string, onClick: () => void) {
+    if (!shouldShowBrowserNotification(messageId, senderUserId)) {
+      return;
+    }
+
+    const notification = new Notification("OfficeChat", {
+      body: truncateNotificationPreview(body)
+    });
+    notification.onclick = () => {
+      window.focus();
+      onClick();
+      notification.close();
+    };
+  }
+
   const updateGroupActivity = useCallback(
     (groupId: string, message: OfficeChatMessage, markUnread: boolean) => {
       const nextActivity = {
@@ -312,7 +375,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
   useEffect(() => {
     const loadedSettings = readSettings(locale);
+    const loadedNotificationPreference = readNotificationPreference();
+    const loadedNotificationPermission = getBrowserNotificationPermission();
     setSettings({ ...loadedSettings, language: locale });
+    browserNotificationsEnabledRef.current = loadedNotificationPreference;
+    notificationPermissionRef.current = loadedNotificationPermission;
+    setBrowserNotificationsEnabled(loadedNotificationPreference);
+    setNotificationPermission(loadedNotificationPermission);
   }, [locale]);
 
   useEffect(() => {
@@ -443,6 +512,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           const isSelectedGroup = selected.type === "group" && selected.groupId === payload.group_id;
           const isOwnMessage = payload.message.sender_user_id === currentUser.id;
           updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
+          if (payload.type === "message.created") {
+            const preview = getGroupMessagePreview(payload.message);
+            showBrowserNotification(
+              payload.message.id,
+              payload.message.sender_user_id,
+              `${group.name} - ${payload.message.sender.display_name}: ${preview}`,
+              () => {
+                setSelected({ type: "group", groupId: payload.group_id });
+                markGroupRead(payload.group_id);
+              }
+            );
+          }
         } catch {
           return;
         }
@@ -479,6 +560,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             selected.type === "direct" && selected.conversationId === payload.conversation_id;
           const isOwnMessage = payload.message.sender_user_id === currentUser.id;
           updateDirectUserActivity(conversation.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
+          if (payload.type === "direct.message.created") {
+            const preview = getDirectMessagePreview(payload.message);
+            showBrowserNotification(
+              payload.message.id,
+              payload.message.sender_user_id,
+              `${payload.message.sender.display_name}: ${preview}`,
+              () => {
+                setSelected({ type: "direct", conversationId: payload.conversation_id });
+                markDirectUserRead(conversation.other_user.id);
+              }
+            );
+          }
         } catch {
           return;
         }
@@ -525,6 +618,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               lastMessageTime > existingTime &&
               !isSelectedConversation &&
               lastMessage.sender_user_id !== currentUserId;
+            if (shouldMarkUnread) {
+              const preview = getDirectMessagePreview(lastMessage);
+              showBrowserNotification(
+                lastMessage.id,
+                lastMessage.sender_user_id,
+                `${lastMessage.sender.display_name}: ${preview}`,
+                () => {
+                  setSelected({ type: "direct", conversationId: conversation.id });
+                  markDirectUserRead(conversation.other_user.id);
+                }
+              );
+            }
             nextDirectUsers[conversation.other_user.id] = {
               ...existingActivity,
               preview: getDirectMessagePreview(lastMessage),
@@ -555,6 +660,26 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   function handleLanguageChange(nextLocale: Locale) {
     updateSettings({ ...settings, language: nextLocale });
     router.push(`/${nextLocale}/app`);
+  }
+
+  function updateBrowserNotificationsEnabled(isEnabled: boolean) {
+    browserNotificationsEnabledRef.current = isEnabled;
+    setBrowserNotificationsEnabled(isEnabled);
+    // TODO: Move notification preferences to backend user_preferences when user settings are persisted server-side.
+    localStorage.setItem(notificationPreferenceKey, String(isEnabled));
+  }
+
+  async function requestBrowserNotificationPermission() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      updateBrowserNotificationsEnabled(false);
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    notificationPermissionRef.current = permission;
+    setNotificationPermission(permission);
+    updateBrowserNotificationsEnabled(permission === "granted");
   }
 
   async function logout() {
@@ -844,6 +969,39 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   <option value="purple">{dictionary.appShell.accentPurple}</option>
                 </select>
               </label>
+              <div className="field">
+                <span className="field-label">{dictionary.appShell.browserNotifications}</span>
+                <p className="note">
+                  {dictionary.appShell.notificationPermission}:{" "}
+                  {dictionary.appShell.notificationPermissions[notificationPermission]}
+                </p>
+                <p className="note">
+                  {browserNotificationsEnabled
+                    ? dictionary.appShell.notificationsEnabled
+                    : dictionary.appShell.notificationsDisabled}
+                </p>
+                <label className="checkbox-field">
+                  <input
+                    checked={browserNotificationsEnabled}
+                    disabled={notificationPermission !== "granted"}
+                    onChange={(event) => updateBrowserNotificationsEnabled(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{dictionary.appShell.notificationsPreference}</span>
+                </label>
+                <button
+                  className="secondary-link"
+                  disabled={notificationPermission === "unsupported"}
+                  onClick={() => void requestBrowserNotificationPermission()}
+                  type="button"
+                >
+                  {dictionary.appShell.enableNotifications}
+                </button>
+                <p className="note">{dictionary.appShell.notificationsNote}</p>
+                {notificationPermission === "denied" ? (
+                  <p className="form-error">{dictionary.appShell.notificationsDeniedHint}</p>
+                ) : null}
+              </div>
               <p className="note">{dictionary.appShell.settingsNote}</p>
             </div>
           </section>

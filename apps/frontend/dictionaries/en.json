@@ -191,7 +191,21 @@
     "accentDefault": "Default",
     "accentBlue": "Blue",
     "accentGreen": "Green",
-    "accentPurple": "Purple"
+    "accentPurple": "Purple",
+    "browserNotifications": "Browser notifications",
+    "enableNotifications": "Enable notifications",
+    "notificationsPreference": "Show notifications for new messages",
+    "notificationsEnabled": "Enabled",
+    "notificationsDisabled": "Disabled",
+    "notificationsNote": "Notifications work while OfficeChat is open in the browser.",
+    "notificationsDeniedHint": "Permission is denied. Change it manually in browser settings.",
+    "notificationPermission": "Permission",
+    "notificationPermissions": {
+      "granted": "granted",
+      "denied": "denied",
+      "default": "default",
+      "unsupported": "unsupported"
+    }
   },
   "adminUsers": {
     "ariaLabel": "Admin user management",

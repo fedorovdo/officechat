@@ -89,6 +89,8 @@ http://localhost:3100/ru/app
 
 В Sidebar Notifications v0.1 для direct users добавлены локальные индикаторы непрочитанных сообщений, preview последнего сообщения, короткое время активности и сортировка по недавней активности. Состояние хранится в `localStorage` текущего браузера.
 
+Browser Notifications v0.1 показывает уведомления браузера по новым личным сообщениям, если OfficeChat открыт, уведомления включены в настройках и текущая вкладка не активна. Это локальный frontend-only механизм без backend notification table, service worker и server push.
+
 Если разговор уже известен frontend, WebSocket `direct.message.*` обновляет preview и unread indicator. Для новых разговоров используется простой refresh списка direct conversations примерно раз в 20 секунд. Полноценные backend read receipts и server-side unread counters запланированы позже.
 
 ## Ограничения v0.1
@@ -97,6 +99,7 @@ http://localhost:3100/ru/app
 - Нет read receipts.
 - Нет server-side unread counters.
 - Нет синхронизации unread state между браузерами/устройствами.
+- Нет service worker и push-уведомлений без открытой вкладки.
 - Нет typing indicators.
 - Нет direct messages для bot users.
 - Нет специального admin-доступа к чужим личным перепискам.

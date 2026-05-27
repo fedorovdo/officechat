@@ -92,6 +92,14 @@ POST /api/bots/incoming/{token}
 curl.exe -X POST http://localhost:8100/api/bots/incoming/PASTE_TOKEN_HERE -H "Content-Type: application/json" -d "{\"group_slug\":\"alerts\",\"title\":\"Zabbix alert\",\"severity\":\"high\",\"body\":\"CPU usage is above threshold\"}"
 ```
 
+Webhook также принимает Zabbix-friendly поля `severity`, `status`, `host`, `ip`, `problem`, `trigger`, `event_id`, `url` и `timestamp`. Они форматируются в обычный plain text и рассылаются через текущий WebSocket `message.created`.
+
+Пример monitoring payload:
+
+```powershell
+curl.exe -X POST http://localhost:8100/api/bots/incoming/PASTE_TOKEN_HERE -H "Content-Type: application/json" -d "{\"group_slug\":\"alerts\",\"severity\":\"high\",\"status\":\"problem\",\"title\":\"Disk space low\",\"host\":\"DC5\",\"ip\":\"192.168.1.100\",\"problem\":\"Free space on C: is less than 10%\",\"event_id\":\"12345\",\"url\":\"http://zabbix.local/tr_events.php?triggerid=12345\",\"body\":\"Check the server before the next backup window.\"}"
+```
+
 Outgoing webhooks, AI provider, вложения от бота, direct messages и отдельные scoped permissions для ботов пока не реализованы.
 
 ## Проверка сервисов

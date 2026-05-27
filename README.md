@@ -90,6 +90,12 @@ Bot foundation is available for incoming webhooks:
 
 Each bot has a linked user with role `bot`. Add that bot user to a group by username, then external systems can post messages into the group with the bot token. Full bot tokens are shown only once on create/rotate; only hashes are stored. Outgoing webhooks, AI providers, bot file uploads, direct messages, and per-bot scoped permissions beyond group membership are not implemented yet.
 
+Incoming bot webhooks accept simple payloads with `group_id` or `group_slug` and `body`, plus monitoring-friendly fields for systems such as Zabbix: `title`, `severity`, `status`, `host`, `ip`, `problem`, `trigger`, `event_id`, `url`, and `timestamp`. These fields are formatted as plain text and broadcast through the existing `message.created` WebSocket event.
+
+```powershell
+curl.exe -X POST http://localhost:8100/api/bots/incoming/PASTE_TOKEN_HERE -H "Content-Type: application/json" -d "{\"group_slug\":\"alerts\",\"severity\":\"high\",\"status\":\"problem\",\"title\":\"Disk space low\",\"host\":\"DC5\",\"ip\":\"192.168.1.100\",\"problem\":\"Free space on C: is less than 10%\",\"event_id\":\"12345\",\"url\":\"http://zabbix.local/tr_events.php?triggerid=12345\",\"body\":\"Check the server before the next backup window.\"}"
+```
+
 Important auth environment variables:
 
 - `APP_SECRET_KEY` - development placeholder is included in `.env.example`; change it for any shared or production deployment.

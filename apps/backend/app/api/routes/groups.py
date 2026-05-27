@@ -77,8 +77,11 @@ def message_event_payload(event_type: str, group_id: UUID, message: object) -> d
 async def list_groups(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    include_inactive: bool = False,
 ) -> list[Group]:
-    return await list_visible_groups(session, current_user)
+    if include_inactive and not is_global_group_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return await list_visible_groups(session, current_user, include_inactive=include_inactive)
 
 
 @router.post("", response_model=GroupPublic, status_code=status.HTTP_201_CREATED)

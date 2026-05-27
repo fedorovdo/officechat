@@ -72,14 +72,10 @@ async def patch_user(
             detail="Only superadmin can promote users to superadmin",
         )
 
-    if (
-        current_user.role == "superadmin"
-        and current_user.id == target_user.id
-        and payload.is_active is False
-    ):
+    if current_user.id == target_user.id and payload.is_active is False:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Superadmin cannot disable their own account",
+            detail="Users cannot disable their own account",
         )
 
     try:

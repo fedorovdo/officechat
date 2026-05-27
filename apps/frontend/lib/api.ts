@@ -249,8 +249,9 @@ export function isAdminRole(role: string) {
   return role === "superadmin" || role === "admin";
 }
 
-export function getGroups(token: string) {
-  return apiFetch<OfficeChatGroup[]>("/api/groups", token);
+export function getGroups(token: string, includeInactive = false) {
+  const query = includeInactive ? "?include_inactive=true" : "";
+  return apiFetch<OfficeChatGroup[]>(`/api/groups${query}`, token);
 }
 
 export function createGroup(token: string, payload: CreateGroupPayload) {

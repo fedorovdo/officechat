@@ -49,6 +49,7 @@ Admin users page:
 - Only `superadmin` and `admin` users can access it.
 - Admins can create users, edit display name/email/role/active state, and reset local user passwords.
 - Only `superadmin` can edit or promote `superadmin` users.
+- Cleanup actions are soft by default: users are disabled with `is_active=false`, not physically deleted. This keeps message authorship and future audit history intact.
 
 User-facing app shell is available at http://localhost:3100/ru/app. It shows a top bar, group chat sidebar, active users sidebar section for future direct messages, local UI settings, and the reusable group chat panel with messages, attachments, WebSocket updates, and Ctrl+Enter sending.
 
@@ -59,6 +60,8 @@ User app settings are stored in browser `localStorage` for now. Future versions 
 The user sidebar uses `GET /api/users`, an authenticated endpoint that returns active users with public directory fields only. Direct/private messages are still a planned feature and are not implemented yet.
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
+
+Groups can be archived and restored with `is_active=false/true`. Archived groups are not physically deleted, which keeps message history, attachments, and membership references safe. Regular user and app-shell group lists show active groups only; admin group management can request archived groups with `GET /api/groups?include_inactive=true`.
 
 Messages foundation is available on group detail pages. REST API remains the source of truth:
 

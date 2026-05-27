@@ -60,6 +60,11 @@
     "active": "Активна",
     "inactive": "Неактивна",
     "open": "Открыть",
+    "archive": "Архивировать",
+    "restore": "Восстановить",
+    "archiveSuccess": "Группа архивирована.",
+    "restoreSuccess": "Группа восстановлена.",
+    "archiveError": "Не удалось обновить статус группы.",
     "emptyDescription": "Нет описания",
     "fields": {
       "name": "Название",
@@ -194,6 +199,16 @@
     "resetSuccess": "Пароль сброшен.",
     "resetError": "Не удалось сбросить пароль.",
     "editAction": "Изменить",
+    "disableAction": "Отключить",
+    "enableAction": "Включить",
+    "disableSuccess": "Пользователь отключен.",
+    "enableSuccess": "Пользователь включен.",
+    "filterLabel": "Фильтр",
+    "filters": {
+      "all": "Все",
+      "active": "Активные",
+      "disabled": "Отключённые"
+    },
     "yes": "Да",
     "no": "Нет",
     "emptyValue": "-",

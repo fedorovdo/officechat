@@ -60,6 +60,11 @@
     "active": "Active",
     "inactive": "Inactive",
     "open": "Open",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archiveSuccess": "Group archived.",
+    "restoreSuccess": "Group restored.",
+    "archiveError": "Could not update group status.",
     "emptyDescription": "No description",
     "fields": {
       "name": "Name",
@@ -194,6 +199,16 @@
     "resetSuccess": "Password reset successfully.",
     "resetError": "Could not reset password.",
     "editAction": "Edit",
+    "disableAction": "Disable",
+    "enableAction": "Enable",
+    "disableSuccess": "User disabled.",
+    "enableSuccess": "User enabled.",
+    "filterLabel": "Filter",
+    "filters": {
+      "all": "All",
+      "active": "Active",
+      "disabled": "Disabled"
+    },
     "yes": "Yes",
     "no": "No",
     "emptyValue": "-",

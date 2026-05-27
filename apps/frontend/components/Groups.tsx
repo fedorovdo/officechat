@@ -11,6 +11,7 @@ import {
   getGroups,
   getStoredAccessToken,
   isAdminRole,
+  updateGroup,
   type CreateGroupPayload,
   type OfficeChatGroup,
   type OfficeChatUser
@@ -37,11 +38,12 @@ export function Groups({ dictionary, locale }: GroupsProps) {
   const [form, setForm] = useState<CreateGroupPayload>(initialForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [updatingGroupId, setUpdatingGroupId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  async function reloadGroups(token: string) {
-    setGroups(await getGroups(token));
+  async function reloadGroups(token: string, user = currentUser) {
+    setGroups(await getGroups(token, Boolean(user && isAdminRole(user.role))));
   }
 
   useEffect(() => {
@@ -54,8 +56,9 @@ export function Groups({ dictionary, locale }: GroupsProps) {
 
     async function loadPage() {
       try {
-        setCurrentUser(await getCurrentUser(accessToken));
-        await reloadGroups(accessToken);
+        const loadedUser = await getCurrentUser(accessToken);
+        setCurrentUser(loadedUser);
+        await reloadGroups(accessToken, loadedUser);
       } catch {
         clearStoredAccessToken();
         router.replace(`/${locale}/login`);
@@ -98,6 +101,32 @@ export function Groups({ dictionary, locale }: GroupsProps) {
 
   function updateForm<Key extends keyof CreateGroupPayload>(key: Key, value: CreateGroupPayload[Key]) {
     setForm((currentForm) => ({ ...currentForm, [key]: value }));
+  }
+
+  async function handleToggleGroupActive(group: OfficeChatGroup) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setUpdatingGroupId(group.id);
+    try {
+      await updateGroup(token, group.id, {
+        name: group.name,
+        description: group.description,
+        is_private: group.is_private,
+        is_active: !group.is_active
+      });
+      await reloadGroups(token);
+      setSuccess(group.is_active ? dictionary.groups.archiveSuccess : dictionary.groups.restoreSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.groups.archiveError);
+    } finally {
+      setUpdatingGroupId(null);
+    }
   }
 
   return (
@@ -180,7 +209,7 @@ export function Groups({ dictionary, locale }: GroupsProps) {
               <h2 className="section-title">{dictionary.groups.listTitle}</h2>
               <div className="groups-list">
                 {groups.map((group) => (
-                  <article className="group-card" key={group.id}>
+                  <article className={group.is_active ? "group-card" : "group-card muted-card"} key={group.id}>
                     <div>
                       <h3 className="compact-title">{group.name}</h3>
                       <p className="admin-current">{group.slug}</p>
@@ -190,9 +219,21 @@ export function Groups({ dictionary, locale }: GroupsProps) {
                       <span>{group.is_private ? dictionary.groups.private : dictionary.groups.public}</span>
                       <span>{group.is_active ? dictionary.groups.active : dictionary.groups.inactive}</span>
                     </div>
-                    <Link className="secondary-link" href={`/${locale}/groups/${group.id}`}>
-                      {dictionary.groups.open}
-                    </Link>
+                    <div className="table-actions">
+                      <Link className="secondary-link" href={`/${locale}/groups/${group.id}`}>
+                        {dictionary.groups.open}
+                      </Link>
+                      {currentUser && isAdminRole(currentUser.role) ? (
+                        <button
+                          className="table-action"
+                          disabled={updatingGroupId === group.id}
+                          onClick={() => void handleToggleGroupActive(group)}
+                          type="button"
+                        >
+                          {group.is_active ? dictionary.groups.archive : dictionary.groups.restore}
+                        </button>
+                      ) : null}
+                    </div>
                   </article>
                 ))}
               </div>

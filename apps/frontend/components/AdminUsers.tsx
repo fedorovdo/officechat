@@ -26,6 +26,7 @@ type AdminUsersProps = {
 };
 
 const roles: UserRole[] = ["superadmin", "admin", "group_owner", "moderator", "user", "bot"];
+type UserStatusFilter = "all" | "active" | "disabled";
 
 const initialCreateForm: CreateAdminUserPayload = {
   username: "",
@@ -51,6 +52,7 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
   const [createForm, setCreateForm] = useState<CreateAdminUserPayload>(initialCreateForm);
   const [editForm, setEditForm] = useState<UpdateAdminUserPayload>(initialEditForm);
   const [newPassword, setNewPassword] = useState("");
+  const [statusFilter, setStatusFilter] = useState<UserStatusFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -66,6 +68,20 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
         timeStyle: "short"
       }),
     [locale]
+  );
+
+  const filteredUsers = useMemo(
+    () =>
+      users.filter((user) => {
+        if (statusFilter === "active") {
+          return user.is_active;
+        }
+        if (statusFilter === "disabled") {
+          return !user.is_active;
+        }
+        return true;
+      }),
+    [statusFilter, users]
   );
 
   async function reloadUsers(token: string) {
@@ -201,6 +217,55 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
     }
   }
 
+  async function handleToggleUserActive(user: OfficeChatUser) {
+    if (
+      currentUser?.id === user.id ||
+      (currentUser?.role === "admin" && user.role === "superadmin")
+    ) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    try {
+      const updatedUser = await updateAdminUser(token, user.id, {
+        display_name: user.display_name,
+        email: user.email,
+        role: user.role,
+        is_active: !user.is_active
+      });
+      const loadedUsers = await reloadUsers(token);
+      setSelectedUser((currentSelected) => {
+        if (currentSelected?.id === updatedUser.id) {
+          setEditForm({
+            display_name: updatedUser.display_name,
+            email: updatedUser.email ?? "",
+            role: updatedUser.role,
+            is_active: updatedUser.is_active
+          });
+          return updatedUser;
+        }
+        return currentSelected && !loadedUsers.some((loadedUser) => loadedUser.id === currentSelected.id)
+          ? null
+          : currentSelected;
+      });
+      setSuccess(
+        updatedUser.is_active
+          ? dictionary.adminUsers.enableSuccess
+          : dictionary.adminUsers.disableSuccess
+      );
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.adminUsers.updateError);
+    }
+  }
+
   function updateCreateForm<Key extends keyof CreateAdminUserPayload>(
     key: Key,
     value: CreateAdminUserPayload[Key]
@@ -213,6 +278,19 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
     value: UpdateAdminUserPayload[Key]
   ) {
     setEditForm((currentForm) => ({ ...currentForm, [key]: value }));
+  }
+
+  function canToggleUserActive(user: OfficeChatUser) {
+    if (!currentUser) {
+      return false;
+    }
+    if (currentUser.id === user.id) {
+      return false;
+    }
+    if (currentUser.role === "admin" && user.role === "superadmin") {
+      return false;
+    }
+    return true;
   }
 
   return (
@@ -402,7 +480,21 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
             </div>
 
             <div className="admin-table-wrap">
-              <h2 className="section-title">{dictionary.adminUsers.usersTitle}</h2>
+              <div className="section-toolbar">
+                <h2 className="section-title">{dictionary.adminUsers.usersTitle}</h2>
+                <label className="filter-field">
+                  <span className="field-label">{dictionary.adminUsers.filterLabel}</span>
+                  <select
+                    className="table-select"
+                    onChange={(event) => setStatusFilter(event.target.value as UserStatusFilter)}
+                    value={statusFilter}
+                  >
+                    <option value="all">{dictionary.adminUsers.filters.all}</option>
+                    <option value="active">{dictionary.adminUsers.filters.active}</option>
+                    <option value="disabled">{dictionary.adminUsers.filters.disabled}</option>
+                  </select>
+                </label>
+              </div>
               <div className="table-scroll">
                 <table className="users-table">
                   <thead>
@@ -418,8 +510,8 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((user) => (
-                      <tr key={user.id}>
+                    {filteredUsers.map((user) => (
+                      <tr className={user.is_active ? undefined : "muted-row"} key={user.id}>
                         <td>{user.display_name}</td>
                         <td>{user.username}</td>
                         <td>{user.email ?? dictionary.adminUsers.emptyValue}</td>
@@ -428,9 +520,21 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
                         <td>{user.is_active ? dictionary.adminUsers.yes : dictionary.adminUsers.no}</td>
                         <td>{dateFormatter.format(new Date(user.created_at))}</td>
                         <td>
-                          <button className="table-action" onClick={() => selectUser(user)} type="button">
-                            {dictionary.adminUsers.editAction}
-                          </button>
+                          <div className="table-actions">
+                            <button className="table-action" onClick={() => selectUser(user)} type="button">
+                              {dictionary.adminUsers.editAction}
+                            </button>
+                            <button
+                              className="table-action"
+                              disabled={!canToggleUserActive(user)}
+                              onClick={() => void handleToggleUserActive(user)}
+                              type="button"
+                            >
+                              {user.is_active
+                                ? dictionary.adminUsers.disableAction
+                                : dictionary.adminUsers.enableAction}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

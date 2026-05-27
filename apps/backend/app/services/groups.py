@@ -47,14 +47,21 @@ async def get_group_membership(
     return result.scalar_one_or_none()
 
 
-async def list_visible_groups(session: AsyncSession, current_user: User) -> list[Group]:
+async def list_visible_groups(
+    session: AsyncSession,
+    current_user: User,
+    include_inactive: bool = False,
+) -> list[Group]:
     if is_global_group_admin(current_user):
-        result = await session.execute(select(Group).order_by(Group.created_at.asc()))
+        statement = select(Group).order_by(Group.created_at.asc())
+        if not include_inactive:
+            statement = statement.where(Group.is_active.is_(True))
+        result = await session.execute(statement)
     else:
         result = await session.execute(
             select(Group)
             .join(GroupMember, GroupMember.group_id == Group.id)
-            .where(GroupMember.user_id == current_user.id)
+            .where(GroupMember.user_id == current_user.id, Group.is_active.is_(True))
             .order_by(Group.created_at.asc())
         )
     return list(result.scalars().all())
@@ -63,6 +70,8 @@ async def list_visible_groups(session: AsyncSession, current_user: User) -> list
 async def ensure_group_visible(session: AsyncSession, group: Group, current_user: User) -> None:
     if is_global_group_admin(current_user):
         return
+    if not group.is_active:
+        raise PermissionError("Group is inactive")
     membership = await get_group_membership(session, group.id, current_user.id)
     if membership is None:
         raise PermissionError("Group access denied")

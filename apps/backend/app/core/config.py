@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     postgres_password: str = "officechat_dev_password"
     postgres_host: str = "postgres"
     postgres_port: int = 5432
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle_seconds: int = 1800
 
     valkey_host: str = "valkey"
     valkey_port: int = 6379

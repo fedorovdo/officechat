@@ -399,9 +399,10 @@ export function getDirectConversations(token: string) {
   return apiFetch<OfficeChatDirectConversation[]>("/api/direct/conversations", token);
 }
 
-export function createDirectConversation(token: string, username: string) {
+export function createDirectConversation(token: string, username: string, signal?: AbortSignal) {
   return apiFetch<OfficeChatDirectConversation>("/api/direct/conversations", token, {
     method: "POST",
+    signal,
     body: JSON.stringify({ username })
   });
 }
@@ -413,9 +414,10 @@ export function getDirectMessages(token: string, conversationId: string, limit =
   );
 }
 
-export function sendDirectMessage(token: string, conversationId: string, body: string) {
+export function sendDirectMessage(token: string, conversationId: string, body: string, signal?: AbortSignal) {
   return apiFetch<OfficeChatDirectMessage>(`/api/direct/conversations/${conversationId}/messages`, token, {
     method: "POST",
+    signal,
     body: JSON.stringify({ body, message_type: "text" })
   });
 }

@@ -134,6 +134,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [settings, setSettings] = useState<AppSettings>(() => ({ ...defaultSettings, language: locale }));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
@@ -572,6 +573,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }
 
   async function handleOpenDirectUser(user: OfficeChatDirectoryUser) {
+    if (pendingDirectUsername === user.username) {
+      return;
+    }
+
     const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
@@ -579,8 +584,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
 
     setError("");
+    setPendingDirectUsername(user.username);
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 15000);
     try {
-      const conversation = await createDirectConversation(token, user.username);
+      const conversation = await createDirectConversation(token, user.username, abortController.signal);
       setDirectConversations((currentConversations) => {
         const existingConversation = currentConversations.some((item) => item.id === conversation.id);
         if (!existingConversation) {
@@ -590,7 +598,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       });
       setSelected({ type: "direct", conversationId: conversation.id });
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.loadError);
+      setError(caughtError instanceof Error && caughtError.name !== "AbortError" ? caughtError.message : dictionary.appShell.loadError);
+    } finally {
+      clearTimeout(timeout);
+      setPendingDirectUsername(null);
     }
   }
 
@@ -690,6 +701,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 return (
                   <button
                     className={itemClassName}
+                    disabled={pendingDirectUsername === user.username}
                     key={user.id}
                     onClick={() => void handleOpenDirectUser(user)}
                     type="button"

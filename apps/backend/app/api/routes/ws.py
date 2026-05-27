@@ -2,10 +2,10 @@ from typing import Annotated
 from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.db.session import AsyncSessionLocal
 from app.models.user import User
 from app.services.direct import ensure_direct_conversation_access, get_direct_conversation
 from app.services.groups import get_group
@@ -33,30 +33,53 @@ async def get_websocket_user(session: AsyncSession, token: str) -> User | None:
     return user
 
 
+async def authorize_group_websocket(group_id: UUID, token: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        current_user = await get_websocket_user(session, token)
+        if current_user is None:
+            return False
+
+        group = await get_group(session, group_id)
+        if group is None:
+            return False
+
+        try:
+            await ensure_group_message_access(session, group, current_user)
+        except PermissionError:
+            return False
+
+        return True
+
+
+async def authorize_direct_websocket(conversation_id: UUID, token: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        current_user = await get_websocket_user(session, token)
+        if current_user is None:
+            return False
+
+        conversation = await get_direct_conversation(session, conversation_id)
+        if conversation is None:
+            return False
+
+        try:
+            ensure_direct_conversation_access(conversation, current_user)
+        except PermissionError:
+            return False
+
+        return True
+
+
 @router.websocket("/groups/{group_id}")
 async def group_messages_websocket(
     websocket: WebSocket,
     group_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_db)],
     token: Annotated[str | None, Query()] = None,
 ) -> None:
     if token is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    current_user = await get_websocket_user(session, token)
-    if current_user is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    group = await get_group(session, group_id)
-    if group is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    try:
-        await ensure_group_message_access(session, group, current_user)
-    except PermissionError:
+    if not await authorize_group_websocket(group_id, token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -72,26 +95,13 @@ async def group_messages_websocket(
 async def direct_messages_websocket(
     websocket: WebSocket,
     conversation_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_db)],
     token: Annotated[str | None, Query()] = None,
 ) -> None:
     if token is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    current_user = await get_websocket_user(session, token)
-    if current_user is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    conversation = await get_direct_conversation(session, conversation_id)
-    if conversation is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    try:
-        ensure_direct_conversation_access(conversation, current_user)
-    except PermissionError:
+    if not await authorize_direct_websocket(conversation_id, token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

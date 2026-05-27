@@ -203,6 +203,10 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSending) {
+      return;
+    }
+
     const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
@@ -212,15 +216,22 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     setError("");
     setSuccess("");
     setIsSending(true);
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 20000);
     try {
-      await sendDirectMessage(token, conversation.id, messageBody);
+      await sendDirectMessage(token, conversation.id, messageBody, abortController.signal);
       setMessageBody("");
       shouldScrollToBottomRef.current = true;
       setMessages(await getDirectMessages(token, conversation.id));
       setSuccess(dictionary.directMessages.sendSuccess);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : dictionary.directMessages.sendError);
+      setError(
+        caughtError instanceof Error && caughtError.name !== "AbortError"
+          ? caughtError.message
+          : dictionary.directMessages.sendError
+      );
     } finally {
+      clearTimeout(timeout);
       setIsSending(false);
     }
   }

@@ -2,7 +2,7 @@
 
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
-Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, REST group messages, basic WebSocket real-time updates, and local file attachments for group messages. Direct messages, LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
+Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, REST group messages, basic WebSocket real-time updates, local file attachments for group messages, and basic direct messages between users. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
 
 ## Tech Stack
 
@@ -51,13 +51,25 @@ Admin users page:
 - Only `superadmin` can edit or promote `superadmin` users.
 - Cleanup actions are soft by default: users are disabled with `is_active=false`, not physically deleted. This keeps message authorship and future audit history intact.
 
-User-facing app shell is available at http://localhost:3100/ru/app. It shows a top bar, group chat sidebar, active users sidebar section for future direct messages, local UI settings, and the reusable group chat panel with messages, attachments, WebSocket updates, and Ctrl+Enter sending.
+User-facing app shell is available at http://localhost:3100/ru/app. It shows a top bar, group chat sidebar, active users sidebar section for direct messages, local UI settings, and reusable chat panels with messages, attachments for groups, WebSocket updates, and Ctrl+Enter sending.
 
 Current development uses one frontend on port `3100`. User routes live under `/ru/app`, while admin routes remain under `/ru/admin/*`. Future production deployment can split user/admin surfaces with nginx hostnames or separate frontend entrypoints.
 
 User app settings are stored in browser `localStorage` for now. Future versions should persist language, sidebar side, font size, accent color, and profile preferences in backend user preferences.
 
-The user sidebar uses `GET /api/users`, an authenticated endpoint that returns active users with public directory fields only. Direct/private messages are still a planned feature and are not implemented yet.
+The user sidebar uses `GET /api/users`, an authenticated endpoint that returns active users with public directory fields only.
+
+Direct/private messages are available in the user app shell:
+
+- `GET /api/direct/conversations`
+- `POST /api/direct/conversations`
+- `GET /api/direct/conversations/{conversation_id}/messages`
+- `POST /api/direct/conversations/{conversation_id}/messages`
+- `PATCH /api/direct/conversations/{conversation_id}/messages/{message_id}`
+- `DELETE /api/direct/conversations/{conversation_id}/messages/{message_id}`
+- `WS /api/ws/direct/{conversation_id}?token=...`
+
+Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct-message file attachments, read receipts, and typing indicators are not implemented yet.
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
@@ -80,7 +92,7 @@ WebSocket real-time updates are available for group messages:
 - Development clients pass the JWT token in the query string.
 - Sending still happens through REST; WebSocket only receives `message.created`, `message.updated`, and `message.deleted` events.
 - Current WebSocket manager is single-instance only. Multi-instance production should use Valkey pub/sub or another broker later.
-- Typing indicators, read receipts, direct messages, and reactions are not implemented yet.
+- Typing indicators, read receipts, and reactions are not implemented yet.
 
 File attachments are available for group messages:
 

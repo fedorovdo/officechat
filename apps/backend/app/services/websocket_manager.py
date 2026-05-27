@@ -37,3 +37,39 @@ class GroupWebSocketManager:
 
 
 group_websocket_manager = GroupWebSocketManager()
+
+
+class DirectWebSocketManager:
+    def __init__(self) -> None:
+        self._connections: dict[UUID, set[WebSocket]] = defaultdict(set)
+
+    async def connect(self, conversation_id: UUID, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._connections[conversation_id].add(websocket)
+        logger.info(
+            "WebSocket connected to direct conversation %s; active=%s",
+            conversation_id,
+            len(self._connections[conversation_id]),
+        )
+
+    def disconnect(self, conversation_id: UUID, websocket: WebSocket) -> None:
+        connections = self._connections.get(conversation_id)
+        if connections is None:
+            return
+
+        connections.discard(websocket)
+        if not connections:
+            self._connections.pop(conversation_id, None)
+        logger.info("WebSocket disconnected from direct conversation %s; active=%s", conversation_id, len(connections))
+
+    async def broadcast_to_conversation(self, conversation_id: UUID, event: dict[str, object]) -> None:
+        # TODO: Use Valkey pub/sub or another broker before running multiple backend instances.
+        connections = list(self._connections.get(conversation_id, set()))
+        for websocket in connections:
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                self.disconnect(conversation_id, websocket)
+
+
+direct_websocket_manager = DirectWebSocketManager()

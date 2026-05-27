@@ -18,7 +18,7 @@
 - Миграции базы данных.
 - User app shell: отдельный пользовательский интерфейс `/ru/app` рядом с admin routes `/ru/admin/*`.
 - Локальные настройки интерфейса: язык, сторона sidebar, размер шрифта, accent color.
-- Заготовка UI для будущих direct messages без backend direct messages.
+- Базовые direct messages между пользователями: REST API, WebSocket updates, UI в `/ru/app`.
 
 ## Этап 2: Realtime
 
@@ -27,6 +27,8 @@
 - Доставка и статусы сообщений.
 - Базовые уведомления в интерфейсе.
 - Стандартная поддержка emoji в сообщениях чата.
+- Вложения в direct messages.
+- Read receipts и typing indicators для групп и direct messages.
 
 ## Этап 3: Файлы и администрирование
 

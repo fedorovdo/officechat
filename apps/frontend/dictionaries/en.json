@@ -143,6 +143,18 @@
     "deletedMessage": "Message deleted",
     "newMessages": "New messages"
   },
+  "directMessages": {
+    "ariaLabel": "Direct messages",
+    "title": "Direct messages",
+    "loadError": "Could not load direct messages.",
+    "sendSuccess": "Message sent.",
+    "sendError": "Could not send direct message.",
+    "editSuccess": "Message updated.",
+    "editError": "Could not update direct message.",
+    "deleteSuccess": "Message deleted.",
+    "deleteError": "Could not delete direct message.",
+    "attachmentsLater": "Direct message attachments will be added later"
+  },
   "appShell": {
     "title": "Chat",
     "loading": "Loading OfficeChat...",

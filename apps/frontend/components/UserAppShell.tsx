@@ -6,18 +6,22 @@ import { useRouter } from "next/navigation";
 
 import {
   clearStoredAccessToken,
+  createDirectConversation,
   getCurrentUser,
+  getDirectConversations,
   getGroups,
   getGroupMembers,
   getStoredAccessToken,
   getUsers,
   isAdminRole,
   type OfficeChatDirectoryUser,
+  type OfficeChatDirectConversation,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { DirectChatPanel } from "./DirectChatPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
 
 type UserAppShellProps = {
@@ -30,7 +34,7 @@ type AppFontSize = "small" | "normal" | "large";
 type AccentColor = "default" | "blue" | "green" | "purple";
 type AppSelection =
   | { type: "group"; groupId: string }
-  | { type: "user"; userId: string }
+  | { type: "direct"; conversationId: string }
   | { type: "empty" };
 
 type AppSettings = {
@@ -75,6 +79,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [groups, setGroups] = useState<OfficeChatGroup[]>([]);
   const [users, setUsers] = useState<OfficeChatDirectoryUser[]>([]);
+  const [directConversations, setDirectConversations] = useState<OfficeChatDirectConversation[]>([]);
   const [selected, setSelected] = useState<AppSelection>({ type: "empty" });
   const [selectedMembers, setSelectedMembers] = useState<OfficeChatGroupMember[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => ({ ...defaultSettings, language: locale }));
@@ -83,7 +88,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [error, setError] = useState("");
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
-  const selectedUser = selected.type === "user" ? users.find((user) => user.id === selected.userId) : null;
+  const selectedDirectConversation =
+    selected.type === "direct"
+      ? directConversations.find((conversation) => conversation.id === selected.conversationId)
+      : null;
+  const directMessageUsers = currentUser
+    ? users.filter((user) => user.id !== currentUser.id && user.role !== "bot" && user.is_active)
+    : [];
   const currentMembership = currentUser
     ? selectedMembers.find((member) => member.user_id === currentUser.id)
     : undefined;
@@ -123,14 +134,16 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
     async function loadApp() {
       try {
-        const [loadedUser, loadedGroups, loadedUsers] = await Promise.all([
+        const [loadedUser, loadedGroups, loadedUsers, loadedDirectConversations] = await Promise.all([
           getCurrentUser(accessToken),
           getGroups(accessToken),
-          getUsers(accessToken)
+          getUsers(accessToken),
+          getDirectConversations(accessToken)
         ]);
         setCurrentUser(loadedUser);
         setGroups(loadedGroups);
         setUsers(loadedUsers);
+        setDirectConversations(loadedDirectConversations);
         setSelected(loadedGroups[0] ? { type: "group", groupId: loadedGroups[0].id } : { type: "empty" });
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.loadError);
@@ -183,6 +196,29 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
     clearStoredAccessToken();
     router.replace(`/${locale}/login`);
+  }
+
+  async function handleOpenDirectUser(user: OfficeChatDirectoryUser) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setError("");
+    try {
+      const conversation = await createDirectConversation(token, user.username);
+      setDirectConversations((currentConversations) => {
+        const existingConversation = currentConversations.some((item) => item.id === conversation.id);
+        if (!existingConversation) {
+          return [conversation, ...currentConversations];
+        }
+        return currentConversations.map((item) => (item.id === conversation.id ? conversation : item));
+      });
+      setSelected({ type: "direct", conversationId: conversation.id });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.loadError);
+    }
   }
 
   return (
@@ -242,21 +278,23 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           <section>
             <h2 className="compact-title">{dictionary.appShell.users}</h2>
             <div className="user-app-nav-list">
-              {users.map((user) => (
-                <button
-                  className={
-                    selected.type === "user" && selected.userId === user.id
-                      ? "user-app-nav-item user-app-nav-item-active"
-                      : "user-app-nav-item"
-                  }
-                  key={user.id}
-                  onClick={() => setSelected({ type: "user", userId: user.id })}
-                  type="button"
-                >
-                  <strong>{user.display_name}</strong>
-                  <span>@{user.username} · {user.role}</span>
-                </button>
-              ))}
+              {directMessageUsers.map((user) => {
+                const isSelected =
+                  selected.type === "direct" && selectedDirectConversation?.other_user.id === user.id;
+                return (
+                  <button
+                    className={isSelected ? "user-app-nav-item user-app-nav-item-active" : "user-app-nav-item"}
+                    key={user.id}
+                    onClick={() => void handleOpenDirectUser(user)}
+                    type="button"
+                  >
+                    <strong>{user.display_name}</strong>
+                    <span>
+                      @{user.username} · {user.role}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </section>
         </aside>
@@ -293,11 +331,21 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             </>
           ) : null}
 
-          {selectedUser ? (
-            <div className="user-app-placeholder">
-              <h2>{selectedUser.display_name}</h2>
-              <p>{dictionary.appShell.directMessagesLater}</p>
-            </div>
+          {selectedDirectConversation && currentUser ? (
+            <>
+              <div className="user-app-chat-heading">
+                <div>
+                  <h2 className="section-title">{selectedDirectConversation.other_user.display_name}</h2>
+                  <p className="admin-current">@{selectedDirectConversation.other_user.username}</p>
+                </div>
+              </div>
+              <DirectChatPanel
+                conversation={selectedDirectConversation}
+                currentUser={currentUser}
+                dictionary={dictionary}
+                locale={locale}
+              />
+            </>
           ) : null}
         </section>
       </div>

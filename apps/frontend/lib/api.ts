@@ -85,6 +85,29 @@ export type OfficeChatMessageAttachment = {
   download_url: string;
 };
 
+export type OfficeChatDirectMessage = {
+  id: string;
+  conversation_id: string;
+  sender_user_id: string;
+  body: string;
+  message_type: string;
+  is_deleted: boolean;
+  edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+  sender: OfficeChatDirectoryUser;
+};
+
+export type OfficeChatDirectConversation = {
+  id: string;
+  user_one_id: string;
+  user_two_id: string;
+  created_at: string;
+  updated_at: string;
+  other_user: OfficeChatDirectoryUser;
+  last_message: OfficeChatDirectMessage | null;
+};
+
 export type OfficeChatBot = {
   id: string;
   user_id: string;
@@ -123,6 +146,13 @@ export type GroupMessageEvent = {
   type: "message.created" | "message.updated" | "message.deleted";
   group_id: string;
   message: OfficeChatMessage;
+  message_id?: string;
+};
+
+export type DirectMessageEvent = {
+  type: "direct.message.created" | "direct.message.updated" | "direct.message.deleted";
+  conversation_id: string;
+  message: OfficeChatDirectMessage;
   message_id?: string;
 };
 
@@ -360,6 +390,61 @@ export function getGroupWebSocketUrl(token: string, groupId: string) {
   const backendUrl = new URL(apiBaseUrl);
   backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
   backendUrl.pathname = `/api/ws/groups/${groupId}`;
+  // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
+  backendUrl.search = new URLSearchParams({ token }).toString();
+  return backendUrl.toString();
+}
+
+export function getDirectConversations(token: string) {
+  return apiFetch<OfficeChatDirectConversation[]>("/api/direct/conversations", token);
+}
+
+export function createDirectConversation(token: string, username: string) {
+  return apiFetch<OfficeChatDirectConversation>("/api/direct/conversations", token, {
+    method: "POST",
+    body: JSON.stringify({ username })
+  });
+}
+
+export function getDirectMessages(token: string, conversationId: string, limit = 50) {
+  return apiFetch<OfficeChatDirectMessage[]>(
+    `/api/direct/conversations/${conversationId}/messages?limit=${limit}`,
+    token
+  );
+}
+
+export function sendDirectMessage(token: string, conversationId: string, body: string) {
+  return apiFetch<OfficeChatDirectMessage>(`/api/direct/conversations/${conversationId}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ body, message_type: "text" })
+  });
+}
+
+export function editDirectMessage(token: string, conversationId: string, messageId: string, body: string) {
+  return apiFetch<OfficeChatDirectMessage>(
+    `/api/direct/conversations/${conversationId}/messages/${messageId}`,
+    token,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ body })
+    }
+  );
+}
+
+export function deleteDirectMessage(token: string, conversationId: string, messageId: string) {
+  return apiFetch<OfficeChatDirectMessage>(
+    `/api/direct/conversations/${conversationId}/messages/${messageId}`,
+    token,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
+export function getDirectWebSocketUrl(token: string, conversationId: string) {
+  const backendUrl = new URL(apiBaseUrl);
+  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
+  backendUrl.pathname = `/api/ws/direct/${conversationId}`;
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
   backendUrl.search = new URLSearchParams({ token }).toString();
   return backendUrl.toString();

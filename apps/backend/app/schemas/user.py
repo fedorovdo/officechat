@@ -23,6 +23,16 @@ class UserPublic(BaseModel):
     last_login_at: datetime | None
 
 
+class UserDirectoryEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    username: str
+    display_name: str
+    role: UserRole
+    is_active: bool
+
+
 class AdminUserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     display_name: str = Field(min_length=1, max_length=160)

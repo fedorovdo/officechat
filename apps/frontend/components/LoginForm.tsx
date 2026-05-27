@@ -18,6 +18,10 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  function handleLanguageChange(nextLocale: Locale) {
+    router.push(`/${nextLocale}/login`);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -56,6 +60,18 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
         </Link>
         <h1 className="auth-title">{dictionary.login.title}</h1>
         <p className="auth-description">{dictionary.login.description}</p>
+
+        <label className="field auth-language-field">
+          <span className="field-label">{dictionary.login.language}</span>
+          <select
+            className="field-input"
+            onChange={(event) => handleLanguageChange(event.target.value as Locale)}
+            value={locale}
+          >
+            <option value="ru">RU</option>
+            <option value="en">EN</option>
+          </select>
+        </label>
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <label className="field">

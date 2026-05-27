@@ -12,6 +12,7 @@ docker compose up -d --build
 ## Локальные адреса
 
 - Frontend: http://localhost:3100
+- User app: http://localhost:3100/ru/app
 - Backend: http://localhost:8100
 - Backend root: http://localhost:8100/
 - Backend docs: http://localhost:8100/docs
@@ -101,6 +102,22 @@ curl.exe -X POST http://localhost:8100/api/bots/incoming/PASTE_TOKEN_HERE -H "Co
 ```
 
 Outgoing webhooks, AI provider, вложения от бота, direct messages и отдельные scoped permissions для ботов пока не реализованы.
+
+## User app shell
+
+Основной пользовательский интерфейс чата доступен по адресу:
+
+```text
+http://localhost:3100/ru/app
+```
+
+Dashboard теперь служит входной точкой: основная кнопка открывает OfficeChat app shell, а admin-ссылки показываются только `superadmin` и `admin`.
+
+Текущая локальная разработка использует один frontend port `3100`. Пользовательский app находится на `/ru/app`, административные страницы остаются на `/ru/admin/*`. В production позже можно разделить user/admin интерфейсы через nginx hostnames или отдельные frontend entrypoints.
+
+Настройки app shell пока хранятся в `localStorage`: язык, сторона боковой панели, размер шрифта и акцентный цвет. Позже их нужно перенести в backend `user_preferences`.
+
+Раздел Users в боковой панели является навигационной заготовкой для будущих direct messages. Личные сообщения в этой версии не реализованы.
 
 ## Проверка сервисов
 

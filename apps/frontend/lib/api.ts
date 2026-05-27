@@ -15,6 +15,14 @@ export type OfficeChatUser = {
   last_login_at: string | null;
 };
 
+export type OfficeChatDirectoryUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  is_active: boolean;
+};
+
 export type CreateAdminUserPayload = {
   username: string;
   display_name: string;
@@ -186,6 +194,10 @@ export function getCurrentUser(token: string) {
 
 export function getAdminUsers(token: string) {
   return apiFetch<OfficeChatUser[]>("/api/admin/users", token);
+}
+
+export function getUsers(token: string) {
+  return apiFetch<OfficeChatDirectoryUser[]>("/api/users", token);
 }
 
 export function createAdminUser(token: string, payload: CreateAdminUserPayload) {

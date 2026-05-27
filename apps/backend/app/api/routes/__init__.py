@@ -8,6 +8,7 @@ from app.api.routes.cache import router as cache_router
 from app.api.routes.db import router as db_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.system import router as system_router
+from app.api.routes.users import router as users_router
 from app.api.routes.ws import router as ws_router
 
 api_router = APIRouter()
@@ -15,6 +16,7 @@ api_router.include_router(system_router, prefix="/system", tags=["system"])
 api_router.include_router(db_router, tags=["infrastructure"])
 api_router.include_router(cache_router, tags=["infrastructure"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(bots_router, prefix="/bots", tags=["bots"])
 api_router.include_router(admin_bots_router, prefix="/admin/bots", tags=["admin"])
 api_router.include_router(admin_users_router, prefix="/admin/users", tags=["admin"])

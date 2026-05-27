@@ -225,6 +225,10 @@ a {
   line-height: 1.5;
 }
 
+.auth-language-field {
+  margin-bottom: 18px;
+}
+
 .auth-form {
   display: grid;
   gap: 16px;
@@ -327,6 +331,10 @@ a {
 .dashboard-admin-link {
   justify-self: start;
   margin-top: 8px;
+}
+
+.dashboard-open-app {
+  min-width: 220px;
 }
 
 .admin-page {
@@ -720,6 +728,195 @@ a {
   cursor: wait;
 }
 
+.user-app-shell {
+  min-height: 100vh;
+  --app-accent: var(--accent);
+  background: #f4f6f9;
+  color: var(--foreground);
+}
+
+.user-app-accent-blue {
+  --app-accent: #1967d2;
+}
+
+.user-app-accent-green {
+  --app-accent: #1f8a5b;
+}
+
+.user-app-accent-purple {
+  --app-accent: #6d4aff;
+}
+
+.user-app-font-small {
+  font-size: 14px;
+}
+
+.user-app-font-normal {
+  font-size: 16px;
+}
+
+.user-app-font-large {
+  font-size: 18px;
+}
+
+.user-app-topbar {
+  min-height: 72px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.user-app-title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.user-app-topbar .eyebrow {
+  margin-bottom: 4px;
+  color: var(--app-accent);
+}
+
+.user-app-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.user-app-current-user {
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+  font-size: 14px;
+}
+
+.user-app-current-user span {
+  color: var(--muted);
+}
+
+.user-app-layout {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+}
+
+.user-app-shell-sidebar-right .user-app-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+}
+
+.user-app-shell-sidebar-right .user-app-sidebar {
+  order: 2;
+  border-right: 0;
+  border-left: 1px solid var(--border);
+}
+
+.user-app-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  padding: 18px;
+  border-right: 1px solid var(--border);
+  background: #ffffff;
+  overflow-wrap: anywhere;
+}
+
+.user-app-nav-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.user-app-nav-item {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.user-app-nav-item span {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.user-app-nav-item:hover,
+.user-app-nav-item-active {
+  border-color: color-mix(in srgb, var(--app-accent) 32%, var(--border));
+  background: #f8fbff;
+}
+
+.user-app-main {
+  min-width: 0;
+  padding: 22px;
+}
+
+.user-app-main .messages-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.user-app-main .message-compose {
+  max-width: 780px;
+}
+
+.user-app-chat-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-app-placeholder {
+  max-width: 640px;
+  padding: 28px 0;
+}
+
+.user-app-placeholder h2 {
+  margin: 0 0 8px;
+}
+
+.user-app-placeholder p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(25 32 42 / 24%);
+  z-index: 20;
+}
+
+.settings-panel {
+  width: min(100%, 460px);
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
 @media (max-width: 760px) {
   .page {
     padding: 18px;
@@ -750,5 +947,35 @@ a {
 
   .admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .user-app-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .user-app-topbar-actions {
+    justify-content: flex-start;
+  }
+
+  .user-app-layout,
+  .user-app-shell-sidebar-right .user-app-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .user-app-sidebar,
+  .user-app-shell-sidebar-right .user-app-sidebar {
+    order: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .user-app-main {
+    padding: 18px;
+  }
+
+  .user-app-chat-heading {
+    flex-direction: column;
   }
 }

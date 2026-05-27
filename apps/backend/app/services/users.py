@@ -45,6 +45,13 @@ async def list_users(session: AsyncSession) -> list[User]:
     return list(result.scalars().all())
 
 
+async def list_active_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(
+        select(User).where(User.is_active.is_(True)).order_by(User.display_name.asc(), User.username.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def create_local_user(session: AsyncSession, payload: AdminUserCreate) -> User:
     user = User(
         username=normalize_username(payload.username),

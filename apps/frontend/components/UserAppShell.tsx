@@ -63,6 +63,42 @@ type SidebarActivityState = {
 };
 
 type BrowserNotificationPermission = NotificationPermission | "unsupported";
+type BrowserNotificationResult = "idle" | "sent" | "skipped" | "failed";
+type BrowserNotificationSkipReason =
+  | "none"
+  | "senderIsCurrentUser"
+  | "notificationsDisabled"
+  | "permissionNotGranted"
+  | "tabActive"
+  | "duplicate"
+  | "unsupported"
+  | "constructorError";
+
+type BrowserNotificationDebug = {
+  eventType: string;
+  messageId: string;
+  senderUserId: string;
+  currentUserId: string;
+  selectedChatId: string;
+  permission: BrowserNotificationPermission;
+  enabledValue: string;
+  visibilityState: DocumentVisibilityState | "unknown";
+  windowFocused: boolean;
+  attempted: boolean;
+  result: BrowserNotificationResult;
+  skipReason: BrowserNotificationSkipReason;
+  error: string;
+  timestamp: string;
+};
+
+type BrowserNotificationAttempt = {
+  eventType: string;
+  messageId: string;
+  senderUserId: string;
+  body: string;
+  selectedChatId: string;
+  onClick: () => void;
+};
 
 const settingsKey = "officechat.user_settings";
 const sidebarActivityKeyPrefix = "officechat.sidebar_activity";
@@ -139,6 +175,46 @@ function readNotificationPreference() {
   return localStorage.getItem(notificationPreferenceKey) === "true";
 }
 
+function readNotificationPreferenceRaw() {
+  if (typeof window === "undefined") {
+    return "false";
+  }
+  return localStorage.getItem(notificationPreferenceKey) ?? "false";
+}
+
+function getCurrentVisibilityState(): DocumentVisibilityState | "unknown" {
+  if (typeof document === "undefined") {
+    return "unknown";
+  }
+  return document.visibilityState;
+}
+
+function getCurrentWindowFocusState() {
+  if (typeof document === "undefined") {
+    return false;
+  }
+  return document.hasFocus();
+}
+
+function createEmptyNotificationDebug(): BrowserNotificationDebug {
+  return {
+    eventType: "-",
+    messageId: "-",
+    senderUserId: "-",
+    currentUserId: "-",
+    selectedChatId: "-",
+    permission: "default",
+    enabledValue: "false",
+    visibilityState: "unknown",
+    windowFocused: false,
+    attempted: false,
+    result: "idle",
+    skipReason: "none",
+    error: "",
+    timestamp: "-"
+  };
+}
+
 function truncateNotificationPreview(preview: string) {
   return preview.length > 120 ? `${preview.slice(0, 117)}...` : preview;
 }
@@ -148,6 +224,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const notifiedMessageIdsRef = useRef<string[]>([]);
   const browserNotificationsEnabledRef = useRef(false);
   const notificationPermissionRef = useRef<BrowserNotificationPermission>("default");
+  const windowFocusedRef = useRef(false);
+  const visibilityStateRef = useRef<DocumentVisibilityState | "unknown">("unknown");
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [groups, setGroups] = useState<OfficeChatGroup[]>([]);
   const [users, setUsers] = useState<OfficeChatDirectoryUser[]>([]);
@@ -159,6 +237,14 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] =
     useState<BrowserNotificationPermission>("default");
+  const [notificationPreferenceRaw, setNotificationPreferenceRaw] = useState("false");
+  const [documentVisibilityState, setDocumentVisibilityState] =
+    useState<DocumentVisibilityState | "unknown">("unknown");
+  const [isWindowFocused, setIsWindowFocused] = useState(false);
+  const [testNotificationStatus, setTestNotificationStatus] = useState("");
+  const [notificationDebug, setNotificationDebug] = useState<BrowserNotificationDebug>(() =>
+    createEmptyNotificationDebug()
+  );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
@@ -259,40 +345,99 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     return message.body.trim() || dictionary.sidebarActivity.noRecentMessages;
   }
 
-  function shouldShowBrowserNotification(messageId: string, senderUserId: string) {
-    if (!currentUser || senderUserId === currentUser.id) {
-      return false;
+  function getSelectedChatDebugId() {
+    if (selected.type === "group") {
+      return `group:${selected.groupId}`;
     }
-    if (!browserNotificationsEnabledRef.current || notificationPermissionRef.current !== "granted") {
-      return false;
+    if (selected.type === "direct") {
+      return `direct:${selected.conversationId}`;
     }
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      return false;
-    }
-    if (document.visibilityState === "visible" && document.hasFocus()) {
-      return false;
-    }
-    if (notifiedMessageIdsRef.current.includes(messageId)) {
-      return false;
-    }
-
-    notifiedMessageIdsRef.current = [messageId, ...notifiedMessageIdsRef.current].slice(0, 80);
-    return true;
+    return "empty";
   }
 
-  function showBrowserNotification(messageId: string, senderUserId: string, body: string, onClick: () => void) {
-    if (!shouldShowBrowserNotification(messageId, senderUserId)) {
+  function recordNotificationDebug(nextDebug: BrowserNotificationDebug) {
+    setNotificationDebug(nextDebug);
+  }
+
+  function attemptBrowserNotification({
+    eventType,
+    messageId,
+    senderUserId,
+    body,
+    selectedChatId,
+    onClick
+  }: BrowserNotificationAttempt) {
+    const permission = getBrowserNotificationPermission();
+    const enabledValue = readNotificationPreferenceRaw();
+    const visibilityState = getCurrentVisibilityState();
+    const windowFocused = getCurrentWindowFocusState();
+    const baseDebug: BrowserNotificationDebug = {
+      eventType,
+      messageId,
+      senderUserId,
+      currentUserId: currentUser?.id ?? "-",
+      selectedChatId,
+      permission,
+      enabledValue,
+      visibilityState,
+      windowFocused,
+      attempted: false,
+      result: "skipped",
+      skipReason: "none",
+      error: "",
+      timestamp: new Date().toISOString()
+    };
+
+    if (!currentUser || senderUserId === currentUser.id) {
+      recordNotificationDebug({ ...baseDebug, skipReason: "senderIsCurrentUser" });
+      return;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      recordNotificationDebug({ ...baseDebug, skipReason: "unsupported" });
+      return;
+    }
+    if (!browserNotificationsEnabledRef.current || enabledValue !== "true") {
+      recordNotificationDebug({ ...baseDebug, skipReason: "notificationsDisabled" });
+      return;
+    }
+    if (permission !== "granted") {
+      recordNotificationDebug({ ...baseDebug, skipReason: "permissionNotGranted" });
+      return;
+    }
+    if (visibilityState === "visible" && windowFocused) {
+      recordNotificationDebug({ ...baseDebug, skipReason: "tabActive" });
+      return;
+    }
+    if (notifiedMessageIdsRef.current.includes(messageId)) {
+      recordNotificationDebug({ ...baseDebug, skipReason: "duplicate" });
       return;
     }
 
-    const notification = new Notification("OfficeChat", {
-      body: truncateNotificationPreview(body)
-    });
-    notification.onclick = () => {
-      window.focus();
-      onClick();
-      notification.close();
-    };
+    try {
+      const notification = new Notification("OfficeChat", {
+        body: truncateNotificationPreview(body)
+      });
+      notifiedMessageIdsRef.current = [messageId, ...notifiedMessageIdsRef.current].slice(0, 80);
+      notification.onclick = () => {
+        window.focus();
+        onClick();
+        notification.close();
+      };
+      recordNotificationDebug({
+        ...baseDebug,
+        attempted: true,
+        result: "sent",
+        skipReason: "none"
+      });
+    } catch (caughtError) {
+      recordNotificationDebug({
+        ...baseDebug,
+        attempted: true,
+        result: "failed",
+        skipReason: "constructorError",
+        error: caughtError instanceof Error ? caughtError.message : String(caughtError)
+      });
+    }
   }
 
   const updateGroupActivity = useCallback(
@@ -376,13 +521,42 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   useEffect(() => {
     const loadedSettings = readSettings(locale);
     const loadedNotificationPreference = readNotificationPreference();
+    const loadedNotificationPreferenceRaw = readNotificationPreferenceRaw();
     const loadedNotificationPermission = getBrowserNotificationPermission();
+    const loadedVisibilityState = getCurrentVisibilityState();
+    const loadedWindowFocusState = getCurrentWindowFocusState();
     setSettings({ ...loadedSettings, language: locale });
     browserNotificationsEnabledRef.current = loadedNotificationPreference;
     notificationPermissionRef.current = loadedNotificationPermission;
+    visibilityStateRef.current = loadedVisibilityState;
+    windowFocusedRef.current = loadedWindowFocusState;
     setBrowserNotificationsEnabled(loadedNotificationPreference);
+    setNotificationPreferenceRaw(loadedNotificationPreferenceRaw);
     setNotificationPermission(loadedNotificationPermission);
+    setDocumentVisibilityState(loadedVisibilityState);
+    setIsWindowFocused(loadedWindowFocusState);
   }, [locale]);
+
+  useEffect(() => {
+    function updateBrowserAttentionState() {
+      const nextVisibilityState = getCurrentVisibilityState();
+      const nextWindowFocusState = getCurrentWindowFocusState();
+      visibilityStateRef.current = nextVisibilityState;
+      windowFocusedRef.current = nextWindowFocusState;
+      setDocumentVisibilityState(nextVisibilityState);
+      setIsWindowFocused(nextWindowFocusState);
+    }
+
+    updateBrowserAttentionState();
+    window.addEventListener("focus", updateBrowserAttentionState);
+    window.addEventListener("blur", updateBrowserAttentionState);
+    document.addEventListener("visibilitychange", updateBrowserAttentionState);
+    return () => {
+      window.removeEventListener("focus", updateBrowserAttentionState);
+      window.removeEventListener("blur", updateBrowserAttentionState);
+      document.removeEventListener("visibilitychange", updateBrowserAttentionState);
+    };
+  }, []);
 
   useEffect(() => {
     if (!currentUser) {
@@ -514,15 +688,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
           if (payload.type === "message.created") {
             const preview = getGroupMessagePreview(payload.message);
-            showBrowserNotification(
-              payload.message.id,
-              payload.message.sender_user_id,
-              `${group.name} - ${payload.message.sender.display_name}: ${preview}`,
-              () => {
+            attemptBrowserNotification({
+              eventType: payload.type,
+              messageId: payload.message.id,
+              senderUserId: payload.message.sender_user_id,
+              body: `${group.name} - ${payload.message.sender.display_name}: ${preview}`,
+              selectedChatId: getSelectedChatDebugId(),
+              onClick: () => {
                 setSelected({ type: "group", groupId: payload.group_id });
                 markGroupRead(payload.group_id);
               }
-            );
+            });
           }
         } catch {
           return;
@@ -543,6 +719,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       return;
     }
 
+    // TODO: Add a personal WS /api/ws/me channel so direct notifications do not depend on known conversations.
     const token = getStoredAccessToken();
     if (!token) {
       return;
@@ -562,15 +739,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           updateDirectUserActivity(conversation.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
           if (payload.type === "direct.message.created") {
             const preview = getDirectMessagePreview(payload.message);
-            showBrowserNotification(
-              payload.message.id,
-              payload.message.sender_user_id,
-              `${payload.message.sender.display_name}: ${preview}`,
-              () => {
+            attemptBrowserNotification({
+              eventType: payload.type,
+              messageId: payload.message.id,
+              senderUserId: payload.message.sender_user_id,
+              body: `${payload.message.sender.display_name}: ${preview}`,
+              selectedChatId: getSelectedChatDebugId(),
+              onClick: () => {
                 setSelected({ type: "direct", conversationId: payload.conversation_id });
                 markDirectUserRead(conversation.other_user.id);
               }
-            );
+            });
           }
         } catch {
           return;
@@ -620,15 +799,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               lastMessage.sender_user_id !== currentUserId;
             if (shouldMarkUnread) {
               const preview = getDirectMessagePreview(lastMessage);
-              showBrowserNotification(
-                lastMessage.id,
-                lastMessage.sender_user_id,
-                `${lastMessage.sender.display_name}: ${preview}`,
-                () => {
+              attemptBrowserNotification({
+                eventType: "direct.message.created.poll",
+                messageId: lastMessage.id,
+                senderUserId: lastMessage.sender_user_id,
+                body: `${lastMessage.sender.display_name}: ${preview}`,
+                selectedChatId: getSelectedChatDebugId(),
+                onClick: () => {
                   setSelected({ type: "direct", conversationId: conversation.id });
                   markDirectUserRead(conversation.other_user.id);
                 }
-              );
+              });
             }
             nextDirectUsers[conversation.other_user.id] = {
               ...existingActivity,
@@ -667,6 +848,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     setBrowserNotificationsEnabled(isEnabled);
     // TODO: Move notification preferences to backend user_preferences when user settings are persisted server-side.
     localStorage.setItem(notificationPreferenceKey, String(isEnabled));
+    setNotificationPreferenceRaw(String(isEnabled));
   }
 
   async function requestBrowserNotificationPermission() {
@@ -680,6 +862,71 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     notificationPermissionRef.current = permission;
     setNotificationPermission(permission);
     updateBrowserNotificationsEnabled(permission === "granted");
+  }
+
+  function sendTestBrowserNotification() {
+    const permission = getBrowserNotificationPermission();
+    const enabledValue = readNotificationPreferenceRaw();
+    const visibilityState = getCurrentVisibilityState();
+    const windowFocused = getCurrentWindowFocusState();
+    notificationPermissionRef.current = permission;
+    setNotificationPermission(permission);
+    setNotificationPreferenceRaw(enabledValue);
+    visibilityStateRef.current = visibilityState;
+    windowFocusedRef.current = windowFocused;
+    setDocumentVisibilityState(visibilityState);
+    setIsWindowFocused(windowFocused);
+
+    const baseDebug: BrowserNotificationDebug = {
+      eventType: "test.notification",
+      messageId: "test",
+      senderUserId: currentUser?.id ?? "-",
+      currentUserId: currentUser?.id ?? "-",
+      selectedChatId: getSelectedChatDebugId(),
+      permission,
+      enabledValue,
+      visibilityState,
+      windowFocused,
+      attempted: false,
+      result: "skipped",
+      skipReason: "none",
+      error: "",
+      timestamp: new Date().toISOString()
+    };
+
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setTestNotificationStatus(dictionary.appShell.notificationTestPermissionRequired);
+      recordNotificationDebug({ ...baseDebug, skipReason: "unsupported" });
+      return;
+    }
+
+    if (permission !== "granted") {
+      setTestNotificationStatus(dictionary.appShell.notificationTestPermissionRequired);
+      recordNotificationDebug({ ...baseDebug, skipReason: "permissionNotGranted" });
+      return;
+    }
+
+    try {
+      const notification = new Notification("OfficeChat", { body: "Test notification" });
+      notification.onclick = () => window.focus();
+      setTestNotificationStatus(dictionary.appShell.notificationTestSent);
+      recordNotificationDebug({
+        ...baseDebug,
+        attempted: true,
+        result: "sent",
+        skipReason: "none"
+      });
+    } catch (caughtError) {
+      const errorMessage = caughtError instanceof Error ? caughtError.message : String(caughtError);
+      setTestNotificationStatus(errorMessage);
+      recordNotificationDebug({
+        ...baseDebug,
+        attempted: true,
+        result: "failed",
+        skipReason: "constructorError",
+        error: errorMessage
+      });
+    }
   }
 
   async function logout() {
@@ -997,10 +1244,69 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 >
                   {dictionary.appShell.enableNotifications}
                 </button>
+                <button
+                  className="secondary-link"
+                  disabled={notificationPermission === "unsupported"}
+                  onClick={sendTestBrowserNotification}
+                  type="button"
+                >
+                  {dictionary.appShell.testNotification}
+                </button>
+                {testNotificationStatus ? <p className="form-success">{testNotificationStatus}</p> : null}
                 <p className="note">{dictionary.appShell.notificationsNote}</p>
                 {notificationPermission === "denied" ? (
                   <p className="form-error">{dictionary.appShell.notificationsDeniedHint}</p>
                 ) : null}
+                <div className="notification-debug">
+                  <span className="field-label">{dictionary.appShell.notificationDebugTitle}</span>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugPermission}:{" "}
+                    {dictionary.appShell.notificationPermissions[notificationPermission]}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugEnabled}: {notificationPreferenceRaw}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugVisibility}: {documentVisibilityState}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugFocused}:{" "}
+                    {isWindowFocused ? dictionary.appShell.yes : dictionary.appShell.no}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugLastAttempt}: {notificationDebug.timestamp}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugLastResult}:{" "}
+                    {dictionary.appShell.notificationResults[notificationDebug.result]}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugSkipReason}:{" "}
+                    {dictionary.appShell.notificationSkipReasons[notificationDebug.skipReason]}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugEvent}: {notificationDebug.eventType}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugMessageId}: {notificationDebug.messageId}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugSenderCurrent}: {notificationDebug.senderUserId} /{" "}
+                    {notificationDebug.currentUserId}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugSelectedChat}: {notificationDebug.selectedChatId}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.notificationDebugAttempted}:{" "}
+                    {notificationDebug.attempted ? dictionary.appShell.yes : dictionary.appShell.no}
+                  </p>
+                  {notificationDebug.error ? (
+                    <p className="form-error">
+                      {dictionary.appShell.notificationDebugError}: {notificationDebug.error}
+                    </p>
+                  ) : null}
+                </div>
               </div>
               <p className="note">{dictionary.appShell.settingsNote}</p>
             </div>

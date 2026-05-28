@@ -435,6 +435,19 @@ a {
   height: 18px;
 }
 
+.notification-debug {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.notification-debug .note {
+  overflow-wrap: anywhere;
+}
+
 .admin-table-wrap {
   min-width: 0;
 }

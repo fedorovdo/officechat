@@ -65,6 +65,7 @@ export type OfficeChatMessage = {
   id: string;
   group_id: string;
   sender_user_id: string;
+  reply_to_message_id: string | null;
   body: string;
   message_type: string;
   is_deleted: boolean;
@@ -72,7 +73,16 @@ export type OfficeChatMessage = {
   created_at: string;
   updated_at: string;
   sender: OfficeChatUser;
+  reply_to: OfficeChatMessageReplyPreview | null;
   attachments: OfficeChatMessageAttachment[];
+};
+
+export type OfficeChatMessageReplyPreview = {
+  id: string;
+  sender: Pick<OfficeChatUser, "id" | "username" | "display_name">;
+  body_preview: string;
+  is_deleted: boolean;
+  created_at: string;
 };
 
 export type OfficeChatMessageAttachment = {
@@ -89,6 +99,7 @@ export type OfficeChatDirectMessage = {
   id: string;
   conversation_id: string;
   sender_user_id: string;
+  reply_to_message_id: string | null;
   body: string;
   message_type: string;
   is_deleted: boolean;
@@ -96,6 +107,15 @@ export type OfficeChatDirectMessage = {
   created_at: string;
   updated_at: string;
   sender: OfficeChatDirectoryUser;
+  reply_to: OfficeChatDirectMessageReplyPreview | null;
+};
+
+export type OfficeChatDirectMessageReplyPreview = {
+  id: string;
+  sender: Pick<OfficeChatDirectoryUser, "id" | "username" | "display_name">;
+  body_preview: string;
+  is_deleted: boolean;
+  created_at: string;
 };
 
 export type OfficeChatDirectConversation = {
@@ -344,10 +364,10 @@ export function getGroupMessages(token: string, groupId: string, limit = 50) {
   return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages?limit=${limit}`, token);
 }
 
-export function sendGroupMessage(token: string, groupId: string, body: string) {
+export function sendGroupMessage(token: string, groupId: string, body: string, replyToMessageId?: string | null) {
   return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages`, token, {
     method: "POST",
-    body: JSON.stringify({ body, message_type: "text" })
+    body: JSON.stringify({ body, message_type: "text", reply_to_message_id: replyToMessageId ?? null })
   });
 }
 
@@ -355,12 +375,16 @@ export async function sendGroupMessageWithAttachment(
   token: string,
   groupId: string,
   body: string,
-  file: File
+  file: File,
+  replyToMessageId?: string | null
 ) {
   const formData = new FormData();
   formData.append("file", file);
   if (body.trim()) {
     formData.append("body", body);
+  }
+  if (replyToMessageId) {
+    formData.append("reply_to_message_id", replyToMessageId);
   }
 
   const response = await fetch(`${apiBaseUrl}/api/groups/${groupId}/messages/with-attachment`, {
@@ -428,11 +452,17 @@ export function getDirectMessages(token: string, conversationId: string, limit =
   );
 }
 
-export function sendDirectMessage(token: string, conversationId: string, body: string, signal?: AbortSignal) {
+export function sendDirectMessage(
+  token: string,
+  conversationId: string,
+  body: string,
+  signal?: AbortSignal,
+  replyToMessageId?: string | null
+) {
   return apiFetch<OfficeChatDirectMessage>(`/api/direct/conversations/${conversationId}/messages`, token, {
     method: "POST",
     signal,
-    body: JSON.stringify({ body, message_type: "text" })
+    body: JSON.stringify({ body, message_type: "text", reply_to_message_id: replyToMessageId ?? null })
   });
 }
 

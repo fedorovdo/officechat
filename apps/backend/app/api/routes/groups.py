@@ -246,12 +246,13 @@ async def post_message_with_attachment(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     body: Annotated[str | None, Form()] = None,
+    reply_to_message_id: Annotated[UUID | None, Form()] = None,
     file: UploadFile = File(...),
 ):
     group = await load_group_or_404(session, group_id)
     try:
         await ensure_group_message_access(session, group, current_user)
-        message = await create_message_with_attachment(session, group, current_user, body, file)
+        message = await create_message_with_attachment(session, group, current_user, body, file, reply_to_message_id)
         await broadcast_group_message_created(session, group, message)
         return message
     except PermissionError as exc:

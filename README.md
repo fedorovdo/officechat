@@ -82,6 +82,8 @@ Direct/private messages are available in the user app shell:
 
 Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct-message file attachments, read receipts, and typing indicators are not implemented yet.
 
+Reply-to-message support is available for both group chats and direct messages. Users can reply to an existing message, see a compact quoted preview in the new message, and still edit/delete messages through the existing actions. This is a lightweight reply feature only; threaded discussions, nested reply views, forwarding, mentions, and markdown rendering are planned later.
+
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
 Groups can be archived and restored with `is_active=false/true`. Archived groups are not physically deleted, which keeps message history, attachments, and membership references safe. Regular user and app-shell group lists show active groups only; admin group management can request archived groups with `GET /api/groups?include_inactive=true`.

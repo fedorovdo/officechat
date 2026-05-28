@@ -139,6 +139,11 @@
     "cancelEdit": "Cancel",
     "edit": "Edit",
     "delete": "Delete",
+    "reply": "Reply",
+    "replyTo": "Reply to",
+    "cancelReply": "Cancel reply",
+    "originalMessageDeleted": "Original message deleted",
+    "replyPreviewUnavailable": "Reply preview unavailable",
     "botBadge": "BOT",
     "deletedMessage": "Message deleted",
     "newMessages": "New messages"

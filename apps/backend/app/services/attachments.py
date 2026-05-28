@@ -81,6 +81,7 @@ async def create_message_with_attachment(
     current_user: User,
     body: str | None,
     upload: UploadFile,
+    reply_to_message_id: UUID | None = None,
 ) -> Message:
     stored_filename, storage_path, size_bytes = await save_upload_file(group, upload)
     original_filename = normalize_original_filename(upload.filename)
@@ -90,9 +91,15 @@ async def create_message_with_attachment(
         raise ValueError(f"Message body cannot exceed {settings.message_max_length} characters")
 
     try:
+        normalized_reply_to_message_id = None
+        if reply_to_message_id is not None:
+            reply_to_message = await load_reply_target(session, group, reply_to_message_id)
+            normalized_reply_to_message_id = reply_to_message.id
+
         message = Message(
             group_id=group.id,
             sender_user_id=current_user.id,
+            reply_to_message_id=normalized_reply_to_message_id,
             body=normalized_body,
             message_type="text",
         )
@@ -118,6 +125,16 @@ async def create_message_with_attachment(
         raise
 
     return await load_message_with_sender(session, message.id)
+
+
+async def load_reply_target(session: AsyncSession, group: Group, reply_to_message_id: UUID) -> Message:
+    result = await session.execute(
+        select(Message).where(Message.id == reply_to_message_id, Message.group_id == group.id)
+    )
+    message = result.scalar_one_or_none()
+    if message is None:
+        raise ValueError("Reply target message not found in this group")
+    return message
 
 
 async def get_group_attachment(

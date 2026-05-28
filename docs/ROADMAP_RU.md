@@ -22,6 +22,7 @@
 - Локальные sidebar notifications: unread indicators, last message previews, recent activity ordering через frontend `localStorage`.
 - Базовые browser notifications во frontend: разрешение браузера, тестовая кнопка, диагностика, setup guide, настройка в `localStorage`, уведомления при неактивной вкладке.
 - Персональный WebSocket канал `WS /api/ws/me` для событий новых групповых и личных сообщений текущего пользователя.
+- Reply-to-message для групповых и личных сообщений: компактная цитата исходного сообщения без thread/discussion view.
 
 ## Этап 2: Realtime
 
@@ -32,6 +33,7 @@
 - Базовые уведомления в интерфейсе.
 - Service worker и server push notifications для уведомлений без открытой вкладки.
 - Стандартная поддержка emoji в сообщениях чата.
+- Threads/discussions или расширенное представление цепочек ответов.
 - Вложения в direct messages.
 - Read receipts и typing indicators для групп и direct messages.
 

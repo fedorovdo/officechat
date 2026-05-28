@@ -66,7 +66,7 @@ async def get_last_direct_message(
 ) -> DirectMessage | None:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender))
+        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
         .where(DirectMessage.conversation_id == conversation.id)
         .order_by(DirectMessage.created_at.desc())
         .limit(1)
@@ -122,7 +122,7 @@ async def list_direct_messages(
 ) -> list[DirectMessage]:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender))
+        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
         .where(DirectMessage.conversation_id == conversation.id)
         .order_by(DirectMessage.created_at.desc())
         .limit(limit)
@@ -138,9 +138,17 @@ async def create_direct_message(
     payload: DirectMessageCreate,
 ) -> DirectMessage:
     ensure_direct_conversation_access(conversation, current_user)
+    reply_to_message_id = None
+    if payload.reply_to_message_id is not None:
+        reply_to_message = await get_direct_message(session, conversation, payload.reply_to_message_id)
+        if reply_to_message is None:
+            raise ValueError("Reply target message not found in this conversation")
+        reply_to_message_id = reply_to_message.id
+
     message = DirectMessage(
         conversation_id=conversation.id,
         sender_user_id=current_user.id,
+        reply_to_message_id=reply_to_message_id,
         body=validate_message_body(payload.body),
         message_type=payload.message_type.strip() or "text",
     )
@@ -157,7 +165,7 @@ async def get_direct_message(
 ) -> DirectMessage | None:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender))
+        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
         .where(DirectMessage.id == message_id, DirectMessage.conversation_id == conversation.id)
     )
     return result.scalar_one_or_none()
@@ -165,7 +173,9 @@ async def get_direct_message(
 
 async def load_direct_message(session: AsyncSession, message_id: UUID) -> DirectMessage:
     result = await session.execute(
-        select(DirectMessage).options(selectinload(DirectMessage.sender)).where(DirectMessage.id == message_id)
+        select(DirectMessage)
+        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
+        .where(DirectMessage.id == message_id)
     )
     return result.scalar_one()
 

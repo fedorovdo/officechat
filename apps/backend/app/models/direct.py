@@ -42,6 +42,9 @@ class DirectMessage(Base):
     sender_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    reply_to_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("direct_messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     message_type: Mapped[str] = mapped_column(String(32), nullable=False, default="text")
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -53,3 +56,4 @@ class DirectMessage(Base):
 
     conversation: Mapped[DirectConversation] = relationship()
     sender: Mapped[User] = relationship()
+    reply_to: Mapped["DirectMessage | None"] = relationship(remote_side=[id], foreign_keys=[reply_to_message_id])

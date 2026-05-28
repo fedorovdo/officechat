@@ -675,6 +675,38 @@ a {
   line-height: 1.5;
 }
 
+.message-reply-preview,
+.reply-compose-context {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--app-accent, var(--accent));
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.message-reply-preview span,
+.reply-compose-context strong {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.message-reply-preview p,
+.reply-compose-context p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.reply-compose-context {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+}
+
 .attachments-list {
   display: grid;
   gap: 8px;

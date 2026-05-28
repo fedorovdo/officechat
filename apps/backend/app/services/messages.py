@@ -43,7 +43,11 @@ async def list_group_messages(
 ) -> list[Message]:
     query = (
         select(Message)
-        .options(selectinload(Message.sender), selectinload(Message.attachments))
+        .options(
+            selectinload(Message.sender),
+            selectinload(Message.attachments),
+            selectinload(Message.reply_to).selectinload(Message.sender),
+        )
         .where(Message.group_id == group.id)
         .order_by(Message.created_at.desc())
         .limit(limit)
@@ -64,9 +68,17 @@ async def create_group_message(
     current_user: User,
     payload: MessageCreate,
 ) -> Message:
+    reply_to_message_id = None
+    if payload.reply_to_message_id is not None:
+        reply_to_message = await get_group_message(session, group, payload.reply_to_message_id)
+        if reply_to_message is None:
+            raise ValueError("Reply target message not found in this group")
+        reply_to_message_id = reply_to_message.id
+
     message = Message(
         group_id=group.id,
         sender_user_id=current_user.id,
+        reply_to_message_id=reply_to_message_id,
         body=validate_message_body(payload.body),
         message_type=payload.message_type.strip() or "text",
     )
@@ -79,7 +91,11 @@ async def create_group_message(
 async def get_group_message(session: AsyncSession, group: Group, message_id: UUID) -> Message | None:
     result = await session.execute(
         select(Message)
-        .options(selectinload(Message.sender), selectinload(Message.attachments))
+        .options(
+            selectinload(Message.sender),
+            selectinload(Message.attachments),
+            selectinload(Message.reply_to).selectinload(Message.sender),
+        )
         .where(Message.id == message_id, Message.group_id == group.id)
     )
     return result.scalar_one_or_none()
@@ -88,7 +104,11 @@ async def get_group_message(session: AsyncSession, group: Group, message_id: UUI
 async def load_message_with_sender(session: AsyncSession, message_id: UUID) -> Message:
     result = await session.execute(
         select(Message)
-        .options(selectinload(Message.sender), selectinload(Message.attachments))
+        .options(
+            selectinload(Message.sender),
+            selectinload(Message.attachments),
+            selectinload(Message.reply_to).selectinload(Message.sender),
+        )
         .where(Message.id == message_id)
     )
     return result.scalar_one()

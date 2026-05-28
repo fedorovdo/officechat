@@ -139,6 +139,11 @@
     "cancelEdit": "Отмена",
     "edit": "Изменить",
     "delete": "Удалить",
+    "reply": "Ответить",
+    "replyTo": "Ответ на",
+    "cancelReply": "Отменить ответ",
+    "originalMessageDeleted": "Исходное сообщение удалено",
+    "replyPreviewUnavailable": "Предпросмотр ответа недоступен",
     "botBadge": "BOT",
     "deletedMessage": "Сообщение удалено",
     "newMessages": "Новые сообщения"

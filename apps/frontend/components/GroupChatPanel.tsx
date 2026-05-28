@@ -44,6 +44,7 @@ export function GroupChatPanel({
   const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [replyToMessage, setReplyToMessage] = useState<OfficeChatMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageBody, setEditingMessageBody] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -95,6 +96,7 @@ export function GroupChatPanel({
     hasInitialMessageScrollRef.current = false;
     shouldScrollToBottomRef.current = false;
     setShowNewMessagesButton(false);
+    setReplyToMessage(null);
   }, [groupId]);
 
   useEffect(() => {
@@ -218,6 +220,27 @@ export function GroupChatPanel({
     }
   }
 
+  function getReplyPreviewText(reply: NonNullable<OfficeChatMessage["reply_to"]>) {
+    if (reply.is_deleted) {
+      return dictionary.messages.originalMessageDeleted;
+    }
+    return reply.body_preview || dictionary.messages.replyPreviewUnavailable;
+  }
+
+  function getSelectedReplyPreviewText(message: OfficeChatMessage) {
+    if (message.is_deleted) {
+      return dictionary.messages.originalMessageDeleted;
+    }
+    const body = message.body.trim();
+    if (body) {
+      return body.length > 120 ? `${body.slice(0, 117)}...` : body;
+    }
+    if (message.attachments.length > 0) {
+      return dictionary.sidebarActivity.attachment;
+    }
+    return dictionary.messages.replyPreviewUnavailable;
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const token = getStoredAccessToken();
@@ -231,12 +254,13 @@ export function GroupChatPanel({
     setIsSending(true);
     try {
       if (selectedFile) {
-        await sendGroupMessageWithAttachment(token, groupId, messageBody, selectedFile);
+        await sendGroupMessageWithAttachment(token, groupId, messageBody, selectedFile, replyToMessage?.id);
       } else {
-        await sendGroupMessage(token, groupId, messageBody);
+        await sendGroupMessage(token, groupId, messageBody, replyToMessage?.id);
       }
       setMessageBody("");
       setSelectedFile(null);
+      setReplyToMessage(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -389,9 +413,19 @@ export function GroupChatPanel({
                   </div>
                 </form>
               ) : (
-                <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
-                  {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
-                </p>
+                <>
+                  {message.reply_to ? (
+                    <div className="message-reply-preview">
+                      <span>
+                        {dictionary.messages.replyTo} {message.reply_to.sender.display_name}
+                      </span>
+                      <p>{getReplyPreviewText(message.reply_to)}</p>
+                    </div>
+                  ) : null}
+                  <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
+                    {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
+                  </p>
+                </>
               )}
               {message.attachments.length > 0 ? (
                 <div className="attachments-list">
@@ -412,6 +446,9 @@ export function GroupChatPanel({
               ) : null}
               {!message.is_deleted ? (
                 <div className="message-actions">
+                  <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">
+                    {dictionary.messages.reply}
+                  </button>
                   {canEdit ? (
                     <button
                       className="table-action"
@@ -448,6 +485,19 @@ export function GroupChatPanel({
       ) : null}
 
       <form className="admin-form message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
+        {replyToMessage ? (
+          <div className="reply-compose-context">
+            <div>
+              <strong>
+                {dictionary.messages.replyTo} {replyToMessage.sender.display_name}
+              </strong>
+              <p>{getSelectedReplyPreviewText(replyToMessage)}</p>
+            </div>
+            <button className="table-action" onClick={() => setReplyToMessage(null)} type="button">
+              {dictionary.messages.cancelReply}
+            </button>
+          </div>
+        ) : null}
         <label className="field">
           <span className="field-label">{dictionary.messages.body}</span>
           <textarea

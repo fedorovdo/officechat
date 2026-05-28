@@ -34,6 +34,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const hasInitialMessageScrollRef = useRef(false);
   const [messages, setMessages] = useState<OfficeChatDirectMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
+  const [replyToMessage, setReplyToMessage] = useState<OfficeChatDirectMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageBody, setEditingMessageBody] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -78,6 +79,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     setEditingMessageId(null);
     setEditingMessageBody("");
     setMessageBody("");
+    setReplyToMessage(null);
   }, [conversation.id]);
 
   useEffect(() => {
@@ -219,8 +221,9 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), 20000);
     try {
-      await sendDirectMessage(token, conversation.id, messageBody, abortController.signal);
+      await sendDirectMessage(token, conversation.id, messageBody, abortController.signal, replyToMessage?.id);
       setMessageBody("");
+      setReplyToMessage(null);
       shouldScrollToBottomRef.current = true;
       setMessages(await getDirectMessages(token, conversation.id));
       setSuccess(dictionary.directMessages.sendSuccess);
@@ -280,6 +283,21 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       event.preventDefault();
       composeFormRef.current?.requestSubmit();
     }
+  }
+
+  function getReplyPreviewText(reply: NonNullable<OfficeChatDirectMessage["reply_to"]>) {
+    if (reply.is_deleted) {
+      return dictionary.messages.originalMessageDeleted;
+    }
+    return reply.body_preview || dictionary.messages.replyPreviewUnavailable;
+  }
+
+  function getSelectedReplyPreviewText(message: OfficeChatDirectMessage) {
+    if (message.is_deleted) {
+      return dictionary.messages.originalMessageDeleted;
+    }
+    const body = message.body.trim();
+    return body ? (body.length > 120 ? `${body.slice(0, 117)}...` : body) : dictionary.messages.replyPreviewUnavailable;
   }
 
   return (
@@ -347,12 +365,25 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
                   </div>
                 </form>
               ) : (
-                <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
-                  {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
-                </p>
+                <>
+                  {message.reply_to ? (
+                    <div className="message-reply-preview">
+                      <span>
+                        {dictionary.messages.replyTo} {message.reply_to.sender.display_name}
+                      </span>
+                      <p>{getReplyPreviewText(message.reply_to)}</p>
+                    </div>
+                  ) : null}
+                  <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
+                    {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
+                  </p>
+                </>
               )}
               {!message.is_deleted ? (
                 <div className="message-actions">
+                  <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">
+                    {dictionary.messages.reply}
+                  </button>
                   {canEdit ? (
                     <button
                       className="table-action"
@@ -389,6 +420,19 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       ) : null}
 
       <form className="admin-form message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
+        {replyToMessage ? (
+          <div className="reply-compose-context">
+            <div>
+              <strong>
+                {dictionary.messages.replyTo} {replyToMessage.sender.display_name}
+              </strong>
+              <p>{getSelectedReplyPreviewText(replyToMessage)}</p>
+            </div>
+            <button className="table-action" onClick={() => setReplyToMessage(null)} type="button">
+              {dictionary.messages.cancelReply}
+            </button>
+          </div>
+        ) : null}
         <label className="field">
           <span className="field-label">{dictionary.messages.body}</span>
           <textarea

@@ -251,6 +251,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   );
   const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isNotificationGuideOpen, setIsNotificationGuideOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -1275,10 +1276,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
       {isSettingsOpen ? (
         <div className="settings-backdrop" role="presentation">
+          <div className="settings-modal-stack">
           <section className="settings-panel" aria-label={dictionary.appShell.settingsTitle}>
             <div className="dashboard-header">
               <h2 className="section-title">{dictionary.appShell.settingsTitle}</h2>
-              <button className="table-action" onClick={() => setIsSettingsOpen(false)} type="button">
+              <button
+                className="table-action"
+                onClick={() => {
+                  setIsNotificationGuideOpen(false);
+                  setIsSettingsOpen(false);
+                }}
+                type="button"
+              >
                 {dictionary.appShell.close}
               </button>
             </div>
@@ -1373,6 +1382,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   {dictionary.appShell.testNotification}
                 </button>
                 {testNotificationStatus ? <p className="form-success">{testNotificationStatus}</p> : null}
+                <p className="note">{dictionary.appShell.notificationTestHelp}</p>
+                <button className="secondary-link" onClick={() => setIsNotificationGuideOpen(true)} type="button">
+                  {dictionary.appShell.notificationGuide.howToEnable}
+                </button>
                 <p className="note">{dictionary.appShell.notificationsNote}</p>
                 {notificationPermission === "denied" ? (
                   <p className="form-error">{dictionary.appShell.notificationsDeniedHint}</p>
@@ -1435,6 +1448,57 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               <p className="note">{dictionary.appShell.settingsNote}</p>
             </div>
           </section>
+          {isNotificationGuideOpen ? (
+            <section className="settings-panel notification-guide-panel" aria-label={dictionary.appShell.notificationGuide.title}>
+              <div className="dashboard-header">
+                <h2 className="section-title">{dictionary.appShell.notificationGuide.title}</h2>
+                <button className="table-action" onClick={() => setIsNotificationGuideOpen(false)} type="button">
+                  {dictionary.appShell.notificationGuide.close}
+                </button>
+              </div>
+              <div className="notification-guide-content">
+                <section>
+                  <h3>{dictionary.appShell.notificationGuide.officeChatTitle}</h3>
+                  <ul>
+                    {dictionary.appShell.notificationGuide.officeChatSteps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ul>
+                </section>
+                <section>
+                  <h3>{dictionary.appShell.notificationGuide.browserTitle}</h3>
+                  <p>{dictionary.appShell.notificationGuide.chromeEdge}</p>
+                  <p>{dictionary.appShell.notificationGuide.chromeEdgeSettings}</p>
+                  <p>{dictionary.appShell.notificationGuide.firefox}</p>
+                </section>
+                <section>
+                  <h3>{dictionary.appShell.notificationGuide.windowsTitle}</h3>
+                  <ul>
+                    {dictionary.appShell.notificationGuide.windowsSteps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ul>
+                </section>
+                <section>
+                  <h3>{dictionary.appShell.notificationGuide.linuxTitle}</h3>
+                  <ul>
+                    {dictionary.appShell.notificationGuide.linuxSteps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ul>
+                </section>
+                <section>
+                  <h3>{dictionary.appShell.notificationGuide.limitationsTitle}</h3>
+                  <ul>
+                    {dictionary.appShell.notificationGuide.limitations.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+            </section>
+          ) : null}
+          </div>
         </div>
       ) : null}
     </main>

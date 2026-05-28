@@ -197,6 +197,7 @@
     "testNotification": "Test notification",
     "notificationTestSent": "Test notification sent",
     "notificationTestPermissionRequired": "Allow notifications in the browser first.",
+    "notificationTestHelp": "If the test notification does not appear, check browser and OS settings.",
     "notificationsPreference": "Show notifications for new messages",
     "notificationsEnabled": "Enabled",
     "notificationsDisabled": "Disabled",
@@ -225,6 +226,41 @@
       "denied": "denied",
       "default": "default",
       "unsupported": "unsupported"
+    },
+    "notificationGuide": {
+      "howToEnable": "How to enable notifications",
+      "title": "Notification setup",
+      "close": "Close",
+      "officeChatTitle": "OfficeChat",
+      "officeChatSteps": [
+        "Open Settings.",
+        "Enable \"Show notifications for new messages\".",
+        "Click \"Enable notifications\".",
+        "Click \"Test notification\"."
+      ],
+      "browserTitle": "Browser",
+      "chromeEdge": "For Chrome/Edge: click the icon to the left of the site address, or open site settings and allow notifications for OfficeChat.",
+      "chromeEdgeSettings": "You can also check: Settings -> Privacy and security -> Site settings -> Notifications.",
+      "firefox": "For Firefox: click the icon to the left of the site address and allow notifications for OfficeChat.",
+      "windowsTitle": "Windows",
+      "windowsSteps": [
+        "Open: Settings -> System -> Notifications.",
+        "Turn notifications on.",
+        "Make sure Do not disturb is off.",
+        "Make sure notifications are allowed for Chrome/Edge/Firefox."
+      ],
+      "linuxTitle": "Linux desktop",
+      "linuxSteps": [
+        "Check your desktop environment notification settings.",
+        "The path can differ for GNOME/KDE/Xfce.",
+        "Make sure browser notifications are allowed.",
+        "Make sure Do not disturb mode is off."
+      ],
+      "limitationsTitle": "Limitations",
+      "limitations": [
+        "In this version, notifications work while OfficeChat is open in the browser.",
+        "Background push notifications without an open tab will require Service Worker / Push later."
+      ]
     },
     "notificationResults": {
       "idle": "no attempts",

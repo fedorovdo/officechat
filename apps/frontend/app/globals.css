@@ -989,6 +989,15 @@ a {
   z-index: 20;
 }
 
+.settings-modal-stack {
+  width: min(100%, 980px);
+  max-height: calc(100vh - 36px);
+  display: grid;
+  grid-template-columns: minmax(0, 460px) minmax(0, 520px);
+  gap: 16px;
+  align-items: start;
+}
+
 .settings-panel {
   width: min(100%, 460px);
   max-height: calc(100vh - 36px);
@@ -998,6 +1007,35 @@ a {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: var(--shadow);
+}
+
+.notification-guide-panel {
+  width: min(100%, 520px);
+}
+
+.notification-guide-content {
+  display: grid;
+  gap: 18px;
+}
+
+.notification-guide-content h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.notification-guide-content p,
+.notification-guide-content li {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.notification-guide-content p {
+  margin: 0 0 8px;
+}
+
+.notification-guide-content ul {
+  margin: 0;
+  padding-left: 20px;
 }
 
 @media (max-width: 760px) {
@@ -1060,5 +1098,9 @@ a {
 
   .user-app-chat-heading {
     flex-direction: column;
+  }
+
+  .settings-modal-stack {
+    grid-template-columns: 1fr;
   }
 }

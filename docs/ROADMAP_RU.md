@@ -20,7 +20,7 @@
 - Локальные настройки интерфейса: язык, сторона sidebar, размер шрифта, accent color.
 - Базовые direct messages между пользователями: REST API, WebSocket updates, UI в `/ru/app`.
 - Локальные sidebar notifications: unread indicators, last message previews, recent activity ordering через frontend `localStorage`.
-- Базовые browser notifications во frontend: разрешение браузера, тестовая кнопка, диагностика, настройка в `localStorage`, уведомления при неактивной вкладке.
+- Базовые browser notifications во frontend: разрешение браузера, тестовая кнопка, диагностика, setup guide, настройка в `localStorage`, уведомления при неактивной вкладке.
 - Персональный WebSocket канал `WS /api/ws/me` для событий новых групповых и личных сообщений текущего пользователя.
 
 ## Этап 2: Realtime

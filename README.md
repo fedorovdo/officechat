@@ -55,7 +55,7 @@ User-facing app shell is available at http://localhost:3100/ru/app. It shows a t
 
 Sidebar activity indicators are available in early frontend form. Groups and direct users can show local unread dots, last message previews, short activity timestamps, and recent-activity ordering. This state is stored in browser `localStorage` for now. Backend read receipts, server-side unread counters, and cross-device unread synchronization are planned later.
 
-Browser notifications are available in early frontend form. Users can enable them in the app shell settings; they work only while OfficeChat is open in a browser tab/window and only after the browser grants notification permission. Server push notifications, service workers, email notifications, and mobile push are planned later.
+Browser notifications are available in early frontend form. Users can enable them in the app shell settings; they work only while OfficeChat is open in a browser tab/window and only after the browser and OS grant notification permission. The settings panel includes diagnostics, a test notification button, and a setup guide. See [docs/NOTIFICATIONS_RU.md](docs/NOTIFICATIONS_RU.md). Server push notifications, service workers, email notifications, and mobile push are planned later.
 
 Reliable in-app notification delivery uses a personal WebSocket channel:
 

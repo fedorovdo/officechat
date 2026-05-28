@@ -156,6 +156,20 @@ export type DirectMessageEvent = {
   message_id?: string;
 };
 
+export type PersonalNotificationEvent =
+  | {
+      type: "user.group.message.created";
+      group_id: string;
+      group: Pick<OfficeChatGroup, "id" | "name" | "slug">;
+      message: OfficeChatMessage;
+    }
+  | {
+      type: "user.direct.message.created";
+      conversation_id: string;
+      other_user: OfficeChatDirectoryUser;
+      message: OfficeChatDirectMessage;
+    };
+
 export type CreateGroupPayload = {
   name: string;
   slug: string;
@@ -447,6 +461,15 @@ export function getDirectWebSocketUrl(token: string, conversationId: string) {
   const backendUrl = new URL(apiBaseUrl);
   backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
   backendUrl.pathname = `/api/ws/direct/${conversationId}`;
+  // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
+  backendUrl.search = new URLSearchParams({ token }).toString();
+  return backendUrl.toString();
+}
+
+export function getPersonalWebSocketUrl(token: string) {
+  const backendUrl = new URL(apiBaseUrl);
+  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
+  backendUrl.pathname = "/api/ws/me";
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
   backendUrl.search = new URLSearchParams({ token }).toString();
   return backendUrl.toString();

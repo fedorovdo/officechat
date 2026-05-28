@@ -57,6 +57,13 @@ Sidebar activity indicators are available in early frontend form. Groups and dir
 
 Browser notifications are available in early frontend form. Users can enable them in the app shell settings; they work only while OfficeChat is open in a browser tab/window and only after the browser grants notification permission. Server push notifications, service workers, email notifications, and mobile push are planned later.
 
+Reliable in-app notification delivery uses a personal WebSocket channel:
+
+- `WS /api/ws/me?token=...`
+- It receives `user.group.message.created` and `user.direct.message.created` events relevant to the authenticated user.
+- Browser notifications in `/ru/app` use this personal channel, while group/direct chat panels keep their existing channel-specific WebSocket updates.
+- Current WebSocket delivery is single-instance only; multi-instance production should use Valkey pub/sub or another broker later.
+
 Current development uses one frontend on port `3100`. User routes live under `/ru/app`, while admin routes remain under `/ru/admin/*`. Future production deployment can split user/admin surfaces with nginx hostnames or separate frontend entrypoints.
 
 User app settings are stored in browser `localStorage` for now. Future versions should persist language, sidebar side, font size, accent color, and profile preferences in backend user preferences.

@@ -14,6 +14,7 @@ import {
   getGroupMembers,
   getGroupMessages,
   getGroupWebSocketUrl,
+  getPersonalWebSocketUrl,
   getStoredAccessToken,
   getUsers,
   isAdminRole,
@@ -25,7 +26,8 @@ import {
   type OfficeChatGroup,
   type OfficeChatGroupMember,
   type OfficeChatMessage,
-  type OfficeChatUser
+  type OfficeChatUser,
+  type PersonalNotificationEvent
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { DirectChatPanel } from "./DirectChatPanel";
@@ -64,6 +66,7 @@ type SidebarActivityState = {
 
 type BrowserNotificationPermission = NotificationPermission | "unsupported";
 type BrowserNotificationResult = "idle" | "sent" | "skipped" | "failed";
+type PersonalSocketStatus = "connected" | "disconnected" | "reconnecting";
 type BrowserNotificationSkipReason =
   | "none"
   | "senderIsCurrentUser"
@@ -226,6 +229,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const notificationPermissionRef = useRef<BrowserNotificationPermission>("default");
   const windowFocusedRef = useRef(false);
   const visibilityStateRef = useRef<DocumentVisibilityState | "unknown">("unknown");
+  const selectedRef = useRef<AppSelection>({ type: "empty" });
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [groups, setGroups] = useState<OfficeChatGroup[]>([]);
   const [users, setUsers] = useState<OfficeChatDirectoryUser[]>([]);
@@ -245,6 +249,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [notificationDebug, setNotificationDebug] = useState<BrowserNotificationDebug>(() =>
     createEmptyNotificationDebug()
   );
+  const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
@@ -346,11 +351,15 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }
 
   function getSelectedChatDebugId() {
-    if (selected.type === "group") {
-      return `group:${selected.groupId}`;
+    return getSelectionDebugId(selected);
+  }
+
+  function getSelectionDebugId(selection: AppSelection) {
+    if (selection.type === "group") {
+      return `group:${selection.groupId}`;
     }
-    if (selected.type === "direct") {
-      return `direct:${selected.conversationId}`;
+    if (selection.type === "direct") {
+      return `direct:${selection.conversationId}`;
     }
     return "empty";
   }
@@ -518,6 +527,43 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }));
   }
 
+  function upsertPersonalDirectConversation(event: Extract<PersonalNotificationEvent, { type: "user.direct.message.created" }>) {
+    if (!currentUser) {
+      return;
+    }
+
+    setDirectConversations((currentConversations) => {
+      const nextConversation: OfficeChatDirectConversation = {
+        id: event.conversation_id,
+        user_one_id: currentUser.id,
+        user_two_id: event.other_user.id,
+        created_at: event.message.created_at,
+        updated_at: event.message.updated_at,
+        other_user: event.other_user,
+        last_message: event.message
+      };
+      const existingConversation = currentConversations.find(
+        (conversation) => conversation.id === event.conversation_id
+      );
+      const conversationsWithoutCurrent = currentConversations.filter(
+        (conversation) => conversation.id !== event.conversation_id
+      );
+      return [
+        {
+          ...nextConversation,
+          user_one_id: existingConversation?.user_one_id ?? nextConversation.user_one_id,
+          user_two_id: existingConversation?.user_two_id ?? nextConversation.user_two_id,
+          created_at: existingConversation?.created_at ?? nextConversation.created_at
+        },
+        ...conversationsWithoutCurrent
+      ];
+    });
+  }
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
   useEffect(() => {
     const loadedSettings = readSettings(locale);
     const loadedNotificationPreference = readNotificationPreference();
@@ -636,6 +682,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     if (!token) {
       return;
     }
+    const accessToken = token;
 
     let isCancelled = false;
     for (const group of groups) {
@@ -686,20 +733,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           const isSelectedGroup = selected.type === "group" && selected.groupId === payload.group_id;
           const isOwnMessage = payload.message.sender_user_id === currentUser.id;
           updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
-          if (payload.type === "message.created") {
-            const preview = getGroupMessagePreview(payload.message);
-            attemptBrowserNotification({
-              eventType: payload.type,
-              messageId: payload.message.id,
-              senderUserId: payload.message.sender_user_id,
-              body: `${group.name} - ${payload.message.sender.display_name}: ${preview}`,
-              selectedChatId: getSelectedChatDebugId(),
-              onClick: () => {
-                setSelected({ type: "group", groupId: payload.group_id });
-                markGroupRead(payload.group_id);
-              }
-            });
-          }
         } catch {
           return;
         }
@@ -737,20 +770,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             selected.type === "direct" && selected.conversationId === payload.conversation_id;
           const isOwnMessage = payload.message.sender_user_id === currentUser.id;
           updateDirectUserActivity(conversation.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
-          if (payload.type === "direct.message.created") {
-            const preview = getDirectMessagePreview(payload.message);
-            attemptBrowserNotification({
-              eventType: payload.type,
-              messageId: payload.message.id,
-              senderUserId: payload.message.sender_user_id,
-              body: `${payload.message.sender.display_name}: ${preview}`,
-              selectedChatId: getSelectedChatDebugId(),
-              onClick: () => {
-                setSelected({ type: "direct", conversationId: payload.conversation_id });
-                markDirectUserRead(conversation.other_user.id);
-              }
-            });
-          }
         } catch {
           return;
         }
@@ -764,6 +783,121 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       }
     };
   }, [currentUser, directConversations, selected, updateDirectUserActivity]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    const activeUser = currentUser;
+
+    const token = getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+    const accessToken = token;
+
+    let websocket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let shouldReconnect = true;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 10;
+
+    function scheduleReconnect() {
+      if (!shouldReconnect) {
+        return;
+      }
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        setPersonalSocketStatus("disconnected");
+        return;
+      }
+
+      reconnectAttempts += 1;
+      setPersonalSocketStatus("reconnecting");
+      reconnectTimer = setTimeout(connect, 3000);
+    }
+
+    function handleGroupPersonalEvent(payload: Extract<PersonalNotificationEvent, { type: "user.group.message.created" }>) {
+      const currentSelection = selectedRef.current;
+      const isSelectedGroup = currentSelection.type === "group" && currentSelection.groupId === payload.group_id;
+      const isOwnMessage = payload.message.sender_user_id === activeUser.id;
+      updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
+
+      const preview = getGroupMessagePreview(payload.message);
+      attemptBrowserNotification({
+        eventType: payload.type,
+        messageId: payload.message.id,
+        senderUserId: payload.message.sender_user_id,
+        body: `${payload.group.name} - ${payload.message.sender.display_name}: ${preview}`,
+        selectedChatId: getSelectionDebugId(currentSelection),
+        onClick: () => {
+          setSelected({ type: "group", groupId: payload.group_id });
+          markGroupRead(payload.group_id);
+        }
+      });
+    }
+
+    function handleDirectPersonalEvent(payload: Extract<PersonalNotificationEvent, { type: "user.direct.message.created" }>) {
+      const currentSelection = selectedRef.current;
+      const isSelectedConversation =
+        currentSelection.type === "direct" && currentSelection.conversationId === payload.conversation_id;
+      const isOwnMessage = payload.message.sender_user_id === activeUser.id;
+      upsertPersonalDirectConversation(payload);
+      updateDirectUserActivity(payload.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
+
+      const preview = getDirectMessagePreview(payload.message);
+      attemptBrowserNotification({
+        eventType: payload.type,
+        messageId: payload.message.id,
+        senderUserId: payload.message.sender_user_id,
+        body: `${payload.message.sender.display_name}: ${preview}`,
+        selectedChatId: getSelectionDebugId(currentSelection),
+        onClick: () => {
+          setSelected({ type: "direct", conversationId: payload.conversation_id });
+          markDirectUserRead(payload.other_user.id);
+        }
+      });
+    }
+
+    function connect() {
+      websocket = new WebSocket(getPersonalWebSocketUrl(accessToken));
+      websocket.onopen = () => {
+        reconnectAttempts = 0;
+        setPersonalSocketStatus("connected");
+      };
+      websocket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data as string) as PersonalNotificationEvent;
+          if (payload.type === "user.group.message.created") {
+            handleGroupPersonalEvent(payload);
+            return;
+          }
+          if (payload.type === "user.direct.message.created") {
+            handleDirectPersonalEvent(payload);
+          }
+        } catch {
+          return;
+        }
+      };
+      websocket.onclose = () => {
+        websocket = null;
+        scheduleReconnect();
+      };
+      websocket.onerror = () => {
+        websocket?.close();
+      };
+    }
+
+    connect();
+
+    return () => {
+      shouldReconnect = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      websocket?.close();
+      setPersonalSocketStatus("disconnected");
+    };
+  }, [currentUser, updateDirectUserActivity, updateGroupActivity]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -797,20 +931,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               lastMessageTime > existingTime &&
               !isSelectedConversation &&
               lastMessage.sender_user_id !== currentUserId;
-            if (shouldMarkUnread) {
-              const preview = getDirectMessagePreview(lastMessage);
-              attemptBrowserNotification({
-                eventType: "direct.message.created.poll",
-                messageId: lastMessage.id,
-                senderUserId: lastMessage.sender_user_id,
-                body: `${lastMessage.sender.display_name}: ${preview}`,
-                selectedChatId: getSelectedChatDebugId(),
-                onClick: () => {
-                  setSelected({ type: "direct", conversationId: conversation.id });
-                  markDirectUserRead(conversation.other_user.id);
-                }
-              });
-            }
             nextDirectUsers[conversation.other_user.id] = {
               ...existingActivity,
               preview: getDirectMessagePreview(lastMessage),
@@ -1272,6 +1392,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   <p className="note">
                     {dictionary.appShell.notificationDebugFocused}:{" "}
                     {isWindowFocused ? dictionary.appShell.yes : dictionary.appShell.no}
+                  </p>
+                  <p className="note">
+                    {dictionary.appShell.personalSocketStatus}:{" "}
+                    {dictionary.appShell.personalSocketStatuses[personalSocketStatus]}
                   </p>
                   <p className="note">
                     {dictionary.appShell.notificationDebugLastAttempt}: {notificationDebug.timestamp}

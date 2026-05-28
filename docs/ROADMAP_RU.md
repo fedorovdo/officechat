@@ -21,6 +21,7 @@
 - Базовые direct messages между пользователями: REST API, WebSocket updates, UI в `/ru/app`.
 - Локальные sidebar notifications: unread indicators, last message previews, recent activity ordering через frontend `localStorage`.
 - Базовые browser notifications во frontend: разрешение браузера, тестовая кнопка, диагностика, настройка в `localStorage`, уведомления при неактивной вкладке.
+- Персональный WebSocket канал `WS /api/ws/me` для событий новых групповых и личных сообщений текущего пользователя.
 
 ## Этап 2: Realtime
 
@@ -29,7 +30,6 @@
 - Доставка и статусы сообщений.
 - Backend read receipts и server-side unread counters.
 - Базовые уведомления в интерфейсе.
-- Персональный WebSocket канал `WS /api/ws/me` для надежной доставки уведомлений по всем чатам.
 - Service worker и server push notifications для уведомлений без открытой вкладки.
 - Стандартная поддержка emoji в сообщениях чата.
 - Вложения в direct messages.

@@ -208,6 +208,7 @@
     "notificationDebugEnabled": "localStorage notifications enabled",
     "notificationDebugVisibility": "document.visibilityState",
     "notificationDebugFocused": "window focus",
+    "personalSocketStatus": "WS /api/ws/me",
     "notificationDebugLastAttempt": "Last attempt",
     "notificationDebugLastResult": "Last result",
     "notificationDebugSkipReason": "Skip reason",
@@ -230,6 +231,11 @@
       "sent": "sent",
       "skipped": "skipped",
       "failed": "failed"
+    },
+    "personalSocketStatuses": {
+      "connected": "connected",
+      "disconnected": "disconnected",
+      "reconnecting": "reconnecting"
     },
     "notificationSkipReasons": {
       "none": "none",

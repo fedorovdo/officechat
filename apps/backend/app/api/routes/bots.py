@@ -9,18 +9,9 @@ from app.schemas.message import MessagePublic
 from app.services.bots import authenticate_bot_by_token
 from app.services.groups import get_group, get_group_by_slug, get_group_membership
 from app.services.messages import create_group_message
-from app.services.websocket_manager import group_websocket_manager
+from app.services.personal_notifications import broadcast_group_message_created
 
 router = APIRouter()
-
-
-def message_event_payload(event_type: str, group_id: object, message: object) -> dict[str, object]:
-    serialized_message = MessagePublic.model_validate(message).model_dump(mode="json")
-    return {
-        "type": event_type,
-        "group_id": str(group_id),
-        "message": serialized_message,
-    }
 
 
 @router.post("/incoming/{token}", response_model=MessagePublic)
@@ -50,8 +41,5 @@ async def incoming_bot_message(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    await group_websocket_manager.broadcast_to_group(
-        group.id,
-        message_event_payload("message.created", group.id, message),
-    )
+    await broadcast_group_message_created(session, group, message)
     return message

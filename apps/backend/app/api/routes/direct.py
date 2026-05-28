@@ -28,6 +28,7 @@ from app.services.direct import (
     list_direct_messages,
     update_direct_message,
 )
+from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
 from app.services.websocket_manager import direct_websocket_manager
 
 router = APIRouter()
@@ -58,22 +59,6 @@ async def serialize_conversation(
         other_user=get_other_user(conversation, current_user),
         last_message=await get_last_direct_message(session, conversation),
     )
-
-
-def direct_message_event_payload(
-    event_type: str,
-    conversation_id: UUID,
-    message: DirectMessage,
-) -> dict[str, object]:
-    serialized_message = DirectMessagePublic.model_validate(message).model_dump(mode="json")
-    event: dict[str, object] = {
-        "type": event_type,
-        "conversation_id": str(conversation_id),
-        "message": serialized_message,
-    }
-    if event_type == "direct.message.deleted":
-        event["message_id"] = serialized_message["id"]
-    return event
 
 
 @router.get("/conversations", response_model=list[DirectConversationPublic])
@@ -137,10 +122,7 @@ async def post_message(
     conversation = await load_conversation_or_404(session, conversation_id)
     try:
         message = await create_direct_message(session, conversation, current_user, payload)
-        await direct_websocket_manager.broadcast_to_conversation(
-            conversation_id,
-            direct_message_event_payload("direct.message.created", conversation_id, message),
-        )
+        await broadcast_direct_message_created(conversation, message)
         return message
     except PermissionError as exc:
         raise_for_permission_error(exc)

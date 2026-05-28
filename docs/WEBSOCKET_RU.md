@@ -7,6 +7,7 @@ WebSocket Real-time v0.1 добавляет базовые онлайн-обно
 ```text
 WS /api/ws/groups/{group_id}?token=...
 WS /api/ws/direct/{conversation_id}?token=...
+WS /api/ws/me?token=...
 ```
 
 Для локальной разработки клиент передает JWT bearer token в query-параметре `token`. Это удобно для MVP и отладки, но для production-сценариев нужно перейти на более строгую схему с secure cookies, короткими session-токенами или другим защищенным механизмом.
@@ -80,6 +81,32 @@ Direct message events:
   "message": {}
 }
 ```
+
+Personal notification events:
+
+```json
+{
+  "type": "user.group.message.created",
+  "group_id": "...",
+  "group": {
+    "id": "...",
+    "name": "...",
+    "slug": "..."
+  },
+  "message": {}
+}
+```
+
+```json
+{
+  "type": "user.direct.message.created",
+  "conversation_id": "...",
+  "other_user": {},
+  "message": {}
+}
+```
+
+Канал `WS /api/ws/me` подключается один раз для текущего пользователя и получает события по группам и личным разговорам, которые относятся к этому пользователю. Frontend browser notifications используют именно этот канал, чтобы уведомления не зависели от выбранного чата.
 
 ## Ограничение single-instance
 

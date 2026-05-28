@@ -45,6 +45,7 @@ from app.services.messages import (
     list_group_messages,
     update_group_message,
 )
+from app.services.personal_notifications import broadcast_group_message_created, group_message_event_payload
 from app.services.websocket_manager import group_websocket_manager
 
 router = APIRouter()
@@ -59,18 +60,6 @@ async def load_group_or_404(session: AsyncSession, group_id: UUID) -> Group:
 
 def raise_for_permission_error(exc: PermissionError) -> None:
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-
-
-def message_event_payload(event_type: str, group_id: UUID, message: object) -> dict[str, object]:
-    serialized_message = MessagePublic.model_validate(message).model_dump(mode="json")
-    event: dict[str, object] = {
-        "type": event_type,
-        "group_id": str(group_id),
-        "message": serialized_message,
-    }
-    if event_type == "message.deleted":
-        event["message_id"] = serialized_message["id"]
-    return event
 
 
 @router.get("", response_model=list[GroupPublic])
@@ -243,10 +232,7 @@ async def post_message(
     try:
         await ensure_group_message_access(session, group, current_user)
         message = await create_group_message(session, group, current_user, payload)
-        await group_websocket_manager.broadcast_to_group(
-            group_id,
-            message_event_payload("message.created", group_id, message),
-        )
+        await broadcast_group_message_created(session, group, message)
         return message
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -266,10 +252,7 @@ async def post_message_with_attachment(
     try:
         await ensure_group_message_access(session, group, current_user)
         message = await create_message_with_attachment(session, group, current_user, body, file)
-        await group_websocket_manager.broadcast_to_group(
-            group_id,
-            message_event_payload("message.created", group_id, message),
-        )
+        await broadcast_group_message_created(session, group, message)
         return message
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -299,7 +282,7 @@ async def patch_message(
         updated_message = await update_group_message(session, message, current_user, payload)
         await group_websocket_manager.broadcast_to_group(
             group_id,
-            message_event_payload("message.updated", group_id, updated_message),
+            group_message_event_payload("message.updated", group_id, updated_message),
         )
         return updated_message
     except PermissionError as exc:
@@ -361,7 +344,7 @@ async def delete_message(
         deleted_message = await delete_group_message(session, group, message, current_user)
         await group_websocket_manager.broadcast_to_group(
             group_id,
-            message_event_payload("message.deleted", group_id, deleted_message),
+            group_message_event_payload("message.deleted", group_id, deleted_message),
         )
         return deleted_message
     except PermissionError as exc:

@@ -12,7 +12,7 @@ from app.services.groups import get_group
 from app.services.messages import ensure_group_message_access
 from app.services.security import decode_access_token
 from app.services.users import get_user_by_id
-from app.services.websocket_manager import direct_websocket_manager, group_websocket_manager
+from app.services.websocket_manager import direct_websocket_manager, group_websocket_manager, user_websocket_manager
 
 router = APIRouter()
 
@@ -69,6 +69,14 @@ async def authorize_direct_websocket(conversation_id: UUID, token: str) -> bool:
         return True
 
 
+async def authorize_user_websocket(token: str) -> UUID | None:
+    async with AsyncSessionLocal() as session:
+        current_user = await get_websocket_user(session, token)
+        if current_user is None:
+            return None
+        return current_user.id
+
+
 @router.websocket("/groups/{group_id}")
 async def group_messages_websocket(
     websocket: WebSocket,
@@ -111,3 +119,25 @@ async def direct_messages_websocket(
             await websocket.receive_text()
     except WebSocketDisconnect:
         direct_websocket_manager.disconnect(conversation_id, websocket)
+
+
+@router.websocket("/me")
+async def personal_notifications_websocket(
+    websocket: WebSocket,
+    token: Annotated[str | None, Query()] = None,
+) -> None:
+    if token is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    user_id = await authorize_user_websocket(token)
+    if user_id is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await user_websocket_manager.connect_user(user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        user_websocket_manager.disconnect_user(user_id, websocket)

@@ -208,6 +208,7 @@
     "notificationDebugEnabled": "localStorage notifications enabled",
     "notificationDebugVisibility": "document.visibilityState",
     "notificationDebugFocused": "window focus",
+    "personalSocketStatus": "WS /api/ws/me",
     "notificationDebugLastAttempt": "Последняя попытка",
     "notificationDebugLastResult": "Последний результат",
     "notificationDebugSkipReason": "Причина пропуска",
@@ -230,6 +231,11 @@
       "sent": "отправлено",
       "skipped": "пропущено",
       "failed": "ошибка"
+    },
+    "personalSocketStatuses": {
+      "connected": "подключено",
+      "disconnected": "отключено",
+      "reconnecting": "переподключение"
     },
     "notificationSkipReasons": {
       "none": "нет",

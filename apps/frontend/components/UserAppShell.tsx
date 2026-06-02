@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import {
   clearStoredAccessToken,
   createDirectConversation,
+  createDiscussion,
   getCurrentUser,
   getDirectConversations,
   getDirectWebSocketUrl,
@@ -31,6 +32,7 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { DirectChatPanel } from "./DirectChatPanel";
+import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
 
 type UserAppShellProps = {
@@ -255,6 +257,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [isNotificationGuideOpen, setIsNotificationGuideOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
+  const [activeDiscussionId, setActiveDiscussionId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
@@ -565,6 +568,24 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     });
   }
 
+  async function handleOpenDiscussion(message: OfficeChatMessage) {
+    if (!currentUser) {
+      return;
+    }
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    try {
+      const discussion = await createDiscussion(token, message.group_id, message.id);
+      setActiveDiscussionId(discussion.id);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.openError);
+    }
+  }
+
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
@@ -852,6 +873,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         selectedChatId: getSelectionDebugId(currentSelection),
         onClick: () => {
           setSelected({ type: "group", groupId: payload.group_id });
+          setActiveDiscussionId(null);
           markGroupRead(payload.group_id);
         }
       });
@@ -874,7 +896,26 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         selectedChatId: getSelectionDebugId(currentSelection),
         onClick: () => {
           setSelected({ type: "direct", conversationId: payload.conversation_id });
+          setActiveDiscussionId(null);
           markDirectUserRead(payload.other_user.id);
+        }
+      });
+    }
+
+    function handleDiscussionPersonalEvent(
+      payload: Extract<PersonalNotificationEvent, { type: "user.discussion.message.created" }>
+    ) {
+      const currentSelection = selectedRef.current;
+      const preview = payload.message.is_deleted ? dictionary.messages.deletedMessage : payload.message.body;
+      attemptBrowserNotification({
+        eventType: payload.type,
+        messageId: payload.message.id,
+        senderUserId: payload.message.sender_user_id,
+        body: dictionary.discussions.newMessageNotification.replace("{preview}", preview),
+        selectedChatId: getSelectionDebugId(currentSelection),
+        onClick: () => {
+          setSelected({ type: "group", groupId: payload.discussion.source_group_id });
+          setActiveDiscussionId(payload.discussion_id);
         }
       });
     }
@@ -894,6 +935,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           }
           if (payload.type === "user.direct.message.created") {
             handleDirectPersonalEvent(payload);
+            return;
+          }
+          if (payload.type === "user.discussion.message.created") {
+            handleDiscussionPersonalEvent(payload);
           }
         } catch {
           return;
@@ -918,7 +963,14 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       websocket?.close();
       setPersonalSocketStatus("disconnected");
     };
-  }, [currentUser, dictionary.messages.mentionedYou, updateDirectUserActivity, updateGroupActivity]);
+  }, [
+    currentUser,
+    dictionary.discussions.newMessageNotification,
+    dictionary.messages.deletedMessage,
+    dictionary.messages.mentionedYou,
+    updateDirectUserActivity,
+    updateGroupActivity
+  ]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -1110,6 +1162,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         return currentConversations.map((item) => (item.id === conversation.id ? conversation : item));
       });
       setSelected({ type: "direct", conversationId: conversation.id });
+      setActiveDiscussionId(null);
     } catch (caughtError) {
       setError(caughtError instanceof Error && caughtError.name !== "AbortError" ? caughtError.message : dictionary.appShell.loadError);
     } finally {
@@ -1168,6 +1221,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     key={group.id}
                     onClick={() => {
                       setSelected({ type: "group", groupId: group.id });
+                      setActiveDiscussionId(null);
                       markGroupRead(group.id);
                     }}
                     type="button"
@@ -1256,24 +1310,36 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           ) : null}
 
           {selectedGroup && currentUser ? (
-            <>
-              <div className="user-app-chat-heading">
-                <div>
-                  <h2 className="section-title">{selectedGroup.name}</h2>
-                  <p className="admin-current">{selectedGroup.slug}</p>
+            <div className={activeDiscussionId ? "user-app-chat-layout user-app-chat-layout-discussion" : "user-app-chat-layout"}>
+              <div className="user-app-chat-primary">
+                <div className="user-app-chat-heading">
+                  <div>
+                    <h2 className="section-title">{selectedGroup.name}</h2>
+                    <p className="admin-current">{selectedGroup.slug}</p>
+                  </div>
+                  <Link className="secondary-link" href={`/${locale}/groups/${selectedGroup.id}`}>
+                    {dictionary.appShell.groupDetails}
+                  </Link>
                 </div>
-                <Link className="secondary-link" href={`/${locale}/groups/${selectedGroup.id}`}>
-                  {dictionary.appShell.groupDetails}
-                </Link>
+                <GroupChatPanel
+                  canModerateMessages={canModerateMessages}
+                  currentUser={currentUser}
+                  dictionary={dictionary}
+                  groupId={selectedGroup.id}
+                  locale={locale}
+                  onDiscuss={(message) => void handleOpenDiscussion(message)}
+                />
               </div>
-              <GroupChatPanel
-                canModerateMessages={canModerateMessages}
-                currentUser={currentUser}
-                dictionary={dictionary}
-                groupId={selectedGroup.id}
-                locale={locale}
-              />
-            </>
+              {activeDiscussionId ? (
+                <DiscussionPanel
+                  currentUser={currentUser}
+                  dictionary={dictionary}
+                  discussionId={activeDiscussionId}
+                  locale={locale}
+                  onClose={() => setActiveDiscussionId(null)}
+                />
+              ) : null}
+            </div>
           ) : null}
 
           {selectedDirectConversation && currentUser ? (

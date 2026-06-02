@@ -4,13 +4,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.direct import DirectConversation, DirectMessage
+from app.models.discussion import Discussion, DiscussionMessage
 from app.models.group import Group, GroupMember
 from app.models.message import Message
 from app.models.user import User
 from app.schemas.direct import DirectMessagePublic
+from app.schemas.discussion import DiscussionMessagePublic
 from app.schemas.message import MessagePublic
 from app.schemas.user import UserDirectoryEntry
-from app.services.websocket_manager import direct_websocket_manager, group_websocket_manager, user_websocket_manager
+from app.services.websocket_manager import (
+    direct_websocket_manager,
+    discussion_websocket_manager,
+    group_websocket_manager,
+    user_websocket_manager,
+)
 
 
 def group_message_event_payload(event_type: str, group_id: UUID, message: Message) -> dict[str, object]:
@@ -37,6 +44,22 @@ def direct_message_event_payload(
         "message": serialized_message,
     }
     if event_type == "direct.message.deleted":
+        event["message_id"] = serialized_message["id"]
+    return event
+
+
+def discussion_message_event_payload(
+    event_type: str,
+    discussion_id: UUID,
+    message: DiscussionMessage,
+) -> dict[str, object]:
+    serialized_message = DiscussionMessagePublic.model_validate(message).model_dump(mode="json")
+    event: dict[str, object] = {
+        "type": event_type,
+        "discussion_id": str(discussion_id),
+        "message": serialized_message,
+    }
+    if event_type == "discussion.message.deleted":
         event["message_id"] = serialized_message["id"]
     return event
 
@@ -117,3 +140,32 @@ async def broadcast_direct_message_created(conversation: DirectConversation, mes
             user_id,
             personal_direct_message_event_payload(conversation, user_id, message),
         )
+
+
+def personal_discussion_message_event_payload(discussion: Discussion, message: DiscussionMessage) -> dict[str, object]:
+    return {
+        "type": "user.discussion.message.created",
+        "discussion_id": str(discussion.id),
+        "discussion": {
+            "id": str(discussion.id),
+            "title": discussion.title,
+            "source_group_id": str(discussion.source_group_id),
+        },
+        "message": DiscussionMessagePublic.model_validate(message).model_dump(mode="json"),
+    }
+
+
+async def broadcast_discussion_message_created(
+    session: AsyncSession,
+    discussion: Discussion,
+    message: DiscussionMessage,
+) -> None:
+    from app.services.discussions import list_active_discussion_member_user_ids
+
+    await discussion_websocket_manager.broadcast_to_discussion(
+        discussion.id,
+        discussion_message_event_payload("discussion.message.created", discussion.id, message),
+    )
+    event = personal_discussion_message_event_payload(discussion, message)
+    for user_id in await list_active_discussion_member_user_ids(session, discussion.id):
+        await user_websocket_manager.broadcast_to_user(user_id, event)

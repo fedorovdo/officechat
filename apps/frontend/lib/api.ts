@@ -1,5 +1,6 @@
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
 export type GroupRole = "owner" | "moderator" | "member";
+export type DiscussionMemberRole = "owner" | "member";
 
 export type OfficeChatUser = {
   id: string;
@@ -135,6 +136,49 @@ export type OfficeChatDirectConversation = {
   last_message: OfficeChatDirectMessage | null;
 };
 
+export type OfficeChatDiscussionSourceMessage = {
+  id: string;
+  sender: OfficeChatDirectoryUser;
+  body_preview: string;
+  is_deleted: boolean;
+  created_at: string;
+};
+
+export type OfficeChatDiscussionMember = {
+  id: string;
+  discussion_id: string;
+  user_id: string;
+  role: DiscussionMemberRole;
+  joined_at: string;
+  user: OfficeChatDirectoryUser;
+};
+
+export type OfficeChatDiscussion = {
+  id: string;
+  source_group_id: string;
+  source_message_id: string;
+  title: string | null;
+  created_by_user_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  source_message: OfficeChatDiscussionSourceMessage;
+  members: OfficeChatDiscussionMember[];
+  can_manage_members: boolean;
+};
+
+export type OfficeChatDiscussionMessage = {
+  id: string;
+  discussion_id: string;
+  sender_user_id: string;
+  body: string;
+  is_deleted: boolean;
+  edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+  sender: OfficeChatDirectoryUser;
+};
+
 export type OfficeChatBot = {
   id: string;
   user_id: string;
@@ -183,6 +227,24 @@ export type DirectMessageEvent = {
   message_id?: string;
 };
 
+export type DiscussionEvent =
+  | {
+      type: "discussion.message.created" | "discussion.message.updated" | "discussion.message.deleted";
+      discussion_id: string;
+      message: OfficeChatDiscussionMessage;
+      message_id?: string;
+    }
+  | {
+      type: "discussion.member.added";
+      discussion_id: string;
+      member: OfficeChatDiscussionMember;
+    }
+  | {
+      type: "discussion.member.removed";
+      discussion_id: string;
+      member_id: string;
+    };
+
 export type PersonalNotificationEvent =
   | {
       type: "user.group.message.created";
@@ -196,6 +258,12 @@ export type PersonalNotificationEvent =
       conversation_id: string;
       other_user: OfficeChatDirectoryUser;
       message: OfficeChatDirectMessage;
+    }
+  | {
+      type: "user.discussion.message.created";
+      discussion_id: string;
+      discussion: Pick<OfficeChatDiscussion, "id" | "title" | "source_group_id">;
+      message: OfficeChatDiscussionMessage;
     };
 
 export type CreateGroupPayload = {
@@ -508,6 +576,81 @@ export function getPersonalWebSocketUrl(token: string) {
   const backendUrl = new URL(apiBaseUrl);
   backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
   backendUrl.pathname = "/api/ws/me";
+  // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
+  backendUrl.search = new URLSearchParams({ token }).toString();
+  return backendUrl.toString();
+}
+
+export function createDiscussion(
+  token: string,
+  sourceGroupId: string,
+  sourceMessageId: string,
+  title?: string | null
+) {
+  return apiFetch<OfficeChatDiscussion>("/api/discussions", token, {
+    method: "POST",
+    body: JSON.stringify({
+      source_group_id: sourceGroupId,
+      source_message_id: sourceMessageId,
+      title: title ?? null
+    })
+  });
+}
+
+export function getDiscussionByMessage(token: string, messageId: string) {
+  return apiFetch<OfficeChatDiscussion>(`/api/discussions/by-message/${messageId}`, token);
+}
+
+export function getDiscussion(token: string, discussionId: string) {
+  return apiFetch<OfficeChatDiscussion>(`/api/discussions/${discussionId}`, token);
+}
+
+export function getDiscussionMessages(token: string, discussionId: string, limit = 50) {
+  return apiFetch<OfficeChatDiscussionMessage[]>(`/api/discussions/${discussionId}/messages?limit=${limit}`, token);
+}
+
+export function sendDiscussionMessage(token: string, discussionId: string, body: string) {
+  return apiFetch<OfficeChatDiscussionMessage>(`/api/discussions/${discussionId}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ body })
+  });
+}
+
+export function editDiscussionMessage(token: string, discussionId: string, messageId: string, body: string) {
+  return apiFetch<OfficeChatDiscussionMessage>(`/api/discussions/${discussionId}/messages/${messageId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ body })
+  });
+}
+
+export function deleteDiscussionMessage(token: string, discussionId: string, messageId: string) {
+  return apiFetch<OfficeChatDiscussionMessage>(`/api/discussions/${discussionId}/messages/${messageId}`, token, {
+    method: "DELETE"
+  });
+}
+
+export function addDiscussionMember(
+  token: string,
+  discussionId: string,
+  username: string,
+  role: DiscussionMemberRole = "member"
+) {
+  return apiFetch<OfficeChatDiscussionMember>(`/api/discussions/${discussionId}/members`, token, {
+    method: "POST",
+    body: JSON.stringify({ username, role })
+  });
+}
+
+export function removeDiscussionMember(token: string, discussionId: string, memberId: string) {
+  return apiFetch<void>(`/api/discussions/${discussionId}/members/${memberId}`, token, {
+    method: "DELETE"
+  });
+}
+
+export function getDiscussionWebSocketUrl(token: string, discussionId: string) {
+  const backendUrl = new URL(apiBaseUrl);
+  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
+  backendUrl.pathname = `/api/ws/discussions/${discussionId}`;
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
   backendUrl.search = new URLSearchParams({ token }).toString();
   return backendUrl.toString();

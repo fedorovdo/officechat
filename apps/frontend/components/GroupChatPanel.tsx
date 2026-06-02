@@ -24,6 +24,7 @@ type GroupChatPanelProps = {
   dictionary: Dictionary;
   groupId: string;
   locale: Locale;
+  onDiscuss?: (message: OfficeChatMessage) => void;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -33,7 +34,8 @@ export function GroupChatPanel({
   currentUser,
   dictionary,
   groupId,
-  locale
+  locale,
+  onDiscuss
 }: GroupChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -463,6 +465,11 @@ export function GroupChatPanel({
                   <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">
                     {dictionary.messages.reply}
                   </button>
+                  {onDiscuss ? (
+                    <button className="table-action" onClick={() => onDiscuss(message)} type="button">
+                      {dictionary.discussions.discuss}
+                    </button>
+                  ) : null}
                   {canEdit ? (
                     <button
                       className="table-action"

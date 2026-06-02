@@ -86,6 +86,8 @@ Reply-to-message support is available for both group chats and direct messages. 
 
 Basic `@username` mentions are available in group messages. OfficeChat detects active non-bot users who belong to the same group, includes mention metadata in REST/WebSocket payloads, highlights recognized mentions in the chat UI, and uses mention-aware browser notification text. Unknown usernames are ignored safely. Autocomplete, profile links, direct-message mentions, and markdown rendering are not implemented yet.
 
+Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, text-only discussion messages, Ctrl+Enter sending, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, discussion attachments, nested threads, a discussion sidebar, read receipts, and typing indicators are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
+
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
 Groups can be archived and restored with `is_active=false/true`. Archived groups are not physically deleted, which keeps message history, attachments, and membership references safe. Regular user and app-shell group lists show active groups only; admin group management can request archived groups with `GET /api/groups?include_inactive=true`.

@@ -1010,6 +1010,90 @@ a {
   max-width: 780px;
 }
 
+.user-app-chat-layout {
+  min-width: 0;
+}
+
+.user-app-chat-layout-discussion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 20px;
+  align-items: start;
+}
+
+.user-app-chat-primary {
+  min-width: 0;
+}
+
+.discussion-panel {
+  min-width: 0;
+  max-height: calc(100vh - 116px);
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.discussion-panel-header .eyebrow {
+  margin-bottom: 6px;
+}
+
+.discussion-source,
+.discussion-message {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+
+.discussion-source p,
+.discussion-message p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.discussion-section,
+.discussion-members,
+.discussion-messages-list {
+  display: grid;
+  gap: 10px;
+}
+
+.discussion-member {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.discussion-invite-form,
+.discussion-compose {
+  display: grid;
+  gap: 10px;
+}
+
+.discussion-message-deleted {
+  background: #f5f6f8;
+}
+
+@media (max-width: 1180px) {
+  .user-app-chat-layout-discussion {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .discussion-panel {
+    max-height: none;
+  }
+}
+
 .user-app-chat-heading {
   display: flex;
   align-items: flex-start;

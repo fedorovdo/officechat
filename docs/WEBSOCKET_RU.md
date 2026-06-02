@@ -7,6 +7,7 @@ WebSocket Real-time v0.1 добавляет базовые онлайн-обно
 ```text
 WS /api/ws/groups/{group_id}?token=...
 WS /api/ws/direct/{conversation_id}?token=...
+WS /api/ws/discussions/{discussion_id}?token=...
 WS /api/ws/me?token=...
 ```
 
@@ -82,6 +83,18 @@ Direct message events:
 }
 ```
 
+Discussion events:
+
+```json
+{
+  "type": "discussion.message.created",
+  "discussion_id": "...",
+  "message": {}
+}
+```
+
+Также используются `discussion.message.updated`, `discussion.message.deleted`, `discussion.member.added` и `discussion.member.removed`.
+
 Personal notification events:
 
 ```json
@@ -107,7 +120,22 @@ Personal notification events:
 }
 ```
 
+```json
+{
+  "type": "user.discussion.message.created",
+  "discussion_id": "...",
+  "discussion": {
+    "id": "...",
+    "title": "...",
+    "source_group_id": "..."
+  },
+  "message": {}
+}
+```
+
 Канал `WS /api/ws/me` подключается один раз для текущего пользователя и получает события по группам и личным разговорам, которые относятся к этому пользователю. Frontend browser notifications используют именно этот канал, чтобы уведомления не зависели от выбранного чата.
+
+Сообщения discussion также отправляются через персональный канал участникам обсуждения. Это позволяет показать browser notification, даже если боковая панель discussion закрыта.
 
 Для групповых сообщений payload `message` содержит массив `mentions`, а personal event содержит `mentioned_user_ids`. Это позволяет frontend показать более заметный sidebar indicator и mention-aware browser notification для упомянутого пользователя без отдельного WebSocket канала.
 
@@ -122,7 +150,7 @@ Personal notification events:
 - Нет typing indicators.
 - Нет read receipts.
 - Нет direct message attachments.
-- Нет file attachments.
+- Нет discussion file attachments.
 - Нет reactions.
 - Нет mention autocomplete и profile links.
 - Нет multi-instance pub/sub.

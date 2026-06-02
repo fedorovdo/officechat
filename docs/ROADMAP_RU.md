@@ -24,6 +24,7 @@
 - Персональный WebSocket канал `WS /api/ws/me` для событий новых групповых и личных сообщений текущего пользователя.
 - Reply-to-message для групповых и личных сообщений: компактная цитата исходного сообщения без thread/discussion view.
 - Базовые `@username` mentions в групповых сообщениях: определение активных участников группы, подсветка и mention-aware browser notifications.
+- Базовые message discussions из групповых сообщений: правая боковая панель, участники, text-only сообщения и WebSocket updates.
 
 ## Этап 2: Realtime
 
@@ -34,7 +35,7 @@
 - Базовые уведомления в интерфейсе.
 - Service worker и server push notifications для уведомлений без открытой вкладки.
 - Стандартная поддержка emoji в сообщениях чата.
-- Threads/discussions или расширенное представление цепочек ответов.
+- Расширение discussions: отдельный sidebar список, вложения, direct-message discussions и более развитое представление цепочек.
 - Autocomplete и profile links для mentions, поддержка mentions в direct messages.
 - Вложения в direct messages.
 - Read receipts и typing indicators для групп и direct messages.

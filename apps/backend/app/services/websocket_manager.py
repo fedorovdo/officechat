@@ -75,6 +75,56 @@ class DirectWebSocketManager:
 direct_websocket_manager = DirectWebSocketManager()
 
 
+class DiscussionWebSocketManager:
+    def __init__(self) -> None:
+        self._connections: dict[UUID, set[WebSocket]] = defaultdict(set)
+        self._connection_users: dict[UUID, dict[WebSocket, UUID]] = defaultdict(dict)
+
+    async def connect(self, discussion_id: UUID, user_id: UUID, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._connections[discussion_id].add(websocket)
+        self._connection_users[discussion_id][websocket] = user_id
+        logger.info(
+            "WebSocket connected to discussion %s; active=%s",
+            discussion_id,
+            len(self._connections[discussion_id]),
+        )
+
+    def disconnect(self, discussion_id: UUID, websocket: WebSocket) -> None:
+        connections = self._connections.get(discussion_id)
+        if connections is None:
+            return
+
+        connections.discard(websocket)
+        connection_users = self._connection_users.get(discussion_id)
+        if connection_users is not None:
+            connection_users.pop(websocket, None)
+        if not connections:
+            self._connections.pop(discussion_id, None)
+            self._connection_users.pop(discussion_id, None)
+        logger.info("WebSocket disconnected from discussion %s; active=%s", discussion_id, len(connections))
+
+    async def disconnect_user(self, discussion_id: UUID, user_id: UUID) -> None:
+        connection_users = self._connection_users.get(discussion_id, {})
+        for websocket, connected_user_id in list(connection_users.items()):
+            if connected_user_id != user_id:
+                continue
+            await websocket.close(code=1008)
+            self.disconnect(discussion_id, websocket)
+
+    async def broadcast_to_discussion(self, discussion_id: UUID, event: dict[str, object]) -> None:
+        # TODO: Use Valkey pub/sub or another broker before running multiple backend instances.
+        connections = list(self._connections.get(discussion_id, set()))
+        for websocket in connections:
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                self.disconnect(discussion_id, websocket)
+
+
+discussion_websocket_manager = DiscussionWebSocketManager()
+
+
 class UserWebSocketManager:
     def __init__(self) -> None:
         self._connections: dict[UUID, set[WebSocket]] = defaultdict(set)

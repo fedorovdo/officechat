@@ -241,6 +241,20 @@ export function GroupChatPanel({
     return dictionary.messages.replyPreviewUnavailable;
   }
 
+  function renderMessageBody(message: OfficeChatMessage) {
+    const mentionedUsernames = new Set(message.mentions.map((mention) => mention.username.toLowerCase()));
+    return message.body.split(/(@[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu).map((part, index) => {
+      const username = part.startsWith("@") ? part.slice(1).toLowerCase() : "";
+      return mentionedUsernames.has(username) ? (
+        <mark className="message-mention" key={`${message.id}-${index}`}>
+          {part}
+        </mark>
+      ) : (
+        part
+      );
+    });
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const token = getStoredAccessToken();
@@ -423,7 +437,7 @@ export function GroupChatPanel({
                     </div>
                   ) : null}
                   <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
-                    {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
+                    {message.is_deleted ? dictionary.messages.deletedMessage : renderMessageBody(message)}
                   </p>
                 </>
               )}
@@ -498,6 +512,7 @@ export function GroupChatPanel({
             </button>
           </div>
         ) : null}
+        <p className="note message-compose-hint">{dictionary.messages.mentionHint}</p>
         <label className="field">
           <span className="field-label">{dictionary.messages.body}</span>
           <textarea

@@ -14,6 +14,7 @@ from app.models.attachment import MessageAttachment
 from app.models.group import Group
 from app.models.message import Message
 from app.models.user import User
+from app.services.mentions import sync_message_mentions
 from app.services.messages import load_message_with_sender
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -118,6 +119,7 @@ async def create_message_with_attachment(
                 size_bytes=size_bytes,
             )
         )
+        await sync_message_mentions(session, message)
         await session.commit()
     except Exception:
         await session.rollback()

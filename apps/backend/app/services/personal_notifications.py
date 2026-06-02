@@ -51,6 +51,7 @@ async def list_active_group_member_user_ids(session: AsyncSession, group_id: UUI
 
 
 def personal_group_message_event_payload(group: Group, message: Message) -> dict[str, object]:
+    serialized_message = MessagePublic.model_validate(message).model_dump(mode="json")
     return {
         "type": "user.group.message.created",
         "group_id": str(group.id),
@@ -59,7 +60,8 @@ def personal_group_message_event_payload(group: Group, message: Message) -> dict
             "name": group.name,
             "slug": group.slug,
         },
-        "message": MessagePublic.model_validate(message).model_dump(mode="json"),
+        "message": serialized_message,
+        "mentioned_user_ids": [mention["user_id"] for mention in serialized_message["mentions"]],
     }
 
 

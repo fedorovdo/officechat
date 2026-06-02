@@ -675,6 +675,18 @@ a {
   line-height: 1.5;
 }
 
+.message-mention {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #dbeafe;
+  color: #174ea6;
+  font-weight: 800;
+}
+
+.message-compose-hint {
+  margin: 0;
+}
+
 .message-reply-preview,
 .reply-compose-context {
   display: grid;
@@ -929,6 +941,17 @@ a {
   border-radius: 999px;
   background: var(--app-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 18%, transparent);
+}
+
+.sidebar-unread-dot-mention {
+  width: 11px;
+  height: 11px;
+  background: #b42318;
+  box-shadow: 0 0 0 3px rgb(180 35 24 / 16%);
+}
+
+.user-app-nav-item-mentioned {
+  border-color: rgb(180 35 24 / 28%);
 }
 
 .sidebar-item-top {

@@ -82,7 +82,9 @@ Direct/private messages are available in the user app shell:
 
 Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct-message file attachments, read receipts, and typing indicators are not implemented yet.
 
-Reply-to-message support is available for both group chats and direct messages. Users can reply to an existing message, see a compact quoted preview in the new message, and still edit/delete messages through the existing actions. This is a lightweight reply feature only; threaded discussions, nested reply views, forwarding, mentions, and markdown rendering are planned later.
+Reply-to-message support is available for both group chats and direct messages. Users can reply to an existing message, see a compact quoted preview in the new message, and still edit/delete messages through the existing actions. This is a lightweight reply feature only; threaded discussions, nested reply views, forwarding, and markdown rendering are planned later.
+
+Basic `@username` mentions are available in group messages. OfficeChat detects active non-bot users who belong to the same group, includes mention metadata in REST/WebSocket payloads, highlights recognized mentions in the chat UI, and uses mention-aware browser notification text. Unknown usernames are ignored safely. Autocomplete, profile links, direct-message mentions, and markdown rendering are not implemented yet.
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 

@@ -75,6 +75,7 @@ export type OfficeChatMessage = {
   sender: OfficeChatUser;
   reply_to: OfficeChatMessageReplyPreview | null;
   attachments: OfficeChatMessageAttachment[];
+  mentions: OfficeChatMessageMention[];
 };
 
 export type OfficeChatMessageReplyPreview = {
@@ -93,6 +94,12 @@ export type OfficeChatMessageAttachment = {
   size_bytes: number;
   created_at: string;
   download_url: string;
+};
+
+export type OfficeChatMessageMention = {
+  user_id: string;
+  username: string;
+  display_name: string;
 };
 
 export type OfficeChatDirectMessage = {
@@ -182,6 +189,7 @@ export type PersonalNotificationEvent =
       group_id: string;
       group: Pick<OfficeChatGroup, "id" | "name" | "slug">;
       message: OfficeChatMessage;
+      mentioned_user_ids: string[];
     }
   | {
       type: "user.direct.message.created";

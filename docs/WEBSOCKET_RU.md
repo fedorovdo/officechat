@@ -93,6 +93,7 @@ Personal notification events:
     "name": "...",
     "slug": "..."
   },
+  "mentioned_user_ids": ["..."],
   "message": {}
 }
 ```
@@ -108,6 +109,8 @@ Personal notification events:
 
 Канал `WS /api/ws/me` подключается один раз для текущего пользователя и получает события по группам и личным разговорам, которые относятся к этому пользователю. Frontend browser notifications используют именно этот канал, чтобы уведомления не зависели от выбранного чата.
 
+Для групповых сообщений payload `message` содержит массив `mentions`, а personal event содержит `mentioned_user_ids`. Это позволяет frontend показать более заметный sidebar indicator и mention-aware browser notification для упомянутого пользователя без отдельного WebSocket канала.
+
 ## Ограничение single-instance
 
 Текущий connection manager хранит активные WebSocket-подключения в памяти одного backend-процесса. Это подходит для локальной разработки и одного экземпляра backend.
@@ -121,4 +124,5 @@ Personal notification events:
 - Нет direct message attachments.
 - Нет file attachments.
 - Нет reactions.
+- Нет mention autocomplete и profile links.
 - Нет multi-instance pub/sub.

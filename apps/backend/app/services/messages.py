@@ -7,10 +7,12 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.group import Group
+from app.models.mention import MessageMention
 from app.models.message import Message
 from app.models.user import User
 from app.schemas.message import MessageCreate, MessageUpdate
 from app.services.groups import get_group_membership, is_global_group_admin
+from app.services.mentions import sync_message_mentions
 
 DELETED_MESSAGE_BODY = "Message deleted"
 GROUP_MESSAGE_MANAGERS = {"owner", "moderator"}
@@ -47,6 +49,7 @@ async def list_group_messages(
             selectinload(Message.sender),
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
         )
         .where(Message.group_id == group.id)
         .order_by(Message.created_at.desc())
@@ -83,6 +86,8 @@ async def create_group_message(
         message_type=payload.message_type.strip() or "text",
     )
     session.add(message)
+    await session.flush()
+    await sync_message_mentions(session, message)
     await session.commit()
     await session.refresh(message)
     return await load_message_with_sender(session, message.id)
@@ -95,6 +100,7 @@ async def get_group_message(session: AsyncSession, group: Group, message_id: UUI
             selectinload(Message.sender),
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
         )
         .where(Message.id == message_id, Message.group_id == group.id)
     )
@@ -108,6 +114,7 @@ async def load_message_with_sender(session: AsyncSession, message_id: UUID) -> M
             selectinload(Message.sender),
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
         )
         .where(Message.id == message_id)
     )
@@ -127,6 +134,7 @@ async def update_group_message(
 
     message.body = validate_message_body(payload.body)
     message.edited_at = datetime.now(timezone.utc)
+    await sync_message_mentions(session, message)
     await session.commit()
     await session.refresh(message)
     return await load_message_with_sender(session, message.id)

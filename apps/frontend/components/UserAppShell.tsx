@@ -57,6 +57,7 @@ type SidebarActivityItem = {
   preview: string;
   timestamp: string;
   unread: boolean;
+  mentioned?: boolean;
 };
 
 type SidebarActivityState = {
@@ -451,11 +452,12 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }
 
   const updateGroupActivity = useCallback(
-    (groupId: string, message: OfficeChatMessage, markUnread: boolean) => {
+    (groupId: string, message: OfficeChatMessage, markUnread: boolean, markMentioned = false) => {
       const nextActivity = {
         preview: getGroupMessagePreview(message),
         timestamp: message.updated_at ?? message.created_at,
-        unread: markUnread
+        unread: markUnread,
+        mentioned: markMentioned
       };
       setSidebarActivity((currentActivity) => ({
         ...currentActivity,
@@ -464,7 +466,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           [groupId]: {
             ...currentActivity.groups[groupId],
             ...nextActivity,
-            unread: markUnread || currentActivity.groups[groupId]?.unread || false
+            unread: markUnread || currentActivity.groups[groupId]?.unread || false,
+            mentioned: markMentioned || currentActivity.groups[groupId]?.mentioned || false
           }
         }
       }));
@@ -505,7 +508,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             timestamp: "",
             unread: false
           }),
-          unread: false
+          unread: false,
+          mentioned: false
         }
       }
     }));
@@ -733,7 +737,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           }
           const isSelectedGroup = selected.type === "group" && selected.groupId === payload.group_id;
           const isOwnMessage = payload.message.sender_user_id === currentUser.id;
-          updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
+          const isMentioned = payload.message.mentions.some((mention) => mention.user_id === currentUser.id);
+          updateGroupActivity(
+            payload.group_id,
+            payload.message,
+            !isSelectedGroup && !isOwnMessage,
+            isMentioned && !isSelectedGroup && !isOwnMessage
+          );
         } catch {
           return;
         }
@@ -753,7 +763,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       return;
     }
 
-    // TODO: Add a personal WS /api/ws/me channel so direct notifications do not depend on known conversations.
+    // Conversation-specific sockets keep known direct-chat sidebar previews fresh; /api/ws/me handles global notifications.
     const token = getStoredAccessToken();
     if (!token) {
       return;
@@ -821,14 +831,24 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       const currentSelection = selectedRef.current;
       const isSelectedGroup = currentSelection.type === "group" && currentSelection.groupId === payload.group_id;
       const isOwnMessage = payload.message.sender_user_id === activeUser.id;
-      updateGroupActivity(payload.group_id, payload.message, !isSelectedGroup && !isOwnMessage);
+      const isMentioned = payload.mentioned_user_ids.includes(activeUser.id);
+      updateGroupActivity(
+        payload.group_id,
+        payload.message,
+        !isSelectedGroup && !isOwnMessage,
+        isMentioned && !isSelectedGroup && !isOwnMessage
+      );
 
       const preview = getGroupMessagePreview(payload.message);
       attemptBrowserNotification({
         eventType: payload.type,
         messageId: payload.message.id,
         senderUserId: payload.message.sender_user_id,
-        body: `${payload.group.name} - ${payload.message.sender.display_name}: ${preview}`,
+        body: isMentioned
+          ? dictionary.messages.mentionedYou
+              .replace("{group_name}", payload.group.name)
+              .replace("{preview}", preview)
+          : `${payload.group.name} - ${payload.message.sender.display_name}: ${preview}`,
         selectedChatId: getSelectionDebugId(currentSelection),
         onClick: () => {
           setSelected({ type: "group", groupId: payload.group_id });
@@ -898,7 +918,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       websocket?.close();
       setPersonalSocketStatus("disconnected");
     };
-  }, [currentUser, updateDirectUserActivity, updateGroupActivity]);
+  }, [currentUser, dictionary.messages.mentionedYou, updateDirectUserActivity, updateGroupActivity]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -1137,7 +1157,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 const itemClassName = [
                   "user-app-nav-item",
                   isSelected ? "user-app-nav-item-active" : "",
-                  activity?.unread ? "user-app-nav-item-unread" : ""
+                  activity?.unread ? "user-app-nav-item-unread" : "",
+                  activity?.mentioned ? "user-app-nav-item-mentioned" : ""
                 ]
                   .filter(Boolean)
                   .join(" ");
@@ -1154,8 +1175,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     {activity?.unread ? (
                       <span
                         aria-label={dictionary.sidebarActivity.unread}
-                        className="sidebar-unread-dot"
-                        title={dictionary.sidebarActivity.newMessages}
+                        className={activity.mentioned ? "sidebar-unread-dot sidebar-unread-dot-mention" : "sidebar-unread-dot"}
+                        title={activity.mentioned ? dictionary.messages.mentions : dictionary.sidebarActivity.newMessages}
                       />
                     ) : null}
                     <span className="sidebar-item-top">

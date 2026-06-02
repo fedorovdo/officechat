@@ -71,6 +71,27 @@ class MessageReplyPreviewPublic(BaseModel):
         }
 
 
+class MessageMentionPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: UUID
+    username: str
+    display_name: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_mentioned_user(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return data
+
+        user = getattr(data, "mentioned_user")
+        return {
+            "user_id": getattr(data, "mentioned_user_id"),
+            "username": getattr(user, "username"),
+            "display_name": getattr(user, "display_name"),
+        }
+
+
 class MessagePublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,3 +108,4 @@ class MessagePublic(BaseModel):
     sender: UserPublic
     reply_to: MessageReplyPreviewPublic | None = None
     attachments: list[MessageAttachmentPublic] = Field(default_factory=list)
+    mentions: list[MessageMentionPublic] = Field(default_factory=list)

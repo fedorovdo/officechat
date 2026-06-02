@@ -144,6 +144,9 @@
     "cancelReply": "Отменить ответ",
     "originalMessageDeleted": "Исходное сообщение удалено",
     "replyPreviewUnavailable": "Предпросмотр ответа недоступен",
+    "mentionHint": "Можно упомянуть пользователя через @username",
+    "mentionedYou": "Вас упомянули в {group_name}: {preview}",
+    "mentions": "Вас упомянули",
     "botBadge": "BOT",
     "deletedMessage": "Сообщение удалено",
     "newMessages": "Новые сообщения"

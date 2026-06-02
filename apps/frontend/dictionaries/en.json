@@ -144,6 +144,9 @@
     "cancelReply": "Cancel reply",
     "originalMessageDeleted": "Original message deleted",
     "replyPreviewUnavailable": "Reply preview unavailable",
+    "mentionHint": "You can mention a user with @username",
+    "mentionedYou": "You were mentioned in {group_name}: {preview}",
+    "mentions": "Mentioned you",
     "botBadge": "BOT",
     "deletedMessage": "Message deleted",
     "newMessages": "New messages"

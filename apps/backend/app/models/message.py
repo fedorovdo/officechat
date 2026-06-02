@@ -39,3 +39,7 @@ class Message(Base):
         back_populates="message",
         cascade="all, delete-orphan",
     )
+    mentions: Mapped[list["MessageMention"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )

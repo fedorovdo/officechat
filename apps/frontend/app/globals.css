@@ -581,7 +581,7 @@ a {
 }
 
 .message-item {
-  width: min(100%, 760px);
+  width: min(100%, 900px);
   display: grid;
   gap: 8px;
   justify-self: start;
@@ -883,11 +883,11 @@ a {
 .user-app-layout {
   min-height: calc(100vh - 72px);
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: clamp(280px, 20vw, 320px) minmax(0, 1fr);
 }
 
 .user-app-shell-sidebar-right .user-app-layout {
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 20vw, 320px);
 }
 
 .user-app-shell-sidebar-right .user-app-sidebar {
@@ -998,16 +998,22 @@ a {
 
 .user-app-main {
   min-width: 0;
-  padding: 22px;
+  padding: clamp(14px, 1.6vw, 22px);
 }
 
 .user-app-main .messages-panel {
+  width: 100%;
   margin-top: 18px;
   padding-top: 18px;
 }
 
+.user-app-main .messages-list {
+  width: 100%;
+}
+
 .user-app-main .message-compose {
-  max-width: 780px;
+  width: 100%;
+  max-width: 900px;
 }
 
 .user-app-chat-layout {
@@ -1016,8 +1022,8 @@ a {
 
 .user-app-chat-layout-discussion {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 520px);
+  gap: clamp(12px, 1.2vw, 18px);
   align-items: start;
 }
 
@@ -1026,14 +1032,25 @@ a {
 }
 
 .discussion-panel {
+  position: sticky;
+  top: 16px;
   min-width: 0;
-  max-height: calc(100vh - 116px);
+  width: 100%;
+  max-height: calc(100vh - 104px);
   padding: 16px;
   display: grid;
   gap: 16px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
+  background: #ffffff;
+}
+
+.discussion-panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 10px;
   background: #ffffff;
 }
 
@@ -1090,6 +1107,7 @@ a {
   }
 
   .discussion-panel {
+    position: static;
     max-height: none;
   }
 }

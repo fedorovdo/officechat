@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.schemas.user import AdminPasswordReset, AdminUserCreate, AdminUserUpdate
+from app.schemas.user import AdminPasswordReset, AdminUserCreate, AdminUserUpdate, UserProfileUpdate
 from app.services.security import hash_password, verify_password
 
 
@@ -79,6 +79,13 @@ async def update_user(session: AsyncSession, user: User, payload: AdminUserUpdat
     if "is_active" in update_fields and payload.is_active is not None:
         user.is_active = payload.is_active
 
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def update_user_profile(session: AsyncSession, user: User, payload: UserProfileUpdate) -> User:
+    user.display_name = payload.display_name
     await session.commit()
     await session.refresh(user)
     return user

@@ -332,6 +332,13 @@ export function getCurrentUser(token: string) {
   return apiFetch<OfficeChatUser>("/api/auth/me", token);
 }
 
+export function updateCurrentUser(token: string, displayName: string) {
+  return apiFetch<OfficeChatUser>("/api/auth/me", token, {
+    method: "PATCH",
+    body: JSON.stringify({ display_name: displayName })
+  });
+}
+
 export function getAdminUsers(token: string) {
   return apiFetch<OfficeChatUser[]>("/api/admin/users", token);
 }

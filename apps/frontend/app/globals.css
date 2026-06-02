@@ -1174,6 +1174,36 @@ a {
   box-shadow: var(--shadow);
 }
 
+.profile-panel {
+  width: min(100%, 520px);
+}
+
+.profile-facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.profile-facts div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-facts dt {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.profile-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .notification-guide-panel {
   width: min(100%, 520px);
 }

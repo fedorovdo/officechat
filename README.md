@@ -68,6 +68,8 @@ Current development uses one frontend on port `3100`. User routes live under `/r
 
 User app settings are stored in browser `localStorage` for now. Future versions should persist language, sidebar side, font size, accent color, and profile preferences in backend user preferences.
 
+The user app top bar includes a basic profile panel. Authenticated active users can review their account details and update their own display name through `PATCH /api/auth/me`. Avatar upload and backend-persisted UI preferences are planned later.
+
 The user sidebar uses `GET /api/users`, an authenticated endpoint that returns active users with public directory fields only.
 
 Direct/private messages are available in the user app shell:
@@ -120,7 +122,7 @@ File attachments are available for group messages:
 - Allowed extensions default to `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`.
 - Antivirus scanning, previews, thumbnails, drag-and-drop, S3, and retention cleanup are not implemented yet.
 
-Planned UX features include standard emoji support in chat messages, user profile pages, avatar/profile photo upload, and avatar display in messages and user lists. These are roadmap items and are not implemented yet.
+Planned UX features include standard emoji support in chat messages, richer user profile pages, avatar/profile photo upload, and avatar display in messages and user lists. A basic self-profile panel with display-name editing is already available.
 
 Bot foundation is available for incoming webhooks:
 

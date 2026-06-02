@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 UserRole = Literal["superadmin", "admin", "group_owner", "moderator", "user", "bot"]
 
@@ -31,6 +31,18 @@ class UserDirectoryEntry(BaseModel):
     display_name: str
     role: UserRole
     is_active: bool
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=160)
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value: str) -> str:
+        display_name = value.strip()
+        if not display_name:
+            raise ValueError("Display name must not be empty")
+        return display_name
 
 
 class AdminUserCreate(BaseModel):

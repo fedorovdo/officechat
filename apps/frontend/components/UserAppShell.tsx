@@ -19,6 +19,7 @@ import {
   getStoredAccessToken,
   getUsers,
   isAdminRole,
+  updateCurrentUser,
   type DirectMessageEvent,
   type GroupMessageEvent,
   type OfficeChatDirectoryUser,
@@ -254,11 +255,16 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   );
   const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationGuideOpen, setIsNotificationGuideOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
   const [activeDiscussionId, setActiveDiscussionId] = useState<string | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [isProfileSaving, setIsProfileSaving] = useState(false);
   const [error, setError] = useState("");
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
@@ -354,6 +360,14 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       new Intl.DateTimeFormat(locale, {
         hour: "2-digit",
         minute: "2-digit"
+      }),
+    [locale]
+  );
+  const profileDateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        dateStyle: "medium",
+        timeStyle: "short"
       }),
     [locale]
   );
@@ -1153,6 +1167,42 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
   }
 
+  function openProfile() {
+    if (!currentUser) {
+      return;
+    }
+    setProfileDisplayName(currentUser.display_name);
+    setProfileSuccess("");
+    setProfileError("");
+    setIsProfileOpen(true);
+  }
+
+  function formatProfileDate(timestamp: string | null) {
+    return timestamp ? profileDateFormatter.format(new Date(timestamp)) : dictionary.appShell.profile.notAvailable;
+  }
+
+  async function saveProfile() {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+
+    setProfileSuccess("");
+    setProfileError("");
+    setIsProfileSaving(true);
+    try {
+      const updatedUser = await updateCurrentUser(token, profileDisplayName);
+      setCurrentUser(updatedUser);
+      setProfileDisplayName(updatedUser.display_name);
+      setProfileSuccess(dictionary.appShell.profile.updateSuccess);
+    } catch (caughtError) {
+      setProfileError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.profile.updateError);
+    } finally {
+      setIsProfileSaving(false);
+    }
+  }
+
   async function logout() {
     const token = getStoredAccessToken();
     if (token) {
@@ -1221,6 +1271,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               {dictionary.appShell.admin}
             </Link>
           ) : null}
+          <button className="secondary-link" disabled={!currentUser} onClick={openProfile} type="button">
+            {dictionary.appShell.profile.open}
+          </button>
           <button className="secondary-link" onClick={() => setIsSettingsOpen(true)} type="button">
             {dictionary.appShell.settings}
           </button>
@@ -1406,6 +1459,73 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           ) : null}
         </section>
       </div>
+
+      {isProfileOpen && currentUser ? (
+        <div className="settings-backdrop" role="presentation">
+          <section className="settings-panel profile-panel" aria-label={dictionary.appShell.profile.title}>
+            <div className="dashboard-header">
+              <div>
+                <p className="eyebrow">{dictionary.appShell.profile.account}</p>
+                <h2 className="section-title">{dictionary.appShell.profile.title}</h2>
+              </div>
+              <button className="table-action" onClick={() => setIsProfileOpen(false)} type="button">
+                {dictionary.appShell.close}
+              </button>
+            </div>
+            <div className="admin-form">
+              <label className="field">
+                <span className="field-label">{dictionary.appShell.profile.displayName}</span>
+                <input
+                  className="field-input"
+                  maxLength={160}
+                  onChange={(event) => setProfileDisplayName(event.target.value)}
+                  value={profileDisplayName}
+                />
+              </label>
+              <dl className="profile-facts">
+                <div>
+                  <dt>{dictionary.appShell.profile.username}</dt>
+                  <dd>@{currentUser.username}</dd>
+                </div>
+                <div>
+                  <dt>{dictionary.appShell.profile.role}</dt>
+                  <dd>{currentUser.role}</dd>
+                </div>
+                <div>
+                  <dt>{dictionary.appShell.profile.authProvider}</dt>
+                  <dd>{currentUser.auth_provider}</dd>
+                </div>
+                <div>
+                  <dt>{dictionary.appShell.profile.accountStatus}</dt>
+                  <dd>
+                    {currentUser.is_active
+                      ? dictionary.appShell.profile.active
+                      : dictionary.appShell.profile.inactive}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{dictionary.appShell.profile.created}</dt>
+                  <dd>{formatProfileDate(currentUser.created_at)}</dd>
+                </div>
+                <div>
+                  <dt>{dictionary.appShell.profile.lastLogin}</dt>
+                  <dd>{formatProfileDate(currentUser.last_login_at)}</dd>
+                </div>
+              </dl>
+              {profileSuccess ? <p className="form-success">{profileSuccess}</p> : null}
+              {profileError ? <p className="form-error">{profileError}</p> : null}
+              <button
+                className="primary-button"
+                disabled={isProfileSaving || !profileDisplayName.trim()}
+                onClick={() => void saveProfile()}
+                type="button"
+              >
+                {isProfileSaving ? dictionary.appShell.profile.saving : dictionary.appShell.profile.save}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {isSettingsOpen ? (
         <div className="settings-backdrop" role="presentation">

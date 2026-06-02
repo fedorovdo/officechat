@@ -174,7 +174,7 @@
     "messages": "Discussion messages",
     "message": "Message",
     "addParticipant": "Add participant",
-    "usernamePlaceholder": "username",
+    "usernamePlaceholder": "username or @username",
     "add": "Add",
     "removeMember": "Remove",
     "openError": "Could not open discussion.",
@@ -187,6 +187,7 @@
     "deleteError": "Could not delete discussion message.",
     "inviteSuccess": "Participant added.",
     "inviteError": "Could not add participant.",
+    "inviteUserNotFound": "User not found or is not a member of the source group",
     "removeSuccess": "Participant removed from discussion.",
     "removeError": "Could not remove participant.",
     "newMessageNotification": "New discussion message: {preview}"

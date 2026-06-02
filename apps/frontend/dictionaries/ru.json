@@ -174,7 +174,7 @@
     "messages": "Сообщения обсуждения",
     "message": "Сообщение",
     "addParticipant": "Добавить участника",
-    "usernamePlaceholder": "username",
+    "usernamePlaceholder": "username или @username",
     "add": "Добавить",
     "removeMember": "Убрать",
     "openError": "Не удалось открыть обсуждение.",
@@ -187,6 +187,7 @@
     "deleteError": "Не удалось удалить сообщение обсуждения.",
     "inviteSuccess": "Участник добавлен.",
     "inviteError": "Не удалось добавить участника.",
+    "inviteUserNotFound": "Пользователь не найден или не является участником исходной группы",
     "removeSuccess": "Участник удален из обсуждения.",
     "removeError": "Не удалось удалить участника.",
     "newMessageNotification": "Новое сообщение в обсуждении: {preview}"

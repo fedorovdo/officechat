@@ -204,12 +204,18 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
     setError("");
     setSuccess("");
     try {
-      await addDiscussionMember(token, discussionId, inviteUsername);
+      const normalizedUsername = inviteUsername.trim().replace(/^@/, "").trim();
+      await addDiscussionMember(token, discussionId, normalizedUsername);
       setInviteUsername("");
       setDiscussion(await getDiscussion(token, discussionId));
       setSuccess(dictionary.discussions.inviteSuccess);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.inviteError);
+      const message = caughtError instanceof Error ? caughtError.message : "";
+      setError(
+        message.includes("not found") || message.includes("source group")
+          ? dictionary.discussions.inviteUserNotFound
+          : message || dictionary.discussions.inviteError
+      );
     }
   }
 

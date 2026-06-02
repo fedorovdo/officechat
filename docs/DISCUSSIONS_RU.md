@@ -68,7 +68,7 @@ DELETE /api/discussions/{discussion_id}/messages/{message_id}
 }
 ```
 
-Добавление участника:
+Добавление участника поддерживает обычный `username` и mention-style формат `@username`:
 
 ```json
 {

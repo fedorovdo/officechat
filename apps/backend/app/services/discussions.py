@@ -15,6 +15,13 @@ from app.services.messages import DELETED_MESSAGE_BODY, ensure_group_message_acc
 from app.services.users import get_user_by_username
 
 
+def normalize_discussion_invite_username(username: str) -> str:
+    normalized_username = username.strip()
+    if normalized_username.startswith("@"):
+        normalized_username = normalized_username[1:].strip()
+    return normalized_username
+
+
 async def get_discussion(session: AsyncSession, discussion_id: UUID) -> Discussion | None:
     result = await session.execute(
         select(Discussion)
@@ -129,15 +136,16 @@ async def add_discussion_member(
     if not await can_manage_discussion_members(session, discussion, current_user):
         raise PermissionError("Discussion member management access denied")
 
-    user = await get_user_by_username(session, payload.username)
+    username = normalize_discussion_invite_username(payload.username)
+    user = await get_user_by_username(session, username)
     if user is None:
-        raise LookupError("User not found")
+        raise LookupError("User not found or is not a member of the source group")
     if not user.is_active:
         raise ValueError("Active user required")
     if user.role == "bot":
         raise ValueError("Bot users cannot join discussions yet")
     if await get_group_membership(session, discussion.source_group_id, user.id) is None:
-        raise ValueError("User must be a source group member")
+        raise ValueError("User not found or is not a member of the source group")
 
     member = DiscussionMember(discussion_id=discussion.id, user_id=user.id, role=payload.role)
     session.add(member)

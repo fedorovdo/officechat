@@ -258,6 +258,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
   const [activeDiscussionId, setActiveDiscussionId] = useState<string | null>(null);
+  const [sidebarSearch, setSidebarSearch] = useState("");
   const [error, setError] = useState("");
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
@@ -265,12 +266,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     selected.type === "direct"
       ? directConversations.find((conversation) => conversation.id === selected.conversationId)
       : null;
-  const directMessageUsers = currentUser
-    ? users.filter((user) => user.id !== currentUser.id && user.role !== "bot" && user.is_active)
-    : [];
+  const directMessageUsers = useMemo(
+    () =>
+      currentUser
+        ? users.filter((user) => user.id !== currentUser.id && user.role !== "bot" && user.is_active)
+        : [],
+    [currentUser, users]
+  );
   const orderedGroups = useMemo(
     () =>
       groups
+        .filter((group) => group.is_active)
         .map((group, index) => ({ group, index }))
         .sort((left, right) => {
           const timeDifference =
@@ -294,6 +300,31 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         .map(({ user }) => user),
     [directMessageUsers, sidebarActivity.directUsers]
   );
+  const normalizedSidebarSearch = sidebarSearch.trim().toLocaleLowerCase();
+  const filteredOrderedGroups = useMemo(
+    () =>
+      normalizedSidebarSearch
+        ? orderedGroups.filter(
+            (group) =>
+              group.name.toLocaleLowerCase().includes(normalizedSidebarSearch) ||
+              group.slug.toLocaleLowerCase().includes(normalizedSidebarSearch)
+          )
+        : orderedGroups,
+    [normalizedSidebarSearch, orderedGroups]
+  );
+  const filteredOrderedDirectMessageUsers = useMemo(
+    () =>
+      normalizedSidebarSearch
+        ? orderedDirectMessageUsers.filter(
+            (user) =>
+              user.display_name.toLocaleLowerCase().includes(normalizedSidebarSearch) ||
+              user.username.toLocaleLowerCase().includes(normalizedSidebarSearch)
+          )
+        : orderedDirectMessageUsers,
+    [normalizedSidebarSearch, orderedDirectMessageUsers]
+  );
+  const hasSidebarSearchResults =
+    filteredOrderedGroups.length > 0 || filteredOrderedDirectMessageUsers.length > 0;
   const currentMembership = currentUser
     ? selectedMembers.find((member) => member.user_id === currentUser.id)
     : undefined;
@@ -1201,10 +1232,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
       <div className="user-app-layout">
         <aside className="user-app-sidebar" aria-label={dictionary.appShell.sidebarAriaLabel}>
+          <input
+            aria-label={dictionary.appShell.sidebarSearch}
+            className="field-input user-app-sidebar-search"
+            onChange={(event) => setSidebarSearch(event.target.value)}
+            placeholder={dictionary.appShell.sidebarSearch}
+            type="search"
+            value={sidebarSearch}
+          />
+          {!isLoading && normalizedSidebarSearch && !hasSidebarSearchResults ? (
+            <p className="muted user-app-sidebar-empty">{dictionary.appShell.nothingFound}</p>
+          ) : null}
+
           <section>
             <h2 className="compact-title">{dictionary.appShell.groups}</h2>
             <div className="user-app-nav-list">
-              {orderedGroups.map((group) => {
+              {filteredOrderedGroups.map((group) => {
                 const activity = sidebarActivity.groups[group.id];
                 const isSelected = selected.type === "group" && selected.groupId === group.id;
                 const itemClassName = [
@@ -1246,7 +1289,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   </button>
                 );
               })}
-              {!isLoading && groups.length === 0 ? (
+              {!isLoading && !normalizedSidebarSearch && orderedGroups.length === 0 ? (
                 <p className="muted">{dictionary.appShell.noGroups}</p>
               ) : null}
             </div>
@@ -1255,7 +1298,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           <section>
             <h2 className="compact-title">{dictionary.appShell.users}</h2>
             <div className="user-app-nav-list">
-              {orderedDirectMessageUsers.map((user) => {
+              {filteredOrderedDirectMessageUsers.map((user) => {
                 const activity = sidebarActivity.directUsers[user.id];
                 const isSelected =
                   selected.type === "direct" && selectedDirectConversation?.other_user.id === user.id;
@@ -1294,6 +1337,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   </button>
                 );
               })}
+              {!isLoading && !normalizedSidebarSearch && orderedDirectMessageUsers.length === 0 ? (
+                <p className="muted">{dictionary.appShell.noUsers}</p>
+              ) : null}
             </div>
           </section>
         </aside>

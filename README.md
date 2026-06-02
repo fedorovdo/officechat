@@ -53,7 +53,7 @@ Admin users page:
 
 User-facing app shell is available at http://localhost:3100/ru/app. It shows a top bar, group chat sidebar, active users sidebar section for direct messages, local UI settings, and reusable chat panels with messages, attachments for groups, WebSocket updates, and Ctrl+Enter sending.
 
-Sidebar activity indicators are available in early frontend form. Groups and direct users can show local unread dots, last message previews, short activity timestamps, and recent-activity ordering. This state is stored in browser `localStorage` for now. Backend read receipts, server-side unread counters, and cross-device unread synchronization are planned later.
+Sidebar activity indicators are available in early frontend form. Groups and direct users can show local unread dots, last message previews, short activity timestamps, and recent-activity ordering. A local sidebar search filters groups by name or slug and users by display name or username. The normal direct-message list hides inactive users, the current user, and bot users. Activity state is stored in browser `localStorage` for now. Backend read receipts, server-side unread counters, and cross-device unread synchronization are planned later.
 
 Browser notifications are available in early frontend form. Users can enable them in the app shell settings; they work only while OfficeChat is open in a browser tab/window and only after the browser and OS grant notification permission. The settings panel includes diagnostics, a test notification button, and a setup guide. See [docs/NOTIFICATIONS_RU.md](docs/NOTIFICATIONS_RU.md). Server push notifications, service workers, email notifications, and mobile push are planned later.
 

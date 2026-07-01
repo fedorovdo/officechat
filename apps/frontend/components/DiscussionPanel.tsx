@@ -20,6 +20,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { EmojiPicker } from "./EmojiPicker";
 import { UserAvatar } from "./UserAvatar";
 
 type DiscussionPanelProps = {
@@ -35,6 +36,7 @@ type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 export function DiscussionPanel({ currentUser, dictionary, discussionId, locale, onClose }: DiscussionPanelProps) {
   const router = useRouter();
   const composeFormRef = useRef<HTMLFormElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [discussion, setDiscussion] = useState<OfficeChatDiscussion | null>(null);
   const [messages, setMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
@@ -54,6 +56,13 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       }),
     [locale]
   );
+
+  function resizeComposer(textarea: HTMLTextAreaElement) {
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(textarea.scrollHeight, 160);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
+  }
 
   const refreshDiscussion = useCallback(async (token: string) => {
     const [loadedDiscussion, loadedMessages] = await Promise.all([
@@ -152,6 +161,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
     try {
       await sendDiscussionMessage(token, discussionId, messageBody);
       setMessageBody("");
+      if (composerTextareaRef.current) composerTextareaRef.current.style.height = "42px";
       setMessages(await getDiscussionMessages(token, discussionId));
       setSuccess(dictionary.discussions.sendSuccess);
     } catch (caughtError) {
@@ -398,19 +408,33 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       </section>
 
       <form className="admin-form discussion-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
-        <label className="field">
-          <span className="field-label">{dictionary.discussions.message}</span>
-          <textarea
-            className="field-input textarea-input"
-            onChange={(event) => setMessageBody(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            required
+        <div className="discussion-composer-row">
+          <EmojiPicker
+            dictionary={dictionary}
+            disabled={isSending}
+            onAfterInsert={resizeComposer}
+            onChange={setMessageBody}
+            textareaRef={composerTextareaRef}
             value={messageBody}
           />
-        </label>
-        <button className="primary-button" disabled={isSending} type="submit">
-          {isSending ? dictionary.messages.sending : dictionary.messages.send}
-        </button>
+          <textarea
+            aria-label={dictionary.discussions.message}
+            className="field-input composer-textarea"
+            onChange={(event) => {
+              setMessageBody(event.target.value);
+              resizeComposer(event.currentTarget);
+            }}
+            onKeyDown={handleComposerKeyDown}
+            placeholder={dictionary.discussions.message}
+            ref={composerTextareaRef}
+            required
+            rows={1}
+            value={messageBody}
+          />
+          <button className="composer-send-button" disabled={isSending || !messageBody.trim()} type="submit">
+            {isSending ? dictionary.messages.sending : dictionary.messages.send}
+          </button>
+        </div>
       </form>
     </aside>
   );

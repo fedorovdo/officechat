@@ -122,7 +122,7 @@ File attachments are available for group messages:
 - Allowed extensions default to `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`.
 - Antivirus scanning, previews, thumbnails, drag-and-drop, S3, and retention cleanup are not implemented yet.
 
-Planned UX features include standard emoji support in chat messages, richer user profile pages, and optional avatar cropping/editing. Local avatar upload and avatar display in messenger messages and user lists are available in v0.1.
+The group, direct, and discussion message composers include a lightweight Unicode emoji picker with RU/EN search and a local frequently-used list. Recent emoji are stored in the browser under `officechat.emoji.recent`; no custom emoji, stickers, GIFs, or reactions are implemented yet. Local avatar upload and avatar display in messenger messages and user lists are also available in v0.1, while optional avatar cropping/editing remains planned.
 
 Bot foundation is available for incoming webhooks:
 

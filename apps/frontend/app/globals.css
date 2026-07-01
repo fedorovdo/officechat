@@ -1907,13 +1907,13 @@ a {
 
 .messenger-composer-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) max-content;
+  grid-template-columns: 40px 40px minmax(0, 1fr) max-content;
   align-items: end;
   gap: 8px;
 }
 
 .messenger-composer-row-direct {
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: 40px minmax(0, 1fr) max-content;
 }
 
 .composer-textarea {
@@ -1939,6 +1939,95 @@ a {
   background: #eef2f0;
   color: var(--app-accent);
   font-size: 22px;
+}
+
+.composer-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.emoji-picker-anchor {
+  position: relative;
+  width: 40px;
+}
+
+.emoji-picker-trigger {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.emoji-picker {
+  position: absolute;
+  z-index: 12;
+  bottom: calc(100% + 9px);
+  left: 0;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, 60vh);
+  padding: 10px;
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--divider);
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgb(20 35 29 / 18%);
+}
+
+.emoji-picker-search {
+  min-height: 36px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+
+.emoji-picker-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.emoji-picker-section + .emoji-picker-section {
+  margin-top: 10px;
+}
+
+.emoji-picker-section h3 {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.emoji-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.emoji-picker-item {
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.emoji-picker-item:hover,
+.emoji-picker-item:focus-visible {
+  background: #eef2f0;
+}
+
+.emoji-picker-empty {
+  margin: 12px 4px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 .composer-send-button {
@@ -2029,16 +2118,15 @@ a {
   background: #f8faf9;
 }
 
-.discussion-compose .textarea-input {
-  min-height: 80px;
-  max-height: 160px;
+.discussion-composer-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) max-content;
+  align-items: end;
+  gap: 8px;
 }
 
-.discussion-compose .primary-button {
-  width: max-content;
-  min-height: 38px;
-  padding: 0 16px;
-  justify-self: start;
+.discussion-compose .emoji-picker {
+  width: min(330px, calc(100vw - 28px));
 }
 
 .user-app-placeholder {
@@ -2151,6 +2239,17 @@ select:focus-visible,
 
   .composer-send-button {
     padding: 0 11px;
+  }
+
+  .emoji-picker {
+    left: auto;
+    right: 0;
+    width: min(340px, calc(100vw - 72px));
+  }
+
+  .messenger-composer-row .emoji-picker {
+    left: 0;
+    right: auto;
   }
 
   .user-app-chat-layout-discussion .discussion-panel,

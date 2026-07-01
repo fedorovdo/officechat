@@ -17,6 +17,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { EmojiPicker } from "./EmojiPicker";
 import { UserAvatar } from "./UserAvatar";
 
 type GroupChatPanelProps = {
@@ -581,6 +582,14 @@ export function GroupChatPanel({
           >
             +
           </button>
+          <EmojiPicker
+            dictionary={dictionary}
+            disabled={isSending}
+            onAfterInsert={resizeComposer}
+            onChange={setMessageBody}
+            textareaRef={composerTextareaRef}
+            value={messageBody}
+          />
           <textarea
             aria-label={dictionary.messages.body}
             className="field-input composer-textarea"

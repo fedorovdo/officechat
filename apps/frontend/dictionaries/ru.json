@@ -228,6 +228,21 @@
     "attachFile": "Прикрепить файл",
     "removeAttachment": "Удалить вложение",
     "composerShortcut": "Enter — отправить, Shift+Enter — новая строка",
+    "emoji": {
+      "label": "Emoji",
+      "search": "Поиск emoji",
+      "searchPlaceholder": "Найти emoji",
+      "noResults": "Emoji не найдены",
+      "categories": {
+        "recent": "Часто используемые",
+        "smileys": "Смайлы",
+        "gestures": "Жесты",
+        "people": "Люди",
+        "hearts": "Сердца",
+        "objects": "Объекты",
+        "symbols": "Символы"
+      }
+    },
     "nothingFound": "Ничего не найдено",
     "noGroups": "Нет доступных групп",
     "noUsers": "Нет пользователей",

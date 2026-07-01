@@ -228,6 +228,21 @@
     "attachFile": "Attach file",
     "removeAttachment": "Remove attachment",
     "composerShortcut": "Enter — send, Shift+Enter — new line",
+    "emoji": {
+      "label": "Emoji",
+      "search": "Search emoji",
+      "searchPlaceholder": "Find emoji",
+      "noResults": "No emoji found",
+      "categories": {
+        "recent": "Frequently used",
+        "smileys": "Smileys",
+        "gestures": "Gestures",
+        "people": "People",
+        "hearts": "Hearts",
+        "objects": "Objects",
+        "symbols": "Symbols"
+      }
+    },
     "nothingFound": "Nothing found",
     "noGroups": "No available groups",
     "noUsers": "No users",

@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.models.discussion import Discussion, DiscussionMember, DiscussionMessage
 from app.models.group import GroupMember
 from app.models.message import Message
+from app.models.reaction import DiscussionMessageReaction
 from app.models.user import User
 from app.schemas.discussion import DiscussionCreate, DiscussionMemberCreate, DiscussionMessageCreate, DiscussionMessageUpdate
 from app.services.groups import get_group, get_group_membership, is_global_group_admin
@@ -201,7 +202,10 @@ async def list_discussion_messages(
 ) -> list[DiscussionMessage]:
     result = await session.execute(
         select(DiscussionMessage)
-        .options(selectinload(DiscussionMessage.sender))
+        .options(
+            selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
+        )
         .where(DiscussionMessage.discussion_id == discussion.id)
         .order_by(DiscussionMessage.created_at.desc())
         .limit(limit)
@@ -234,7 +238,10 @@ async def get_discussion_message(
 ) -> DiscussionMessage | None:
     result = await session.execute(
         select(DiscussionMessage)
-        .options(selectinload(DiscussionMessage.sender))
+        .options(
+            selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
+        )
         .where(DiscussionMessage.id == message_id, DiscussionMessage.discussion_id == discussion.id)
     )
     return result.scalar_one_or_none()
@@ -243,7 +250,10 @@ async def get_discussion_message(
 async def load_discussion_message(session: AsyncSession, message_id: UUID) -> DiscussionMessage:
     result = await session.execute(
         select(DiscussionMessage)
-        .options(selectinload(DiscussionMessage.sender))
+        .options(
+            selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
+        )
         .where(DiscussionMessage.id == message_id)
     )
     return result.scalar_one()

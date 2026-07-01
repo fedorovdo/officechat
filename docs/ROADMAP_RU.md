@@ -27,6 +27,7 @@
 - Базовые message discussions из групповых сообщений: правая боковая панель, участники, text-only сообщения и WebSocket updates.
 - Messenger UI v0.1: полноэкранная трехрегионная раскладка, resizable/collapsible sidebar, вкладки чатов, компактные сообщения и закрепленный composer.
 - Emoji Picker v0.1: стандартные Unicode emoji в групповых, личных и discussion composer, RU/EN поиск и локальный список часто используемых emoji.
+- Message Reactions v0.1: фиксированный набор Unicode reactions, точные счётчики и real-time синхронизация для group/direct/discussion сообщений.
 
 ## Этап 2: Realtime
 
@@ -36,7 +37,7 @@
 - Backend read receipts и server-side unread counters.
 - Базовые уведомления в интерфейсе.
 - Service worker и server push notifications для уведомлений без открытой вкладки.
-- Реакции, custom emoji, стикеры и GIF.
+- Custom reactions, стикеры и GIF.
 - Расширение discussions: отдельный sidebar список, вложения, direct-message discussions и более развитое представление цепочек.
 - Autocomplete и profile links для mentions, поддержка mentions в direct messages.
 - Вложения в direct messages.

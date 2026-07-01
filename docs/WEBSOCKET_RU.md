@@ -54,7 +54,23 @@ WS /api/ws/me?token=...
 }
 ```
 
-Frontend v0.1 после получения события просто перезагружает список сообщений. Это проще и надежнее для первого этапа, потому что REST API остается единым источником данных.
+Для message lifecycle событий frontend может обновить список из REST API, который остаётся источником истины. Реакции обновляются точечно без полной перезагрузки:
+
+```json
+{
+  "type": "message.reactions.updated",
+  "group_id": "...",
+  "message_id": "...",
+  "reactions": [
+    {
+      "emoji": "👍",
+      "count": 2,
+      "reacted_by_me": false,
+      "users": []
+    }
+  ]
+}
+```
 
 Direct message events:
 
@@ -83,6 +99,8 @@ Direct message events:
 }
 ```
 
+Для direct reactions используется событие `direct.message.reactions.updated` с `conversation_id`, `message_id` и массивом `reactions`.
+
 Discussion events:
 
 ```json
@@ -93,7 +111,7 @@ Discussion events:
 }
 ```
 
-Также используются `discussion.message.updated`, `discussion.message.deleted`, `discussion.member.added` и `discussion.member.removed`.
+Также используются `discussion.message.updated`, `discussion.message.deleted`, `discussion.message.reactions.updated`, `discussion.member.added` и `discussion.member.removed`. Reaction events не отправляются в персональный `/api/ws/me` и не создают browser notifications.
 
 Personal notification events:
 

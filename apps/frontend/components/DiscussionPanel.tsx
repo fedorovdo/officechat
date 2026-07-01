@@ -4,6 +4,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { useRouter } from "next/navigation";
 
 import {
+  addDiscussionMessageReaction,
   addDiscussionMember,
   deleteDiscussionMessage,
   editDiscussionMessage,
@@ -13,14 +14,17 @@ import {
   getStoredAccessToken,
   isAdminRole,
   removeDiscussionMember,
+  removeDiscussionMessageReaction,
   sendDiscussionMessage,
   type DiscussionEvent,
   type OfficeChatDiscussion,
   type OfficeChatDiscussionMessage,
+  type OfficeChatMessageReaction,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { EmojiPicker } from "./EmojiPicker";
+import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 
 type DiscussionPanelProps = {
@@ -117,7 +121,12 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       websocket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DiscussionEvent;
-          if (payload.type.startsWith("discussion.")) {
+          if (payload.type === "discussion.message.reactions.updated") {
+            const reactions = reactionsForCurrentUser(payload.reactions, currentUser.id);
+            setMessages((current) =>
+              current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
+            );
+          } else if (payload.type.startsWith("discussion.")) {
             void refreshDiscussion(accessToken);
           }
         } catch {
@@ -144,7 +153,39 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       }
       websocket?.close();
     };
-  }, [discussionId, locale, refreshDiscussion, router]);
+  }, [currentUser.id, discussionId, locale, refreshDiscussion, router]);
+
+  function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
+    const normalized = reactionsForCurrentUser(reactions, currentUser.id);
+    setMessages((current) =>
+      current.map((message) => (message.id === messageId ? { ...message, reactions: normalized } : message))
+    );
+    return normalized;
+  }
+
+  async function handleAddReaction(messageId: string, emoji: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      throw new Error(dictionary.messages.reactions.updateError);
+    }
+    return applyReactionUpdate(
+      messageId,
+      await addDiscussionMessageReaction(token, discussionId, messageId, emoji)
+    );
+  }
+
+  async function handleRemoveReaction(messageId: string, emoji: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      throw new Error(dictionary.messages.reactions.updateError);
+    }
+    return applyReactionUpdate(
+      messageId,
+      await removeDiscussionMessageReaction(token, discussionId, messageId, emoji)
+    );
+  }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -382,6 +423,13 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
                     {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
                   </p>
                 )}
+                <MessageReactions
+                  canAddReaction={!message.is_deleted}
+                  dictionary={dictionary}
+                  onAdd={(emoji) => handleAddReaction(message.id, emoji)}
+                  onRemove={(emoji) => handleRemoveReaction(message.id, emoji)}
+                  reactions={message.reactions}
+                />
                 {!message.is_deleted ? (
                   <div className="message-actions">
                     {canEdit ? (

@@ -64,6 +64,19 @@ export type OfficeChatGroupMember = {
   user: OfficeChatUser;
 };
 
+export type OfficeChatReactionUser = {
+  id: string;
+  username: string;
+  display_name: string;
+};
+
+export type OfficeChatMessageReaction = {
+  emoji: string;
+  count: number;
+  reacted_by_me: boolean;
+  users: OfficeChatReactionUser[];
+};
+
 export type OfficeChatMessage = {
   id: string;
   group_id: string;
@@ -79,6 +92,7 @@ export type OfficeChatMessage = {
   reply_to: OfficeChatMessageReplyPreview | null;
   attachments: OfficeChatMessageAttachment[];
   mentions: OfficeChatMessageMention[];
+  reactions: OfficeChatMessageReaction[];
 };
 
 export type OfficeChatMessageReplyPreview = {
@@ -118,6 +132,7 @@ export type OfficeChatDirectMessage = {
   updated_at: string;
   sender: OfficeChatDirectoryUser;
   reply_to: OfficeChatDirectMessageReplyPreview | null;
+  reactions: OfficeChatMessageReaction[];
 };
 
 export type OfficeChatDirectMessageReplyPreview = {
@@ -179,6 +194,7 @@ export type OfficeChatDiscussionMessage = {
   created_at: string;
   updated_at: string;
   sender: OfficeChatDirectoryUser;
+  reactions: OfficeChatMessageReaction[];
 };
 
 export type OfficeChatBot = {
@@ -215,19 +231,33 @@ export type OfficeChatBotRotateTokenResponse = {
   token: string;
 };
 
-export type GroupMessageEvent = {
-  type: "message.created" | "message.updated" | "message.deleted";
-  group_id: string;
-  message: OfficeChatMessage;
-  message_id?: string;
-};
+export type GroupMessageEvent =
+  | {
+      type: "message.created" | "message.updated" | "message.deleted";
+      group_id: string;
+      message: OfficeChatMessage;
+      message_id?: string;
+    }
+  | {
+      type: "message.reactions.updated";
+      group_id: string;
+      message_id: string;
+      reactions: OfficeChatMessageReaction[];
+    };
 
-export type DirectMessageEvent = {
-  type: "direct.message.created" | "direct.message.updated" | "direct.message.deleted";
-  conversation_id: string;
-  message: OfficeChatDirectMessage;
-  message_id?: string;
-};
+export type DirectMessageEvent =
+  | {
+      type: "direct.message.created" | "direct.message.updated" | "direct.message.deleted";
+      conversation_id: string;
+      message: OfficeChatDirectMessage;
+      message_id?: string;
+    }
+  | {
+      type: "direct.message.reactions.updated";
+      conversation_id: string;
+      message_id: string;
+      reactions: OfficeChatMessageReaction[];
+    };
 
 export type DiscussionEvent =
   | {
@@ -245,6 +275,12 @@ export type DiscussionEvent =
       type: "discussion.member.removed";
       discussion_id: string;
       member_id: string;
+    }
+  | {
+      type: "discussion.message.reactions.updated";
+      discussion_id: string;
+      message_id: string;
+      reactions: OfficeChatMessageReaction[];
     };
 
 export type PersonalNotificationEvent =
@@ -542,6 +578,20 @@ export function deleteGroupMessage(token: string, groupId: string, messageId: st
   });
 }
 
+export function addGroupMessageReaction(token: string, groupId: string, messageId: string, emoji: string) {
+  return apiFetch<OfficeChatMessageReaction[]>(`/api/groups/${groupId}/messages/${messageId}/reactions`, token, {
+    method: "PUT",
+    body: JSON.stringify({ emoji })
+  });
+}
+
+export function removeGroupMessageReaction(token: string, groupId: string, messageId: string, emoji: string) {
+  return apiFetch<OfficeChatMessageReaction[]>(`/api/groups/${groupId}/messages/${messageId}/reactions`, token, {
+    method: "DELETE",
+    body: JSON.stringify({ emoji })
+  });
+}
+
 export function getGroupWebSocketUrl(token: string, groupId: string) {
   const backendUrl = new URL(apiBaseUrl);
   backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -602,6 +652,22 @@ export function deleteDirectMessage(token: string, conversationId: string, messa
     {
       method: "DELETE"
     }
+  );
+}
+
+export function addDirectMessageReaction(token: string, conversationId: string, messageId: string, emoji: string) {
+  return apiFetch<OfficeChatMessageReaction[]>(
+    `/api/direct/conversations/${conversationId}/messages/${messageId}/reactions`,
+    token,
+    { method: "PUT", body: JSON.stringify({ emoji }) }
+  );
+}
+
+export function removeDirectMessageReaction(token: string, conversationId: string, messageId: string, emoji: string) {
+  return apiFetch<OfficeChatMessageReaction[]>(
+    `/api/direct/conversations/${conversationId}/messages/${messageId}/reactions`,
+    token,
+    { method: "DELETE", body: JSON.stringify({ emoji }) }
   );
 }
 
@@ -669,6 +735,22 @@ export function deleteDiscussionMessage(token: string, discussionId: string, mes
   return apiFetch<OfficeChatDiscussionMessage>(`/api/discussions/${discussionId}/messages/${messageId}`, token, {
     method: "DELETE"
   });
+}
+
+export function addDiscussionMessageReaction(token: string, discussionId: string, messageId: string, emoji: string) {
+  return apiFetch<OfficeChatMessageReaction[]>(
+    `/api/discussions/${discussionId}/messages/${messageId}/reactions`,
+    token,
+    { method: "PUT", body: JSON.stringify({ emoji }) }
+  );
+}
+
+export function removeDiscussionMessageReaction(token: string, discussionId: string, messageId: string, emoji: string) {
+  return apiFetch<OfficeChatMessageReaction[]>(
+    `/api/discussions/${discussionId}/messages/${messageId}/reactions`,
+    token,
+    { method: "DELETE", body: JSON.stringify({ emoji }) }
+  );
 }
 
 export function addDiscussionMember(

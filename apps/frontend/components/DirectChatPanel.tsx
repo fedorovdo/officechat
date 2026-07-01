@@ -4,19 +4,23 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { useRouter } from "next/navigation";
 
 import {
+  addDirectMessageReaction,
   deleteDirectMessage,
   editDirectMessage,
   getDirectMessages,
   getDirectWebSocketUrl,
   getStoredAccessToken,
+  removeDirectMessageReaction,
   sendDirectMessage,
   type DirectMessageEvent,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
+  type OfficeChatMessageReaction,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { EmojiPicker } from "./EmojiPicker";
+import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 
 type DirectChatPanelProps = {
@@ -170,7 +174,12 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       websocket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DirectMessageEvent;
-          if (payload.type.startsWith("direct.message.")) {
+          if (payload.type === "direct.message.reactions.updated") {
+            const reactions = reactionsForCurrentUser(payload.reactions, currentUser.id);
+            setMessages((current) =>
+              current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
+            );
+          } else if (payload.type.startsWith("direct.message.")) {
             markIncomingMessage();
             void refreshMessages(accessToken);
           }
@@ -202,7 +211,39 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       }
       websocket?.close();
     };
-  }, [conversation.id, locale, refreshMessages, router]);
+  }, [conversation.id, currentUser.id, locale, refreshMessages, router]);
+
+  function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
+    const normalized = reactionsForCurrentUser(reactions, currentUser.id);
+    setMessages((current) =>
+      current.map((message) => (message.id === messageId ? { ...message, reactions: normalized } : message))
+    );
+    return normalized;
+  }
+
+  async function handleAddReaction(messageId: string, emoji: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      throw new Error(dictionary.messages.reactions.updateError);
+    }
+    return applyReactionUpdate(
+      messageId,
+      await addDirectMessageReaction(token, conversation.id, messageId, emoji)
+    );
+  }
+
+  async function handleRemoveReaction(messageId: string, emoji: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      throw new Error(dictionary.messages.reactions.updateError);
+    }
+    return applyReactionUpdate(
+      messageId,
+      await removeDirectMessageReaction(token, conversation.id, messageId, emoji)
+    );
+  }
 
   async function handleRefreshMessages() {
     const token = getStoredAccessToken();
@@ -407,6 +448,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
                   </p>
                 </>
               )}
+              <MessageReactions
+                canAddReaction={!message.is_deleted}
+                dictionary={dictionary}
+                onAdd={(emoji) => handleAddReaction(message.id, emoji)}
+                onRemove={(emoji) => handleRemoveReaction(message.id, emoji)}
+                reactions={message.reactions}
+              />
               {!message.is_deleted ? (
                 <div className="message-actions">
                   <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">

@@ -5,17 +5,21 @@ from app.models.discussion import Discussion, DiscussionMember, DiscussionMessag
 from app.models.group import Group, GroupMember
 from app.models.mention import MessageMention
 from app.models.message import Message
+from app.models.reaction import DirectMessageReaction, DiscussionMessageReaction, GroupMessageReaction
 from app.models.user import User
 
 __all__ = [
     "Bot",
     "DirectConversation",
     "DirectMessage",
+    "DirectMessageReaction",
     "Discussion",
     "DiscussionMember",
     "DiscussionMessage",
+    "DiscussionMessageReaction",
     "Group",
     "GroupMember",
+    "GroupMessageReaction",
     "Message",
     "MessageAttachment",
     "MessageMention",

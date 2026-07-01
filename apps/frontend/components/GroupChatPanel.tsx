@@ -4,20 +4,24 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { useRouter } from "next/navigation";
 
 import {
+  addGroupMessageReaction,
   deleteGroupMessage,
   downloadAttachment,
   editGroupMessage,
   getGroupMessages,
   getGroupWebSocketUrl,
   getStoredAccessToken,
+  removeGroupMessageReaction,
   sendGroupMessage,
   sendGroupMessageWithAttachment,
   type GroupMessageEvent,
   type OfficeChatMessage,
+  type OfficeChatMessageReaction,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { EmojiPicker } from "./EmojiPicker";
+import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 
 type GroupChatPanelProps = {
@@ -189,7 +193,12 @@ export function GroupChatPanel({
       websocket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data as string) as GroupMessageEvent;
-          if (payload.type.startsWith("message.")) {
+          if (payload.type === "message.reactions.updated") {
+            const reactions = reactionsForCurrentUser(payload.reactions, currentUser.id);
+            setMessages((current) =>
+              current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
+            );
+          } else if (payload.type.startsWith("message.")) {
             markIncomingMessage();
             void refreshMessages(accessToken);
           }
@@ -221,7 +230,33 @@ export function GroupChatPanel({
       }
       websocket?.close();
     };
-  }, [groupId, locale, refreshMessages, router]);
+  }, [currentUser.id, groupId, locale, refreshMessages, router]);
+
+  function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
+    const normalized = reactionsForCurrentUser(reactions, currentUser.id);
+    setMessages((current) =>
+      current.map((message) => (message.id === messageId ? { ...message, reactions: normalized } : message))
+    );
+    return normalized;
+  }
+
+  async function handleAddReaction(messageId: string, emoji: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      throw new Error(dictionary.messages.reactions.updateError);
+    }
+    return applyReactionUpdate(messageId, await addGroupMessageReaction(token, groupId, messageId, emoji));
+  }
+
+  async function handleRemoveReaction(messageId: string, emoji: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      throw new Error(dictionary.messages.reactions.updateError);
+    }
+    return applyReactionUpdate(messageId, await removeGroupMessageReaction(token, groupId, messageId, emoji));
+  }
 
   async function handleRefreshMessages() {
     const token = getStoredAccessToken();
@@ -491,6 +526,13 @@ export function GroupChatPanel({
                   ))}
                 </div>
               ) : null}
+              <MessageReactions
+                canAddReaction={!message.is_deleted}
+                dictionary={dictionary}
+                onAdd={(emoji) => handleAddReaction(message.id, emoji)}
+                onRemove={(emoji) => handleRemoveReaction(message.id, emoji)}
+                reactions={message.reactions}
+              />
               {!message.is_deleted ? (
                 <div className="message-actions">
                   <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">

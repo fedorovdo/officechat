@@ -1880,6 +1880,106 @@ a {
   font-size: 11px;
 }
 
+.message-reactions {
+  position: relative;
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.message-reaction-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.message-reaction-chip,
+.message-reaction-add {
+  min-height: 27px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid var(--divider);
+  border-radius: 999px;
+  background: #f8faf9;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.message-reaction-chip:hover,
+.message-reaction-add:hover {
+  border-color: color-mix(in srgb, var(--app-accent) 45%, var(--divider));
+  background: color-mix(in srgb, var(--app-accent) 8%, #ffffff);
+}
+
+.message-reaction-chip-active {
+  border-color: color-mix(in srgb, var(--app-accent) 60%, var(--divider));
+  background: color-mix(in srgb, var(--app-accent) 15%, #ffffff);
+  color: color-mix(in srgb, var(--app-accent) 82%, #10231c);
+  font-weight: 700;
+}
+
+.message-reaction-chip-pending {
+  opacity: 0.65;
+}
+
+.message-reaction-chip:disabled,
+.message-reaction-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.message-reaction-add {
+  width: 27px;
+  padding: 0;
+  font-size: 17px;
+}
+
+.message-reaction-menu {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 5px);
+  left: 0;
+  width: 196px;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(5, 32px);
+  gap: 5px;
+  border: 1px solid var(--divider);
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 9px 22px rgb(20 35 29 / 16%);
+}
+
+.message-reaction-menu button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.message-reaction-menu button:hover,
+.message-reaction-menu button:focus-visible {
+  background: #eef2f0;
+}
+
+.message-reaction-error {
+  margin-top: 4px;
+  display: block;
+  color: #b42318;
+  font-size: 11px;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .message-actions {
     opacity: 0;

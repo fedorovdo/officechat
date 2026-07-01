@@ -883,7 +883,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       websocket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data as string) as GroupMessageEvent;
-          if (!payload.type.startsWith("message.")) {
+          if (payload.type === "message.reactions.updated" || !payload.type.startsWith("message.")) {
             return;
           }
           const isSelectedGroup = selected.type === "group" && selected.groupId === payload.group_id;
@@ -925,7 +925,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       websocket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DirectMessageEvent;
-          if (!payload.type.startsWith("direct.message.")) {
+          if (payload.type === "direct.message.reactions.updated" || !payload.type.startsWith("direct.message.")) {
             return;
           }
           const isSelectedConversation =

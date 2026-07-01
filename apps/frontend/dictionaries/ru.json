@@ -149,7 +149,14 @@
     "mentions": "Вас упомянули",
     "botBadge": "BOT",
     "deletedMessage": "Сообщение удалено",
-    "newMessages": "Новые сообщения"
+    "newMessages": "Новые сообщения",
+    "reactions": {
+      "label": "Реакции",
+      "add": "Добавить реакцию",
+      "remove": "Удалить реакцию",
+      "updateError": "Не удалось обновить реакцию",
+      "andMore": "и ещё {count}"
+    }
   },
   "directMessages": {
     "ariaLabel": "Личные сообщения",

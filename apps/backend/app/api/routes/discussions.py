@@ -17,6 +17,7 @@ from app.schemas.discussion import (
     DiscussionMessageUpdate,
     DiscussionPublic,
 )
+from app.schemas.reaction import MessageReactionPublic, ReactionChange, serialize_reactions
 from app.services.discussions import (
     add_discussion_member,
     can_manage_discussion_members,
@@ -36,6 +37,7 @@ from app.services.personal_notifications import (
     broadcast_discussion_message_created,
     discussion_message_event_payload,
 )
+from app.services.reactions import add_discussion_message_reaction, remove_discussion_message_reaction
 from app.services.websocket_manager import discussion_websocket_manager
 
 router = APIRouter()
@@ -43,6 +45,10 @@ router = APIRouter()
 
 def raise_for_permission_error(exc: PermissionError) -> None:
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+def serialize_message(message: DiscussionMessage, current_user: User) -> DiscussionMessagePublic:
+    return DiscussionMessagePublic.model_validate(message, context={"current_user_id": current_user.id})
 
 
 async def load_discussion_or_404(session: AsyncSession, discussion_id: UUID) -> Discussion:
@@ -192,7 +198,8 @@ async def get_messages(
     discussion = await load_discussion_or_404(session, discussion_id)
     try:
         await ensure_discussion_access(session, discussion, current_user)
-        return await list_discussion_messages(session, discussion, limit)
+        messages = await list_discussion_messages(session, discussion, limit)
+        return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
 
@@ -208,7 +215,7 @@ async def post_message(
     try:
         message = await create_discussion_message(session, discussion, current_user, payload)
         await broadcast_discussion_message_created(session, discussion, message)
-        return message
+        return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -233,7 +240,7 @@ async def patch_message(
             discussion.id,
             discussion_message_event_payload("discussion.message.updated", discussion.id, updated_message),
         )
-        return updated_message
+        return serialize_message(updated_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -257,6 +264,81 @@ async def delete_message(
             discussion.id,
             discussion_message_event_payload("discussion.message.deleted", discussion.id, deleted_message),
         )
-        return deleted_message
+        return serialize_message(deleted_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+
+
+async def change_discussion_message_reaction(
+    discussion_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: AsyncSession,
+    current_user: User,
+    remove: bool,
+) -> list[MessageReactionPublic]:
+    discussion = await load_discussion_or_404(session, discussion_id)
+    try:
+        await ensure_discussion_access(session, discussion, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    message = await get_discussion_message(session, discussion, message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Discussion message not found")
+
+    try:
+        if remove:
+            rows = await remove_discussion_message_reaction(session, message.id, current_user, payload.emoji)
+        else:
+            rows = await add_discussion_message_reaction(
+                session, message.id, current_user, payload.emoji, message.is_deleted
+            )
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    response = serialize_reactions(rows, current_user.id)
+    await discussion_websocket_manager.broadcast_to_discussion(
+        discussion.id,
+        {
+            "type": "discussion.message.reactions.updated",
+            "discussion_id": str(discussion.id),
+            "message_id": str(message.id),
+            "reactions": [item.model_dump(mode="json") for item in serialize_reactions(rows)],
+        },
+    )
+    return response
+
+
+@router.put(
+    "/{discussion_id}/messages/{message_id}/reactions",
+    response_model=list[MessageReactionPublic],
+)
+async def put_message_reaction(
+    discussion_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MessageReactionPublic]:
+    return await change_discussion_message_reaction(
+        discussion_id, message_id, payload, session, current_user, False
+    )
+
+
+@router.delete(
+    "/{discussion_id}/messages/{message_id}/reactions",
+    response_model=list[MessageReactionPublic],
+)
+async def delete_message_reaction(
+    discussion_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MessageReactionPublic]:
+    return await change_discussion_message_reaction(
+        discussion_id, message_id, payload, session, current_user, True
+    )

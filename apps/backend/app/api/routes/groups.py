@@ -18,6 +18,7 @@ from app.schemas.group import (
     GroupUpdate,
 )
 from app.schemas.message import MessageCreate, MessagePublic, MessageUpdate
+from app.schemas.reaction import MessageReactionPublic, ReactionChange, serialize_reactions
 from app.services.attachments import (
     create_message_with_attachment,
     get_group_attachment,
@@ -30,6 +31,7 @@ from app.services.groups import (
     ensure_group_visible,
     get_group,
     get_group_member,
+    get_group_membership,
     is_global_group_admin,
     list_group_members,
     list_visible_groups,
@@ -46,6 +48,7 @@ from app.services.messages import (
     update_group_message,
 )
 from app.services.personal_notifications import broadcast_group_message_created, group_message_event_payload
+from app.services.reactions import add_group_message_reaction, remove_group_message_reaction
 from app.services.websocket_manager import group_websocket_manager
 
 router = APIRouter()
@@ -60,6 +63,10 @@ async def load_group_or_404(session: AsyncSession, group_id: UUID) -> Group:
 
 def raise_for_permission_error(exc: PermissionError) -> None:
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+def serialize_message(message, current_user: User) -> MessagePublic:
+    return MessagePublic.model_validate(message, context={"current_user_id": current_user.id})
 
 
 @router.get("", response_model=list[GroupPublic])
@@ -218,7 +225,8 @@ async def get_messages(
         await ensure_group_message_access(session, group, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
-    return await list_group_messages(session, group, limit=limit, before=before)
+    messages = await list_group_messages(session, group, limit=limit, before=before)
+    return [serialize_message(message, current_user) for message in messages]
 
 
 @router.post("/{group_id}/messages", response_model=MessagePublic, status_code=status.HTTP_201_CREATED)
@@ -233,7 +241,7 @@ async def post_message(
         await ensure_group_message_access(session, group, current_user)
         message = await create_group_message(session, group, current_user, payload)
         await broadcast_group_message_created(session, group, message)
-        return message
+        return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -254,7 +262,7 @@ async def post_message_with_attachment(
         await ensure_group_message_access(session, group, current_user)
         message = await create_message_with_attachment(session, group, current_user, body, file, reply_to_message_id)
         await broadcast_group_message_created(session, group, message)
-        return message
+        return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -285,7 +293,7 @@ async def patch_message(
             group_id,
             group_message_event_payload("message.updated", group_id, updated_message),
         )
-        return updated_message
+        return serialize_message(updated_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -347,6 +355,79 @@ async def delete_message(
             group_id,
             group_message_event_payload("message.deleted", group_id, deleted_message),
         )
-        return deleted_message
+        return serialize_message(deleted_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+
+
+async def change_group_message_reaction(
+    group_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: AsyncSession,
+    current_user: User,
+    remove: bool,
+) -> list[MessageReactionPublic]:
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    if await get_group_membership(session, group.id, current_user.id) is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active group membership required")
+
+    message = await get_group_message(session, group, message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    try:
+        if remove:
+            rows = await remove_group_message_reaction(session, message.id, current_user, payload.emoji)
+        else:
+            rows = await add_group_message_reaction(
+                session, message.id, current_user, payload.emoji, message.is_deleted
+            )
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    response = serialize_reactions(rows, current_user.id)
+    await group_websocket_manager.broadcast_to_group(
+        group.id,
+        {
+            "type": "message.reactions.updated",
+            "group_id": str(group.id),
+            "message_id": str(message.id),
+            "reactions": [item.model_dump(mode="json") for item in serialize_reactions(rows)],
+        },
+    )
+    return response
+
+
+@router.put(
+    "/{group_id}/messages/{message_id}/reactions",
+    response_model=list[MessageReactionPublic],
+)
+async def put_message_reaction(
+    group_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MessageReactionPublic]:
+    return await change_group_message_reaction(group_id, message_id, payload, session, current_user, False)
+
+
+@router.delete(
+    "/{group_id}/messages/{message_id}/reactions",
+    response_model=list[MessageReactionPublic],
+)
+async def delete_message_reaction(
+    group_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MessageReactionPublic]:
+    return await change_group_message_reaction(group_id, message_id, payload, session, current_user, True)

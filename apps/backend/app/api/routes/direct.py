@@ -15,6 +15,7 @@ from app.schemas.direct import (
     DirectMessagePublic,
     DirectMessageUpdate,
 )
+from app.schemas.reaction import MessageReactionPublic, ReactionChange, serialize_reactions
 from app.services.direct import (
     create_direct_message,
     create_or_get_direct_conversation,
@@ -29,6 +30,7 @@ from app.services.direct import (
     update_direct_message,
 )
 from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
+from app.services.reactions import add_direct_message_reaction, remove_direct_message_reaction
 from app.services.websocket_manager import direct_websocket_manager
 
 router = APIRouter()
@@ -50,6 +52,7 @@ async def serialize_conversation(
     conversation: DirectConversation,
     current_user: User,
 ) -> DirectConversationPublic:
+    last_message = await get_last_direct_message(session, conversation)
     return DirectConversationPublic(
         id=conversation.id,
         user_one_id=conversation.user_one_id,
@@ -57,8 +60,16 @@ async def serialize_conversation(
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
         other_user=get_other_user(conversation, current_user),
-        last_message=await get_last_direct_message(session, conversation),
+        last_message=(
+            DirectMessagePublic.model_validate(last_message, context={"current_user_id": current_user.id})
+            if last_message is not None
+            else None
+        ),
     )
+
+
+def serialize_message(message: DirectMessage, current_user: User) -> DirectMessagePublic:
+    return DirectMessagePublic.model_validate(message, context={"current_user_id": current_user.id})
 
 
 @router.get("/conversations", response_model=list[DirectConversationPublic])
@@ -103,7 +114,8 @@ async def get_messages(
     conversation = await load_conversation_or_404(session, conversation_id)
     try:
         ensure_direct_conversation_access(conversation, current_user)
-        return await list_direct_messages(session, conversation, limit=limit)
+        messages = await list_direct_messages(session, conversation, limit=limit)
+        return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
 
@@ -123,7 +135,7 @@ async def post_message(
     try:
         message = await create_direct_message(session, conversation, current_user, payload)
         await broadcast_direct_message_created(conversation, message)
-        return message
+        return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -154,7 +166,7 @@ async def patch_message(
             conversation_id,
             direct_message_event_payload("direct.message.updated", conversation_id, updated_message),
         )
-        return updated_message
+        return serialize_message(updated_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except ValueError as exc:
@@ -184,6 +196,77 @@ async def delete_message(
             conversation_id,
             direct_message_event_payload("direct.message.deleted", conversation_id, deleted_message),
         )
-        return deleted_message
+        return serialize_message(deleted_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+
+
+async def change_direct_message_reaction(
+    conversation_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: AsyncSession,
+    current_user: User,
+    remove: bool,
+) -> list[MessageReactionPublic]:
+    conversation = await load_conversation_or_404(session, conversation_id)
+    try:
+        ensure_direct_conversation_access(conversation, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    message = await get_direct_message(session, conversation, message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    try:
+        if remove:
+            rows = await remove_direct_message_reaction(session, message.id, current_user, payload.emoji)
+        else:
+            rows = await add_direct_message_reaction(
+                session, message.id, current_user, payload.emoji, message.is_deleted
+            )
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    response = serialize_reactions(rows, current_user.id)
+    await direct_websocket_manager.broadcast_to_conversation(
+        conversation.id,
+        {
+            "type": "direct.message.reactions.updated",
+            "conversation_id": str(conversation.id),
+            "message_id": str(message.id),
+            "reactions": [item.model_dump(mode="json") for item in serialize_reactions(rows)],
+        },
+    )
+    return response
+
+
+@router.put(
+    "/conversations/{conversation_id}/messages/{message_id}/reactions",
+    response_model=list[MessageReactionPublic],
+)
+async def put_message_reaction(
+    conversation_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MessageReactionPublic]:
+    return await change_direct_message_reaction(conversation_id, message_id, payload, session, current_user, False)
+
+
+@router.delete(
+    "/conversations/{conversation_id}/messages/{message_id}/reactions",
+    response_model=list[MessageReactionPublic],
+)
+async def delete_message_reaction(
+    conversation_id: UUID,
+    message_id: UUID,
+    payload: ReactionChange,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MessageReactionPublic]:
+    return await change_direct_message_reaction(conversation_id, message_id, payload, session, current_user, True)

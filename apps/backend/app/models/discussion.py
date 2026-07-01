@@ -87,3 +87,7 @@ class DiscussionMessage(Base):
 
     discussion: Mapped[Discussion] = relationship(back_populates="messages")
     sender: Mapped[User] = relationship()
+    reactions: Mapped[list["DiscussionMessageReaction"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )

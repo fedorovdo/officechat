@@ -79,6 +79,8 @@ DELETE /api/discussions/{discussion_id}/messages/{message_id}
 
 ## WebSocket
 
+Discussion messages поддерживают реакции через `PUT/DELETE /api/discussions/{discussion_id}/messages/{message_id}/reactions` с JSON body `{ "emoji": "👍" }`. Реагировать могут только активные участники обсуждения. Событие `discussion.message.reactions.updated` обновляет reaction chips без полной перезагрузки discussion messages.
+
 Онлайн-обновления обсуждения доступны по endpoint:
 
 ```text
@@ -96,6 +98,9 @@ WS /api/ws/discussions/{discussion_id}?token=...
 Персональный канал `WS /api/ws/me` получает `user.discussion.message.created` для browser notifications участников.
 
 ## Ограничения v0.1
+
+- Доступен только фиксированный набор `👍 ❤️ 😂 ✅ 🔥 👀 🎉 😮 😢 👎`.
+- Нет custom reactions и уведомлений о реакциях.
 
 - Обсуждения создаются только из групповых сообщений.
 - Нет обсуждений для direct messages.

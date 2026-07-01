@@ -43,3 +43,7 @@ class Message(Base):
         back_populates="message",
         cascade="all, delete-orphan",
     )
+    reactions: Mapped[list["GroupMessageReaction"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )

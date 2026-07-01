@@ -149,7 +149,14 @@
     "mentions": "Mentioned you",
     "botBadge": "BOT",
     "deletedMessage": "Message deleted",
-    "newMessages": "New messages"
+    "newMessages": "New messages",
+    "reactions": {
+      "label": "Reactions",
+      "add": "Add reaction",
+      "remove": "Remove reaction",
+      "updateError": "Failed to update reaction",
+      "andMore": "and {count} more"
+    }
   },
   "directMessages": {
     "ariaLabel": "Direct messages",

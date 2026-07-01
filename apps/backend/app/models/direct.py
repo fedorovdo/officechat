@@ -57,3 +57,7 @@ class DirectMessage(Base):
     conversation: Mapped[DirectConversation] = relationship()
     sender: Mapped[User] = relationship()
     reply_to: Mapped["DirectMessage | None"] = relationship(remote_side=[id], foreign_keys=[reply_to_message_id])
+    reactions: Mapped[list["DirectMessageReaction"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )

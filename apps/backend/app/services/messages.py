@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.models.group import Group
 from app.models.mention import MessageMention
 from app.models.message import Message
+from app.models.reaction import GroupMessageReaction
 from app.models.user import User
 from app.schemas.message import MessageCreate, MessageUpdate
 from app.services.groups import get_group_membership, is_global_group_admin
@@ -50,6 +51,7 @@ async def list_group_messages(
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
+            selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )
         .where(Message.group_id == group.id)
         .order_by(Message.created_at.desc())
@@ -101,6 +103,7 @@ async def get_group_message(session: AsyncSession, group: Group, message_id: UUI
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
+            selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )
         .where(Message.id == message_id, Message.group_id == group.id)
     )
@@ -115,6 +118,7 @@ async def load_message_with_sender(session: AsyncSession, message_id: UUID) -> M
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
+            selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )
         .where(Message.id == message_id)
     )

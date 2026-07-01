@@ -2,8 +2,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from app.schemas.reaction import MessageReactionPublic, aggregate_reaction_rows
 from app.schemas.user import UserDirectoryEntry
 
 DiscussionMemberRole = Literal["owner", "member"]
@@ -97,3 +98,10 @@ class DiscussionMessagePublic(BaseModel):
     created_at: datetime
     updated_at: datetime
     sender: UserDirectoryEntry
+    reactions: list[MessageReactionPublic] = Field(default_factory=list)
+
+    @field_validator("reactions", mode="before")
+    @classmethod
+    def summarize_reactions(cls, value: object, info: ValidationInfo) -> object:
+        current_user_id = info.context.get("current_user_id") if info.context else None
+        return aggregate_reaction_rows(value, current_user_id)

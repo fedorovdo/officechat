@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.direct import DirectConversation, DirectMessage
+from app.models.reaction import DirectMessageReaction
 from app.models.user import User
 from app.schemas.direct import DirectConversationCreate, DirectMessageCreate, DirectMessageUpdate
 from app.services.messages import DELETED_MESSAGE_BODY, validate_message_body
@@ -66,7 +67,11 @@ async def get_last_direct_message(
 ) -> DirectMessage | None:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
+        .options(
+            selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
+        )
         .where(DirectMessage.conversation_id == conversation.id)
         .order_by(DirectMessage.created_at.desc())
         .limit(1)
@@ -122,7 +127,11 @@ async def list_direct_messages(
 ) -> list[DirectMessage]:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
+        .options(
+            selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
+        )
         .where(DirectMessage.conversation_id == conversation.id)
         .order_by(DirectMessage.created_at.desc())
         .limit(limit)
@@ -165,7 +174,11 @@ async def get_direct_message(
 ) -> DirectMessage | None:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
+        .options(
+            selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
+        )
         .where(DirectMessage.id == message_id, DirectMessage.conversation_id == conversation.id)
     )
     return result.scalar_one_or_none()
@@ -174,7 +187,11 @@ async def get_direct_message(
 async def load_direct_message(session: AsyncSession, message_id: UUID) -> DirectMessage:
     result = await session.execute(
         select(DirectMessage)
-        .options(selectinload(DirectMessage.sender), selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender))
+        .options(
+            selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
+        )
         .where(DirectMessage.id == message_id)
     )
     return result.scalar_one()

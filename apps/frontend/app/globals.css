@@ -1961,18 +1961,22 @@ a {
 
 .emoji-picker {
   position: absolute;
-  z-index: 12;
-  bottom: calc(100% + 9px);
+  z-index: 30;
+  bottom: calc(100% + 8px);
   left: 0;
-  width: min(360px, calc(100vw - 24px));
-  max-height: min(420px, 60vh);
+  width: min(420px, calc(100vw - 24px));
+  height: min(520px, calc(100dvh - 180px));
+  max-height: min(520px, calc(100dvh - 180px));
   padding: 10px;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 9px;
+  overflow: hidden;
   border: 1px solid var(--divider);
   border-radius: 7px;
   background: #ffffff;
   box-shadow: 0 12px 28px rgb(20 35 29 / 18%);
+  isolation: isolate;
 }
 
 .emoji-picker-search {
@@ -1982,9 +1986,14 @@ a {
 }
 
 .emoji-picker-content {
+  max-height: 100%;
   min-height: 0;
+  min-width: 0;
+  padding-right: 2px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .emoji-picker-section + .emoji-picker-section {
@@ -2242,14 +2251,13 @@ select:focus-visible,
   }
 
   .emoji-picker {
-    left: auto;
-    right: 0;
-    width: min(340px, calc(100vw - 72px));
-  }
-
-  .messenger-composer-row .emoji-picker {
     left: 0;
     right: auto;
+    width: min(420px, calc(100vw - 24px));
+  }
+
+  .messenger-composer-row:not(.messenger-composer-row-direct) .emoji-picker {
+    left: -48px;
   }
 
   .user-app-chat-layout-discussion .discussion-panel,

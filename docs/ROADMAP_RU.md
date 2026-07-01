@@ -25,6 +25,7 @@
 - Reply-to-message для групповых и личных сообщений: компактная цитата исходного сообщения без thread/discussion view.
 - Базовые `@username` mentions в групповых сообщениях: определение активных участников группы, подсветка и mention-aware browser notifications.
 - Базовые message discussions из групповых сообщений: правая боковая панель, участники, text-only сообщения и WebSocket updates.
+- Messenger UI v0.1: полноэкранная трехрегионная раскладка, resizable/collapsible sidebar, вкладки чатов, компактные сообщения и закрепленный composer.
 
 ## Этап 2: Realtime
 

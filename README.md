@@ -51,7 +51,7 @@ Admin users page:
 - Only `superadmin` can edit or promote `superadmin` users.
 - Cleanup actions are soft by default: users are disabled with `is_active=false`, not physically deleted. This keeps message authorship and future audit history intact.
 
-User-facing app shell is available at http://localhost:3100/ru/app. It shows a top bar, group chat sidebar, active users sidebar section for direct messages, local UI settings, and reusable chat panels with messages, attachments for groups, WebSocket updates, and Ctrl+Enter sending.
+User-facing app shell is available at http://localhost:3100/ru/app. It uses a viewport-filling messenger layout with a resizable/collapsible chat sidebar, a scrollable active chat, and an optional discussion panel. The sidebar provides All chats, Groups, and Direct tabs; its width, collapsed state, selected tab, and appearance preferences are stored in browser `localStorage`.
 
 Sidebar activity indicators are available in early frontend form. Groups and direct users can show local unread dots, last message previews, short activity timestamps, and recent-activity ordering. A local sidebar search filters groups by name or slug and users by display name or username. The normal direct-message list hides inactive users, the current user, and bot users. Activity state is stored in browser `localStorage` for now. Backend read receipts, server-side unread counters, and cross-device unread synchronization are planned later.
 
@@ -88,7 +88,7 @@ Reply-to-message support is available for both group chats and direct messages. 
 
 Basic `@username` mentions are available in group messages. OfficeChat detects active non-bot users who belong to the same group, includes mention metadata in REST/WebSocket payloads, highlights recognized mentions in the chat UI, and uses mention-aware browser notification text. Unknown usernames are ignored safely. Autocomplete, profile links, direct-message mentions, and markdown rendering are not implemented yet.
 
-Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, text-only discussion messages, Ctrl+Enter sending, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, discussion attachments, nested threads, a discussion sidebar, read receipts, and typing indicators are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
+Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, text-only discussion messages, Enter sending, Shift+Enter line breaks, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, discussion attachments, nested threads, a discussion sidebar, read receipts, and typing indicators are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
@@ -103,7 +103,7 @@ Messages foundation is available on group detail pages. REST API remains the sou
 
 Members can read and send messages in their groups. Message authors can edit and delete their own messages. Group owners, group moderators, `admin`, and `superadmin` users can delete messages according to the current permission model.
 
-The group chat UI includes live update status, readable wrapped multi-line messages, a BOT badge for bot-authored messages, compact message actions, and Ctrl+Enter sending from the composer.
+The group chat UI includes live update status, readable wrapped multi-line messages, a BOT badge for bot-authored messages, compact message actions, and a bottom composer. `Enter` sends, `Shift+Enter` inserts a new line, and `Ctrl+Enter` remains compatible. Group attachments use a compact file picker control. The mobile layout is a basic one-panel-at-a-time experience in v0.1.
 
 WebSocket real-time updates are available for group messages:
 

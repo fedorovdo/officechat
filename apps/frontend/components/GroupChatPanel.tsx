@@ -40,6 +40,8 @@ export function GroupChatPanel({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
@@ -74,17 +76,29 @@ export function GroupChatPanel({
     return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  function isNearPageBottom() {
-    if (typeof window === "undefined") {
+  function isNearMessagesBottom() {
+    const messagesList = messagesListRef.current;
+    if (!messagesList) {
       return true;
     }
-    const scrollBottom = window.scrollY + window.innerHeight;
-    return document.documentElement.scrollHeight - scrollBottom < 240;
+    return messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 180;
   }
 
   function scrollToLatestMessage(behavior: ScrollBehavior = "smooth") {
-    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    const messagesList = messagesListRef.current;
+    if (messagesList) {
+      messagesList.scrollTo({ top: messagesList.scrollHeight, behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    }
     setShowNewMessagesButton(false);
+  }
+
+  function resizeComposer(textarea: HTMLTextAreaElement) {
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(textarea.scrollHeight, 160);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
   }
 
   const refreshMessages = useCallback(
@@ -142,7 +156,7 @@ export function GroupChatPanel({
     const maxReconnectAttempts = 10;
 
     function markIncomingMessage() {
-      if (isNearPageBottom()) {
+      if (isNearMessagesBottom()) {
         shouldScrollToBottomRef.current = true;
       } else {
         setShowNewMessagesButton(true);
@@ -259,6 +273,9 @@ export function GroupChatPanel({
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSending || (!messageBody.trim() && !selectedFile)) {
+      return;
+    }
     const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
@@ -279,6 +296,9 @@ export function GroupChatPanel({
       setReplyToMessage(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
+      }
+      if (composerTextareaRef.current) {
+        composerTextareaRef.current.style.height = "44px";
       }
       shouldScrollToBottomRef.current = true;
       setMessages(await getGroupMessages(token, groupId));
@@ -353,7 +373,13 @@ export function GroupChatPanel({
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && event.ctrlKey && !isSending) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      !isSending &&
+      (messageBody.trim() || selectedFile)
+    ) {
       event.preventDefault();
       composeFormRef.current?.requestSubmit();
     }
@@ -361,7 +387,7 @@ export function GroupChatPanel({
 
   return (
     <section className="messages-panel" aria-label={dictionary.messages.ariaLabel}>
-      <div className="dashboard-header">
+      <div className="dashboard-header messages-toolbar">
         <div>
           <h2 className="section-title">{dictionary.messages.title}</h2>
           <p className={`live-status live-status-${liveUpdateStatus}`}>
@@ -376,7 +402,7 @@ export function GroupChatPanel({
       {success ? <p className="form-success">{success}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
 
-      <div className="messages-list">
+      <div className="messages-list" ref={messagesListRef}>
         {messages.map((message) => {
           const canEdit = currentUser.id === message.sender_user_id && !message.is_deleted;
           const canDelete = (canEdit || canModerateMessages) && !message.is_deleted;
@@ -505,7 +531,7 @@ export function GroupChatPanel({
         </button>
       ) : null}
 
-      <form className="admin-form message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
+      <form className="message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
         {replyToMessage ? (
           <div className="reply-compose-context">
             <div>
@@ -519,33 +545,61 @@ export function GroupChatPanel({
             </button>
           </div>
         ) : null}
-        <p className="note message-compose-hint">{dictionary.messages.mentionHint}</p>
-        <label className="field">
-          <span className="field-label">{dictionary.messages.body}</span>
-          <textarea
-            className="field-input textarea-input"
-            onChange={(event) => setMessageBody(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            required={!selectedFile}
-            value={messageBody}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">{dictionary.messages.attachment}</span>
+        {selectedFile ? (
+          <div className="selected-attachment">
+            <span>{selectedFile.name}</span>
+            <button
+              aria-label={dictionary.appShell.removeAttachment}
+              className="table-action"
+              onClick={() => {
+                setSelectedFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              title={dictionary.appShell.removeAttachment}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+        <div className="messenger-composer-row">
           <input
-            className="field-input file-input"
+            className="visually-hidden"
             onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
             ref={fileInputRef}
+            tabIndex={-1}
             type="file"
           />
-        </label>
-        <button className="primary-button" disabled={isSending} type="submit">
-          {isSending
-            ? dictionary.messages.sending
-            : selectedFile
-              ? dictionary.messages.sendWithAttachment
-              : dictionary.messages.send}
-        </button>
+          <button
+            aria-label={dictionary.appShell.attachFile}
+            className="composer-icon-button"
+            onClick={() => fileInputRef.current?.click()}
+            title={dictionary.appShell.attachFile}
+            type="button"
+          >
+            +
+          </button>
+          <textarea
+            aria-label={dictionary.messages.body}
+            className="field-input composer-textarea"
+            onChange={(event) => {
+              setMessageBody(event.target.value);
+              resizeComposer(event.currentTarget);
+            }}
+            onKeyDown={handleComposerKeyDown}
+            placeholder={dictionary.messages.body}
+            ref={composerTextareaRef}
+            required={!selectedFile}
+            rows={1}
+            value={messageBody}
+          />
+          <button className="composer-send-button" disabled={isSending || (!messageBody.trim() && !selectedFile)} type="submit">
+            {isSending ? dictionary.messages.sending : dictionary.messages.send}
+          </button>
+        </div>
+        <p className="message-compose-hint">
+          {dictionary.messages.mentionHint} · {dictionary.appShell.composerShortcut}
+        </p>
       </form>
     </section>
   );

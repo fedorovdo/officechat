@@ -137,6 +137,9 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSending || !messageBody.trim()) {
+      return;
+    }
     const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
@@ -237,7 +240,13 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && event.ctrlKey && !isSending) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      !isSending &&
+      messageBody.trim()
+    ) {
       event.preventDefault();
       composeFormRef.current?.requestSubmit();
     }

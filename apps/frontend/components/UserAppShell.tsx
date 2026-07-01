@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -43,7 +52,8 @@ type UserAppShellProps = {
 
 type SidebarSide = "left" | "right";
 type AppFontSize = "small" | "normal" | "large";
-type AccentColor = "default" | "blue" | "green" | "purple";
+type AccentColor = "default" | "blue" | "green" | "purple" | "forest";
+type SidebarTab = "all" | "groups" | "direct";
 type AppSelection =
   | { type: "group"; groupId: string }
   | { type: "direct"; conversationId: string }
@@ -110,6 +120,12 @@ type BrowserNotificationAttempt = {
 const settingsKey = "officechat.user_settings";
 const sidebarActivityKeyPrefix = "officechat.sidebar_activity";
 const notificationPreferenceKey = "officechat.notifications.enabled";
+const sidebarWidthKey = "officechat.sidebar.width";
+const sidebarCollapsedKey = "officechat.sidebar.collapsed";
+const sidebarTabKey = "officechat.sidebar.tab";
+const defaultSidebarWidth = 320;
+const minimumSidebarWidth = 240;
+const maximumSidebarWidth = 480;
 const defaultSettings: AppSettings = {
   accentColor: "default",
   fontSize: "normal",
@@ -265,6 +281,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [profileSuccess, setProfileSuccess] = useState("");
   const [profileError, setProfileError] = useState("");
   const [isProfileSaving, setIsProfileSaving] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(defaultSidebarWidth);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("all");
+  const [sidebarPreferencesLoaded, setSidebarPreferencesLoaded] = useState(false);
   const [error, setError] = useState("");
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
@@ -331,6 +351,38 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   );
   const hasSidebarSearchResults =
     filteredOrderedGroups.length > 0 || filteredOrderedDirectMessageUsers.length > 0;
+  const sidebarChatItems = useMemo(() => {
+    const groupItems = filteredOrderedGroups.map((group, index) => ({
+      kind: "group" as const,
+      id: group.id,
+      group,
+      index,
+      activityTime: getActivityTime(sidebarActivity.groups[group.id])
+    }));
+    const directItems = filteredOrderedDirectMessageUsers.map((user, index) => ({
+      kind: "direct" as const,
+      id: user.id,
+      user,
+      index: groupItems.length + index,
+      activityTime: getActivityTime(sidebarActivity.directUsers[user.id])
+    }));
+
+    if (sidebarTab === "groups") {
+      return groupItems;
+    }
+    if (sidebarTab === "direct") {
+      return directItems;
+    }
+    return [...groupItems, ...directItems].sort(
+      (left, right) => right.activityTime - left.activityTime || left.index - right.index
+    );
+  }, [
+    filteredOrderedDirectMessageUsers,
+    filteredOrderedGroups,
+    sidebarActivity.directUsers,
+    sidebarActivity.groups,
+    sidebarTab
+  ]);
   const currentMembership = currentUser
     ? selectedMembers.find((member) => member.user_id === currentUser.id)
     : undefined;
@@ -347,13 +399,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       [
         "user-app-shell",
         settings.sidebarSide === "right" ? "user-app-shell-sidebar-right" : "",
+        isSidebarCollapsed ? "user-app-sidebar-collapsed" : "",
+        selected.type !== "empty" ? "user-app-has-selection" : "",
         `user-app-font-${settings.fontSize}`,
         `user-app-accent-${settings.accentColor}`
       ]
         .filter(Boolean)
         .join(" "),
-    [settings]
+    [isSidebarCollapsed, selected.type, settings]
   );
+  const appShellStyle = {
+    "--sidebar-width": `${isSidebarCollapsed ? 72 : sidebarWidth}px`
+  } as CSSProperties;
 
   const shortTimeFormatter = useMemo(
     () =>
@@ -653,6 +710,28 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     setDocumentVisibilityState(loadedVisibilityState);
     setIsWindowFocused(loadedWindowFocusState);
   }, [locale]);
+
+  useEffect(() => {
+    const storedWidth = Number(localStorage.getItem(sidebarWidthKey));
+    if (Number.isFinite(storedWidth) && storedWidth >= minimumSidebarWidth && storedWidth <= maximumSidebarWidth) {
+      setSidebarWidth(storedWidth);
+    }
+    setIsSidebarCollapsed(localStorage.getItem(sidebarCollapsedKey) === "true");
+    const storedTab = localStorage.getItem(sidebarTabKey);
+    if (storedTab === "all" || storedTab === "groups" || storedTab === "direct") {
+      setSidebarTab(storedTab);
+    }
+    setSidebarPreferencesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarPreferencesLoaded) {
+      return;
+    }
+    localStorage.setItem(sidebarWidthKey, String(sidebarWidth));
+    localStorage.setItem(sidebarCollapsedKey, String(isSidebarCollapsed));
+    localStorage.setItem(sidebarTabKey, sidebarTab);
+  }, [isSidebarCollapsed, sidebarPreferencesLoaded, sidebarTab, sidebarWidth]);
 
   useEffect(() => {
     function updateBrowserAttentionState() {
@@ -1076,6 +1155,53 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     localStorage.setItem(settingsKey, JSON.stringify(nextSettings));
   }
 
+  function setActiveSidebarTab(nextTab: SidebarTab) {
+    setSidebarTab(nextTab);
+  }
+
+  function resetSidebarWidth() {
+    setSidebarWidth(defaultSidebarWidth);
+  }
+
+  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isSidebarCollapsed || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const direction = settings.sidebarSide === "right" ? -1 : 1;
+    document.body.classList.add("sidebar-resizing");
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      const nextWidth = Math.min(
+        maximumSidebarWidth,
+        Math.max(minimumSidebarWidth, startWidth + (pointerEvent.clientX - startX) * direction)
+      );
+      setSidebarWidth(Math.round(nextWidth));
+    }
+
+    function handlePointerUp() {
+      document.body.classList.remove("sidebar-resizing");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
+
+  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const direction = settings.sidebarSide === "right" ? -1 : 1;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const delta = (event.key === "ArrowRight" ? 16 : -16) * direction;
+      setSidebarWidth((currentWidth) =>
+        Math.min(maximumSidebarWidth, Math.max(minimumSidebarWidth, currentWidth + delta))
+      );
+    }
+  }
+
   function handleLanguageChange(nextLocale: Locale) {
     updateSettings({ ...settings, language: nextLocale });
     router.push(`/${nextLocale}/app`);
@@ -1252,150 +1378,187 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
   }
 
-  return (
-    <main className={appShellClass}>
-      <header className="user-app-topbar">
-        <div>
-          <p className="eyebrow">{dictionary.app.name}</p>
-          <h1 className="user-app-title">{dictionary.appShell.title}</h1>
-        </div>
-        <div className="user-app-topbar-actions">
-          {currentUser ? (
-            <div className="user-app-current-user">
-              <strong>{currentUser.display_name}</strong>
-              <span>@{currentUser.username}</span>
-            </div>
-          ) : null}
-          {currentUser && isAdminRole(currentUser.role) ? (
-            <Link className="secondary-link" href={`/${locale}/admin/users`}>
-              {dictionary.appShell.admin}
-            </Link>
-          ) : null}
-          <button className="secondary-link" disabled={!currentUser} onClick={openProfile} type="button">
-            {dictionary.appShell.profile.open}
-          </button>
-          <button className="secondary-link" onClick={() => setIsSettingsOpen(true)} type="button">
-            {dictionary.appShell.settings}
-          </button>
-          <button className="secondary-link" onClick={logout} type="button">
-            {dictionary.dashboard.logout}
-          </button>
-        </div>
-      </header>
+  function getInitials(value: string) {
+    const parts = value.trim().split(/\s+/).filter(Boolean);
+    return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || "OC").toUpperCase();
+  }
 
+  function closeChatOnSmallScreen() {
+    setSelected({ type: "empty" });
+    setActiveDiscussionId(null);
+  }
+
+  return (
+    <main className={appShellClass} style={appShellStyle}>
       <div className="user-app-layout">
         <aside className="user-app-sidebar" aria-label={dictionary.appShell.sidebarAriaLabel}>
-          <input
-            aria-label={dictionary.appShell.sidebarSearch}
-            className="field-input user-app-sidebar-search"
-            onChange={(event) => setSidebarSearch(event.target.value)}
-            placeholder={dictionary.appShell.sidebarSearch}
-            type="search"
-            value={sidebarSearch}
-          />
-          {!isLoading && normalizedSidebarSearch && !hasSidebarSearchResults ? (
-            <p className="muted user-app-sidebar-empty">{dictionary.appShell.nothingFound}</p>
-          ) : null}
+          <div className="messenger-sidebar-header">
+            <div className="messenger-brand">
+              <span className="messenger-brand-mark" aria-hidden="true">OC</span>
+              <span className="messenger-brand-copy">
+                <strong>{dictionary.app.name}</strong>
+                <small>{dictionary.appShell.title}</small>
+              </span>
+            </div>
+            <button
+              aria-label={isSidebarCollapsed ? dictionary.appShell.expandSidebar : dictionary.appShell.collapseSidebar}
+              className="sidebar-icon-button"
+              onClick={() => setIsSidebarCollapsed((current) => !current)}
+              title={isSidebarCollapsed ? dictionary.appShell.expandSidebar : dictionary.appShell.collapseSidebar}
+              type="button"
+            >
+              {isSidebarCollapsed ? ">" : "<"}
+            </button>
+          </div>
 
-          <section>
-            <h2 className="compact-title">{dictionary.appShell.groups}</h2>
-            <div className="user-app-nav-list">
-              {filteredOrderedGroups.map((group) => {
-                const activity = sidebarActivity.groups[group.id];
-                const isSelected = selected.type === "group" && selected.groupId === group.id;
-                const itemClassName = [
-                  "user-app-nav-item",
-                  isSelected ? "user-app-nav-item-active" : "",
-                  activity?.unread ? "user-app-nav-item-unread" : "",
-                  activity?.mentioned ? "user-app-nav-item-mentioned" : ""
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                return (
-                  <button
-                    className={itemClassName}
-                    key={group.id}
-                    onClick={() => {
-                      setSelected({ type: "group", groupId: group.id });
+          <div className="messenger-sidebar-tools">
+            <input
+              aria-label={dictionary.appShell.sidebarSearch}
+              className="field-input user-app-sidebar-search"
+              onChange={(event) => setSidebarSearch(event.target.value)}
+              placeholder={dictionary.appShell.sidebarSearch}
+              type="search"
+              value={sidebarSearch}
+            />
+            <div className="sidebar-tabs" role="tablist" aria-label={dictionary.appShell.chatTabs}>
+              {(["all", "groups", "direct"] as SidebarTab[]).map((tab) => (
+                <button
+                  aria-selected={sidebarTab === tab}
+                  className={sidebarTab === tab ? "sidebar-tab sidebar-tab-active" : "sidebar-tab"}
+                  key={tab}
+                  onClick={() => setActiveSidebarTab(tab)}
+                  role="tab"
+                  type="button"
+                >
+                  {dictionary.appShell.tabs[tab]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="user-app-nav-list">
+            {!isLoading && normalizedSidebarSearch && !hasSidebarSearchResults ? (
+              <p className="sidebar-empty-state">{dictionary.appShell.nothingFound}</p>
+            ) : null}
+            {sidebarChatItems.map((item) => {
+              const isGroup = item.kind === "group";
+              const activity = isGroup
+                ? sidebarActivity.groups[item.group.id]
+                : sidebarActivity.directUsers[item.user.id];
+              const name = isGroup ? item.group.name : item.user.display_name;
+              const secondary = isGroup ? item.group.slug : `@${item.user.username}`;
+              const isSelected = isGroup
+                ? selected.type === "group" && selected.groupId === item.group.id
+                : selected.type === "direct" && selectedDirectConversation?.other_user.id === item.user.id;
+              const itemClassName = [
+                "user-app-nav-item",
+                isSelected ? "user-app-nav-item-active" : "",
+                activity?.unread ? "user-app-nav-item-unread" : "",
+                activity?.mentioned ? "user-app-nav-item-mentioned" : ""
+              ].filter(Boolean).join(" ");
+              return (
+                <button
+                  aria-label={`${name}, ${secondary}`}
+                  className={itemClassName}
+                  disabled={!isGroup && pendingDirectUsername === item.user.username}
+                  key={`${item.kind}-${item.id}`}
+                  onClick={() => {
+                    if (isGroup) {
+                      setSelected({ type: "group", groupId: item.group.id });
                       setActiveDiscussionId(null);
-                      markGroupRead(group.id);
-                    }}
-                    type="button"
-                  >
-                    {activity?.unread ? (
-                      <span
-                        aria-label={dictionary.sidebarActivity.unread}
-                        className={activity.mentioned ? "sidebar-unread-dot sidebar-unread-dot-mention" : "sidebar-unread-dot"}
-                        title={activity.mentioned ? dictionary.messages.mentions : dictionary.sidebarActivity.newMessages}
-                      />
-                    ) : null}
+                      markGroupRead(item.group.id);
+                    } else {
+                      void handleOpenDirectUser(item.user);
+                    }
+                  }}
+                  title={isSidebarCollapsed ? name : undefined}
+                  type="button"
+                >
+                  <span className={isGroup ? "chat-avatar chat-avatar-group" : "chat-avatar"} aria-hidden="true">
+                    {getInitials(name)}
+                  </span>
+                  <span className="sidebar-item-content">
                     <span className="sidebar-item-top">
-                      <strong>{group.name}</strong>
-                      {activity?.timestamp ? (
-                        <span className="sidebar-item-time">{formatActivityTime(activity.timestamp)}</span>
-                      ) : null}
+                      <strong>{name}</strong>
+                      {activity?.timestamp ? <span className="sidebar-item-time">{formatActivityTime(activity.timestamp)}</span> : null}
                     </span>
-                    <span className="sidebar-item-meta">{group.slug}</span>
-                    <span className="sidebar-item-preview">
-                      {activity?.preview || dictionary.sidebarActivity.noRecentMessages}
-                    </span>
-                  </button>
-                );
-              })}
-              {!isLoading && !normalizedSidebarSearch && orderedGroups.length === 0 ? (
-                <p className="muted">{dictionary.appShell.noGroups}</p>
-              ) : null}
-            </div>
-          </section>
+                    <span className="sidebar-item-preview">{activity?.preview || dictionary.sidebarActivity.noRecentMessages}</span>
+                    <span className="sidebar-item-meta">{secondary}</span>
+                  </span>
+                  {activity?.unread ? (
+                    <span
+                      aria-label={dictionary.sidebarActivity.unread}
+                      className={activity.mentioned ? "sidebar-unread-dot sidebar-unread-dot-mention" : "sidebar-unread-dot"}
+                      title={activity.mentioned ? dictionary.messages.mentions : dictionary.sidebarActivity.newMessages}
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
+            {!isLoading && !normalizedSidebarSearch && sidebarChatItems.length === 0 ? (
+              <p className="sidebar-empty-state">
+                {sidebarTab === "groups" ? dictionary.appShell.noGroups : sidebarTab === "direct" ? dictionary.appShell.noUsers : dictionary.appShell.nothingFound}
+              </p>
+            ) : null}
+          </div>
 
-          <section>
-            <h2 className="compact-title">{dictionary.appShell.users}</h2>
-            <div className="user-app-nav-list">
-              {filteredOrderedDirectMessageUsers.map((user) => {
-                const activity = sidebarActivity.directUsers[user.id];
-                const isSelected =
-                  selected.type === "direct" && selectedDirectConversation?.other_user.id === user.id;
-                const itemClassName = [
-                  "user-app-nav-item",
-                  isSelected ? "user-app-nav-item-active" : "",
-                  activity?.unread ? "user-app-nav-item-unread" : ""
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                return (
-                  <button
-                    className={itemClassName}
-                    disabled={pendingDirectUsername === user.username}
-                    key={user.id}
-                    onClick={() => void handleOpenDirectUser(user)}
-                    type="button"
-                  >
-                    {activity?.unread ? (
-                      <span
-                        aria-label={dictionary.sidebarActivity.unread}
-                        className="sidebar-unread-dot"
-                        title={dictionary.sidebarActivity.newMessages}
-                      />
-                    ) : null}
-                    <strong>{user.display_name}</strong>
-                    {activity?.timestamp ? (
-                      <span className="sidebar-item-time">{formatActivityTime(activity.timestamp)}</span>
-                    ) : null}
-                    <span className="sidebar-item-preview">
-                      {activity?.preview || dictionary.sidebarActivity.noRecentMessages}
-                    </span>
-                    <span className="sidebar-item-meta">
-                      @{user.username} - {user.role}
-                    </span>
-                  </button>
-                );
-              })}
-              {!isLoading && !normalizedSidebarSearch && orderedDirectMessageUsers.length === 0 ? (
-                <p className="muted">{dictionary.appShell.noUsers}</p>
+          <div className="messenger-sidebar-account">
+            {currentUser ? (
+              <button className="sidebar-account-button" onClick={openProfile} title={dictionary.appShell.profile.open} type="button">
+                <span className="chat-avatar" aria-hidden="true">{getInitials(currentUser.display_name)}</span>
+                <span className="sidebar-item-content">
+                  <strong>{currentUser.display_name}</strong>
+                  <small>@{currentUser.username}</small>
+                </span>
+              </button>
+            ) : null}
+            <div className="sidebar-account-actions">
+              <button
+                aria-label={dictionary.appShell.settings}
+                className="sidebar-icon-button"
+                onClick={() => setIsSettingsOpen(true)}
+                title={dictionary.appShell.settings}
+                type="button"
+              >
+                ⚙
+              </button>
+              {currentUser && isAdminRole(currentUser.role) ? (
+                <Link
+                  aria-label={dictionary.appShell.admin}
+                  className="sidebar-icon-button"
+                  href={`/${locale}/admin/users`}
+                  title={dictionary.appShell.admin}
+                >
+                  A
+                </Link>
               ) : null}
+              <button
+                aria-label={dictionary.dashboard.logout}
+                className="sidebar-icon-button"
+                onClick={logout}
+                title={dictionary.dashboard.logout}
+                type="button"
+              >
+                ↪
+              </button>
             </div>
-          </section>
+          </div>
         </aside>
+
+        <div
+          aria-label={dictionary.appShell.resizeSidebar}
+          aria-orientation="vertical"
+          aria-valuemax={maximumSidebarWidth}
+          aria-valuemin={minimumSidebarWidth}
+          aria-valuenow={sidebarWidth}
+          className="sidebar-resize-handle"
+          onDoubleClick={resetSidebarWidth}
+          onKeyDown={handleSidebarResizeKeyDown}
+          onPointerDown={handleSidebarResizeStart}
+          role="separator"
+          tabIndex={isSidebarCollapsed ? -1 : 0}
+          title={dictionary.appShell.resetSidebarWidth}
+        />
 
         <section className="user-app-main" aria-label={dictionary.appShell.mainAriaLabel}>
           {error ? <p className="form-error">{error}</p> : null}
@@ -1412,9 +1575,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             <div className={activeDiscussionId ? "user-app-chat-layout user-app-chat-layout-discussion" : "user-app-chat-layout"}>
               <div className="user-app-chat-primary">
                 <div className="user-app-chat-heading">
-                  <div>
-                    <h2 className="section-title">{selectedGroup.name}</h2>
-                    <p className="admin-current">{selectedGroup.slug}</p>
+                  <button className="mobile-chat-back" onClick={closeChatOnSmallScreen} type="button">
+                    {dictionary.appShell.backToChats}
+                  </button>
+                  <div className="chat-header-identity">
+                    <span className="chat-avatar chat-avatar-group" aria-hidden="true">{getInitials(selectedGroup.name)}</span>
+                    <div>
+                      <h2 className="section-title">{selectedGroup.name}</h2>
+                      <p className="admin-current">
+                        {selectedGroup.slug} · {dictionary.appShell.membersCount.replace("{count}", String(selectedMembers.length))}
+                      </p>
+                    </div>
                   </div>
                   <Link className="secondary-link" href={`/${locale}/groups/${selectedGroup.id}`}>
                     {dictionary.appShell.groupDetails}
@@ -1442,11 +1613,21 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           ) : null}
 
           {selectedDirectConversation && currentUser ? (
-            <>
+            <div className="user-app-chat-layout">
               <div className="user-app-chat-heading">
-                <div>
-                  <h2 className="section-title">{selectedDirectConversation.other_user.display_name}</h2>
-                  <p className="admin-current">@{selectedDirectConversation.other_user.username}</p>
+                <button className="mobile-chat-back" onClick={closeChatOnSmallScreen} type="button">
+                  {dictionary.appShell.backToChats}
+                </button>
+                <div className="chat-header-identity">
+                  <span className="chat-avatar" aria-hidden="true">
+                    {getInitials(selectedDirectConversation.other_user.display_name)}
+                  </span>
+                  <div>
+                    <h2 className="section-title">{selectedDirectConversation.other_user.display_name}</h2>
+                    <p className="admin-current">
+                      @{selectedDirectConversation.other_user.username} · {dictionary.appShell.onlineStatusPlaceholder}
+                    </p>
+                  </div>
                 </div>
               </div>
               <DirectChatPanel
@@ -1455,7 +1636,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 dictionary={dictionary}
                 locale={locale}
               />
-            </>
+            </div>
           ) : null}
         </section>
       </div>
@@ -1596,6 +1777,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   <option value="blue">{dictionary.appShell.accentBlue}</option>
                   <option value="green">{dictionary.appShell.accentGreen}</option>
                   <option value="purple">{dictionary.appShell.accentPurple}</option>
+                  <option value="forest">{dictionary.appShell.accentForest}</option>
                 </select>
               </label>
               <div className="field">

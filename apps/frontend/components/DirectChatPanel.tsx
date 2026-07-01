@@ -29,6 +29,8 @@ type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 export function DirectChatPanel({ conversation, currentUser, dictionary, locale }: DirectChatPanelProps) {
   const router = useRouter();
   const composeFormRef = useRef<HTMLFormElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
@@ -52,17 +54,29 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     [locale]
   );
 
-  function isNearPageBottom() {
-    if (typeof window === "undefined") {
+  function isNearMessagesBottom() {
+    const messagesList = messagesListRef.current;
+    if (!messagesList) {
       return true;
     }
-    const scrollBottom = window.scrollY + window.innerHeight;
-    return document.documentElement.scrollHeight - scrollBottom < 240;
+    return messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 180;
   }
 
   function scrollToLatestMessage(behavior: ScrollBehavior = "smooth") {
-    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    const messagesList = messagesListRef.current;
+    if (messagesList) {
+      messagesList.scrollTo({ top: messagesList.scrollHeight, behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    }
     setShowNewMessagesButton(false);
+  }
+
+  function resizeComposer(textarea: HTMLTextAreaElement) {
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(textarea.scrollHeight, 160);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
   }
 
   const refreshMessages = useCallback(
@@ -123,7 +137,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     const maxReconnectAttempts = 10;
 
     function markIncomingMessage() {
-      if (isNearPageBottom()) {
+      if (isNearMessagesBottom()) {
         shouldScrollToBottomRef.current = true;
       } else {
         setShowNewMessagesButton(true);
@@ -205,7 +219,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSending) {
+    if (isSending || !messageBody.trim()) {
       return;
     }
 
@@ -224,6 +238,9 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       await sendDirectMessage(token, conversation.id, messageBody, abortController.signal, replyToMessage?.id);
       setMessageBody("");
       setReplyToMessage(null);
+      if (composerTextareaRef.current) {
+        composerTextareaRef.current.style.height = "44px";
+      }
       shouldScrollToBottomRef.current = true;
       setMessages(await getDirectMessages(token, conversation.id));
       setSuccess(dictionary.directMessages.sendSuccess);
@@ -279,7 +296,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && event.ctrlKey && !isSending) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      !isSending &&
+      messageBody.trim()
+    ) {
       event.preventDefault();
       composeFormRef.current?.requestSubmit();
     }
@@ -302,7 +325,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
 
   return (
     <section className="messages-panel" aria-label={dictionary.directMessages.ariaLabel}>
-      <div className="dashboard-header">
+      <div className="dashboard-header messages-toolbar">
         <div>
           <h2 className="section-title">{dictionary.directMessages.title}</h2>
           <p className={`live-status live-status-${liveUpdateStatus}`}>
@@ -314,11 +337,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
         </button>
       </div>
 
-      <p className="note">{dictionary.directMessages.attachmentsLater}</p>
+      <p className="note direct-chat-note">{dictionary.directMessages.attachmentsLater}</p>
       {success ? <p className="form-success">{success}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
 
-      <div className="messages-list">
+      <div className="messages-list" ref={messagesListRef}>
         {messages.map((message) => {
           const canEdit = currentUser.id === message.sender_user_id && !message.is_deleted;
           const isOwnMessage = currentUser.id === message.sender_user_id;
@@ -419,7 +442,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
         </button>
       ) : null}
 
-      <form className="admin-form message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
+      <form className="message-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
         {replyToMessage ? (
           <div className="reply-compose-context">
             <div>
@@ -433,19 +456,26 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
             </button>
           </div>
         ) : null}
-        <label className="field">
-          <span className="field-label">{dictionary.messages.body}</span>
+        <div className="messenger-composer-row messenger-composer-row-direct">
           <textarea
-            className="field-input textarea-input"
-            onChange={(event) => setMessageBody(event.target.value)}
+            aria-label={dictionary.messages.body}
+            className="field-input composer-textarea"
+            onChange={(event) => {
+              setMessageBody(event.target.value);
+              resizeComposer(event.currentTarget);
+            }}
             onKeyDown={handleComposerKeyDown}
+            placeholder={dictionary.messages.body}
+            ref={composerTextareaRef}
             required
+            rows={1}
             value={messageBody}
           />
-        </label>
-        <button className="primary-button" disabled={isSending} type="submit">
-          {isSending ? dictionary.messages.sending : dictionary.messages.send}
-        </button>
+          <button className="composer-send-button" disabled={isSending || !messageBody.trim()} type="submit">
+            {isSending ? dictionary.messages.sending : dictionary.messages.send}
+          </button>
+        </div>
+        <p className="message-compose-hint">{dictionary.appShell.composerShortcut}</p>
       </form>
     </section>
   );

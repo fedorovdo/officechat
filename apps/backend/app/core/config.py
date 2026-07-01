@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     allowed_upload_extensions: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["pdf", "doc", "docx", "xls", "xlsx", "png", "jpg", "jpeg", "txt", "zip"]
     )
+    avatar_max_upload_size_mb: int = 5
+    allowed_avatar_extensions: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["png", "jpg", "jpeg", "webp"]
+    )
     bootstrap_superadmin_username: str = "admin"
     bootstrap_superadmin_password: str = "admin12345"
     bootstrap_superadmin_display_name: str = "OfficeChat Admin"
@@ -71,9 +75,24 @@ class Settings(BaseSettings):
 
         raise ValueError("ALLOWED_UPLOAD_EXTENSIONS must be a list or comma-separated string")
 
+    @field_validator("allowed_avatar_extensions", mode="before")
+    @classmethod
+    def parse_avatar_extensions(cls, value: object) -> list[str]:
+        if isinstance(value, str):
+            return [extension.strip().lower().lstrip(".") for extension in value.split(",") if extension.strip()]
+
+        if isinstance(value, list):
+            return [str(extension).strip().lower().lstrip(".") for extension in value if str(extension).strip()]
+
+        raise ValueError("ALLOWED_AVATAR_EXTENSIONS must be a list or comma-separated string")
+
     @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024
+
+    @property
+    def avatar_max_upload_size_bytes(self) -> int:
+        return self.avatar_max_upload_size_mb * 1024 * 1024
 
     @property
     def database_url(self) -> str:

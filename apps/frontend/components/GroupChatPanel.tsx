@@ -17,6 +17,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { UserAvatar } from "./UserAvatar";
 
 type GroupChatPanelProps = {
   canModerateMessages: boolean;
@@ -418,6 +419,7 @@ export function GroupChatPanel({
           return (
             <article className={messageItemClasses} key={message.id}>
               <div className="message-meta">
+                <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                 <span className="message-author">
                   <strong>{message.sender.display_name}</strong>
                   {isBotMessage ? (

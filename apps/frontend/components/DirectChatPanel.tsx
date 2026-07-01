@@ -16,6 +16,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { UserAvatar } from "./UserAvatar";
 
 type DirectChatPanelProps = {
   conversation: OfficeChatDirectConversation;
@@ -355,6 +356,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
           return (
             <article className={messageItemClasses} key={message.id}>
               <div className="message-meta">
+                <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                 <span className="message-author">
                   <strong>{message.sender.display_name}</strong>
                   <span className="role-badge">{message.sender.role}</span>

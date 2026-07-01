@@ -24,8 +24,18 @@ class User(Base):
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auth_provider: Mapped[str] = mapped_column(String(64), nullable=False, default="local")
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    avatar_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def avatar_url(self) -> str | None:
+        if not self.avatar_path or not self.avatar_updated_at:
+            return None
+        version = int(self.avatar_updated_at.timestamp() * 1_000_000)
+        return f"/api/users/{self.id}/avatar?v={version}"

@@ -17,6 +17,7 @@ import {
   clearStoredAccessToken,
   createDirectConversation,
   createDiscussion,
+  deleteMyAvatar,
   getCurrentUser,
   getDirectConversations,
   getDirectWebSocketUrl,
@@ -28,6 +29,7 @@ import {
   getStoredAccessToken,
   getUsers,
   isAdminRole,
+  uploadMyAvatar,
   updateCurrentUser,
   type DirectMessageEvent,
   type GroupMessageEvent,
@@ -44,6 +46,7 @@ import type { Dictionary, Locale } from "../lib/i18n";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
+import { UserAvatar } from "./UserAvatar";
 
 type UserAppShellProps = {
   dictionary: Dictionary;
@@ -245,6 +248,7 @@ function truncateNotificationPreview(preview: string) {
 export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const router = useRouter();
   const notifiedMessageIdsRef = useRef<string[]>([]);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const browserNotificationsEnabledRef = useRef(false);
   const notificationPermissionRef = useRef<BrowserNotificationPermission>("default");
   const windowFocusedRef = useRef(false);
@@ -281,6 +285,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [profileSuccess, setProfileSuccess] = useState("");
   const [profileError, setProfileError] = useState("");
   const [isProfileSaving, setIsProfileSaving] = useState(false);
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
+  const [isAvatarUploading, setIsAvatarUploading] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(defaultSidebarWidth);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("all");
@@ -1300,6 +1306,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     setProfileDisplayName(currentUser.display_name);
     setProfileSuccess("");
     setProfileError("");
+    setSelectedAvatarFile(null);
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
     setIsProfileOpen(true);
   }
 
@@ -1326,6 +1334,60 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       setProfileError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.profile.updateError);
     } finally {
       setIsProfileSaving(false);
+    }
+  }
+
+  function getAvatarUploadError(caughtError: unknown) {
+    const message = caughtError instanceof Error ? caughtError.message : "";
+    if (message.includes("exceeds")) return dictionary.appShell.profile.avatarFileTooLarge;
+    if (message.includes("format") || message.includes("content type") || message.includes("valid supported image")) {
+      return dictionary.appShell.profile.avatarUnsupportedFormat;
+    }
+    return message || dictionary.appShell.profile.avatarUploadError;
+  }
+
+  async function handleAvatarFile(file: File | null) {
+    setSelectedAvatarFile(file);
+    if (!file) return;
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setProfileSuccess("");
+    setProfileError("");
+    setIsAvatarUploading(true);
+    try {
+      const updatedUser = await uploadMyAvatar(token, file);
+      setCurrentUser(updatedUser);
+      setProfileSuccess(dictionary.appShell.profile.avatarUpdated);
+      setSelectedAvatarFile(null);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    } catch (caughtError) {
+      setProfileError(getAvatarUploadError(caughtError));
+    } finally {
+      setIsAvatarUploading(false);
+    }
+  }
+
+  async function handleDeleteAvatar() {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setProfileSuccess("");
+    setProfileError("");
+    setIsAvatarUploading(true);
+    try {
+      const updatedUser = await deleteMyAvatar(token);
+      setCurrentUser(updatedUser);
+      setSelectedAvatarFile(null);
+      setProfileSuccess(dictionary.appShell.profile.avatarRemoved);
+    } catch (caughtError) {
+      setProfileError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.profile.avatarUploadError);
+    } finally {
+      setIsAvatarUploading(false);
     }
   }
 
@@ -1474,9 +1536,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   title={isSidebarCollapsed ? name : undefined}
                   type="button"
                 >
-                  <span className={isGroup ? "chat-avatar chat-avatar-group" : "chat-avatar"} aria-hidden="true">
-                    {getInitials(name)}
-                  </span>
+                  {isGroup ? (
+                    <span className="chat-avatar chat-avatar-group" aria-hidden="true">{getInitials(name)}</span>
+                  ) : (
+                    <UserAvatar user={item.user} size={40} />
+                  )}
                   <span className="sidebar-item-content">
                     <span className="sidebar-item-top">
                       <strong>{name}</strong>
@@ -1505,7 +1569,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           <div className="messenger-sidebar-account">
             {currentUser ? (
               <button className="sidebar-account-button" onClick={openProfile} title={dictionary.appShell.profile.open} type="button">
-                <span className="chat-avatar" aria-hidden="true">{getInitials(currentUser.display_name)}</span>
+                <UserAvatar user={currentUser} size={40} />
                 <span className="sidebar-item-content">
                   <strong>{currentUser.display_name}</strong>
                   <small>@{currentUser.username}</small>
@@ -1619,9 +1683,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   {dictionary.appShell.backToChats}
                 </button>
                 <div className="chat-header-identity">
-                  <span className="chat-avatar" aria-hidden="true">
-                    {getInitials(selectedDirectConversation.other_user.display_name)}
-                  </span>
+                  <UserAvatar user={selectedDirectConversation.other_user} size={40} />
                   <div>
                     <h2 className="section-title">{selectedDirectConversation.other_user.display_name}</h2>
                     <p className="admin-current">
@@ -1654,6 +1716,48 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               </button>
             </div>
             <div className="admin-form">
+              <div className="profile-avatar-section">
+                <UserAvatar user={currentUser} size={96} />
+                <div className="profile-avatar-controls">
+                  <span className="field-label">{dictionary.appShell.profile.avatar}</span>
+                  <input
+                    accept="image/png,image/jpeg,image/webp"
+                    className="visually-hidden"
+                    onChange={(event) => void handleAvatarFile(event.target.files?.[0] ?? null)}
+                    ref={avatarInputRef}
+                    type="file"
+                  />
+                  <div className="actions">
+                    <button
+                      className="secondary-link"
+                      disabled={isAvatarUploading}
+                      onClick={() => avatarInputRef.current?.click()}
+                      type="button"
+                    >
+                      {isAvatarUploading
+                        ? dictionary.appShell.profile.avatarUploading
+                        : currentUser.avatar_url
+                          ? dictionary.appShell.profile.changeAvatar
+                          : dictionary.appShell.profile.uploadAvatar}
+                    </button>
+                    {currentUser.avatar_url ? (
+                      <button
+                        className="table-action"
+                        disabled={isAvatarUploading}
+                        onClick={() => void handleDeleteAvatar()}
+                        type="button"
+                      >
+                        {dictionary.appShell.profile.removeAvatar}
+                      </button>
+                    ) : null}
+                  </div>
+                  {selectedAvatarFile ? <p className="note">{selectedAvatarFile.name}</p> : null}
+                  <p className="note">{dictionary.appShell.profile.avatarHint}</p>
+                  {!currentUser.avatar_url && !selectedAvatarFile ? (
+                    <p className="note">{dictionary.appShell.profile.noAvatar}</p>
+                  ) : null}
+                </div>
+              </div>
               <label className="field">
                 <span className="field-label">{dictionary.appShell.profile.displayName}</span>
                 <input

@@ -20,6 +20,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { UserAvatar } from "./UserAvatar";
 
 type DiscussionPanelProps = {
   currentUser: OfficeChatUser;
@@ -291,8 +292,11 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
             <div className="discussion-members">
               {discussion.members.map((member) => (
                 <div className="discussion-member" key={member.id}>
-                  <span>
-                    <strong>{member.user.display_name}</strong> @{member.user.username}
+                  <span className="discussion-member-identity">
+                    <UserAvatar size={30} user={member.user} />
+                    <span>
+                      <strong>{member.user.display_name}</strong> @{member.user.username}
+                    </span>
                   </span>
                   <span className="role-badge">{member.role}</span>
                   {discussion.can_manage_members ? (
@@ -333,6 +337,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
             return (
               <article className={message.is_deleted ? "discussion-message discussion-message-deleted" : "discussion-message"} key={message.id}>
                 <div className="message-meta">
+                  <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                   <strong>{message.sender.display_name}</strong>
                   <span>@{message.sender.username}</span>
                   <span>{dateFormatter.format(new Date(message.created_at))}</span>

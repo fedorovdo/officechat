@@ -18,6 +18,7 @@ class UserPublic(BaseModel):
     is_active: bool
     is_system: bool
     auth_provider: str
+    avatar_url: str | None
     created_at: datetime
     updated_at: datetime
     last_login_at: datetime | None
@@ -31,6 +32,7 @@ class UserDirectoryEntry(BaseModel):
     display_name: str
     role: UserRole
     is_active: bool
+    avatar_url: str | None
 
 
 class UserProfileUpdate(BaseModel):

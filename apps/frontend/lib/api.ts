@@ -11,6 +11,7 @@ export type OfficeChatUser = {
   is_active: boolean;
   is_system: boolean;
   auth_provider: string;
+  avatar_url: string | null;
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
@@ -22,6 +23,7 @@ export type OfficeChatDirectoryUser = {
   display_name: string;
   role: UserRole;
   is_active: boolean;
+  avatar_url: string | null;
 };
 
 export type CreateAdminUserPayload = {
@@ -337,6 +339,39 @@ export function updateCurrentUser(token: string, displayName: string) {
     method: "PATCH",
     body: JSON.stringify({ display_name: displayName })
   });
+}
+
+export async function uploadMyAvatar(token: string, file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${apiBaseUrl}/api/auth/me/avatar`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new Error(typeof body?.detail === "string" ? body.detail : response.statusText);
+  }
+  return (await response.json()) as OfficeChatUser;
+}
+
+export function deleteMyAvatar(token: string) {
+  return apiFetch<OfficeChatUser>("/api/auth/me/avatar", token, { method: "DELETE" });
+}
+
+export function buildUserAvatarUrl(avatarUrl: string) {
+  return `${apiBaseUrl}${avatarUrl}`;
+}
+
+export async function fetchUserAvatar(token: string, avatarUrl: string) {
+  const response = await fetch(buildUserAvatarUrl(avatarUrl), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) {
+    throw new Error(response.statusText);
+  }
+  return response.blob();
 }
 
 export function getAdminUsers(token: string) {

@@ -1099,6 +1099,18 @@ a {
   overflow-wrap: anywhere;
 }
 
+.discussion-member-identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.discussion-member-identity > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .discussion-invite-form,
 .discussion-compose {
   display: grid;
@@ -1181,6 +1193,22 @@ a {
 .profile-facts {
   display: grid;
   gap: 10px;
+  margin: 0;
+}
+
+.profile-avatar-section {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.profile-avatar-controls {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.profile-avatar-controls .actions {
   margin: 0;
 }
 
@@ -1428,6 +1456,32 @@ a {
 .chat-avatar-group {
   border-radius: 10px;
   background: #52756a;
+}
+
+.user-avatar {
+  width: var(--avatar-size, 40px);
+  height: var(--avatar-size, 40px);
+  flex: 0 0 var(--avatar-size, 40px);
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: hsl(var(--avatar-hue, 155) 28% 44%);
+  color: #ffffff;
+  font-size: clamp(10px, calc(var(--avatar-size, 40px) * 0.34), 28px);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.message-sender-avatar {
+  margin-right: 2px;
 }
 
 .sidebar-icon-button {
@@ -2076,7 +2130,8 @@ select:focus-visible,
     flex: 1;
   }
 
-  .chat-header-identity .chat-avatar {
+  .chat-header-identity .chat-avatar,
+  .chat-header-identity .user-avatar {
     display: none;
   }
 
@@ -2107,5 +2162,10 @@ select:focus-visible,
   .profile-facts div {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .profile-avatar-section {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

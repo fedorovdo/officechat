@@ -38,6 +38,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const hasInitialMessageScrollRef = useRef(false);
   const [messages, setMessages] = useState<OfficeChatDirectMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
+  const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
   const [replyToMessage, setReplyToMessage] = useState<OfficeChatDirectMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageBody, setEditingMessageBody] = useState("");
@@ -239,6 +240,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     try {
       await sendDirectMessage(token, conversation.id, messageBody, abortController.signal, replyToMessage?.id);
       setMessageBody("");
+      setEmojiPickerResetKey((current) => current + 1);
       setReplyToMessage(null);
       if (composerTextareaRef.current) {
         composerTextareaRef.current.style.height = "44px";
@@ -461,10 +463,12 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
         ) : null}
         <div className="messenger-composer-row messenger-composer-row-direct">
           <EmojiPicker
+            contextKey={conversation.id}
             dictionary={dictionary}
             disabled={isSending}
             onAfterInsert={resizeComposer}
             onChange={setMessageBody}
+            resetKey={emojiPickerResetKey}
             textareaRef={composerTextareaRef}
             value={messageBody}
           />

@@ -40,6 +40,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
   const [discussion, setDiscussion] = useState<OfficeChatDiscussion | null>(null);
   const [messages, setMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
+  const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
   const [inviteUsername, setInviteUsername] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageBody, setEditingMessageBody] = useState("");
@@ -161,6 +162,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
     try {
       await sendDiscussionMessage(token, discussionId, messageBody);
       setMessageBody("");
+      setEmojiPickerResetKey((current) => current + 1);
       if (composerTextareaRef.current) composerTextareaRef.current.style.height = "42px";
       setMessages(await getDiscussionMessages(token, discussionId));
       setSuccess(dictionary.discussions.sendSuccess);
@@ -410,10 +412,12 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       <form className="admin-form discussion-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
         <div className="discussion-composer-row">
           <EmojiPicker
+            contextKey={discussionId}
             dictionary={dictionary}
             disabled={isSending}
             onAfterInsert={resizeComposer}
             onChange={setMessageBody}
+            resetKey={emojiPickerResetKey}
             textareaRef={composerTextareaRef}
             value={messageBody}
           />

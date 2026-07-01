@@ -99,19 +99,23 @@ const emojiCategories: EmojiCategory[] = [
 ];
 
 type EmojiPickerProps = {
+  contextKey: string;
   dictionary: Dictionary;
   disabled?: boolean;
   onAfterInsert?: (textarea: HTMLTextAreaElement) => void;
   onChange: (value: string) => void;
+  resetKey: number;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
 };
 
 export function EmojiPicker({
+  contextKey,
   dictionary,
   disabled = false,
   onAfterInsert,
   onChange,
+  resetKey,
   textareaRef,
   value
 }: EmojiPickerProps) {
@@ -153,16 +157,23 @@ export function EmojiPicker({
   }, [textareaRef]);
 
   useEffect(() => {
+    setIsOpen(false);
+    setQuery("");
+  }, [contextKey, resetKey]);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+      const target = event.target as Node;
+      const composer = rootRef.current?.closest("form");
+      if (!rootRef.current?.contains(target) && !composer?.contains(target)) setIsOpen(false);
     };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         setIsOpen(false);
-        textareaRef.current?.focus();
+        textareaRef.current?.focus({ preventScroll: true });
       }
     };
 
@@ -203,20 +214,21 @@ export function EmojiPicker({
     const { start, end } = selectionRef.current;
     const nextValue = `${value.slice(0, start)}${emoji}${value.slice(end)}`;
     const nextCursor = start + emoji.length;
-    const nextRecent = [emoji, ...recentEmojis.filter((item) => item !== emoji)].slice(0, RECENT_EMOJI_LIMIT);
 
     onChange(nextValue);
-    setRecentEmojis(nextRecent);
-    setIsOpen(false);
-    try {
-      window.localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(nextRecent));
-    } catch {
-      // Emoji insertion remains available if browser storage is unavailable.
-    }
+    setRecentEmojis((current) => {
+      const nextRecent = [emoji, ...current.filter((item) => item !== emoji)].slice(0, RECENT_EMOJI_LIMIT);
+      try {
+        window.localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(nextRecent));
+      } catch {
+        // Emoji insertion remains available if browser storage is unavailable.
+      }
+      return nextRecent;
+    });
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
-      textarea.focus();
+      textarea.focus({ preventScroll: true });
       textarea.setSelectionRange(nextCursor, nextCursor);
       selectionRef.current = { start: nextCursor, end: nextCursor };
       onAfterInsert?.(textarea);

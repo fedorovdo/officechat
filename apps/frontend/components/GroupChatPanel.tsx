@@ -49,6 +49,7 @@ export function GroupChatPanel({
   const hasInitialMessageScrollRef = useRef(false);
   const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
+  const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [replyToMessage, setReplyToMessage] = useState<OfficeChatMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -294,6 +295,7 @@ export function GroupChatPanel({
         await sendGroupMessage(token, groupId, messageBody, replyToMessage?.id);
       }
       setMessageBody("");
+      setEmojiPickerResetKey((current) => current + 1);
       setSelectedFile(null);
       setReplyToMessage(null);
       if (fileInputRef.current) {
@@ -583,10 +585,12 @@ export function GroupChatPanel({
             +
           </button>
           <EmojiPicker
+            contextKey={groupId}
             dictionary={dictionary}
             disabled={isSending}
             onAfterInsert={resizeComposer}
             onChange={setMessageBody}
+            resetKey={emojiPickerResetKey}
             textareaRef={composerTextareaRef}
             value={messageBody}
           />

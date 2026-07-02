@@ -131,6 +131,8 @@ File attachments are available for group, direct, and discussion messages:
 
 In group, direct, and discussion composers, desktop users can paste PNG, JPEG, or WebP screenshots directly with `Ctrl+V`. Clipboard images receive a safe timestamp filename and a local thumbnail before sending. OfficeChat currently supports one attachment per message, so a pasted image replaces any selected file. Multiple attachments and drag-and-drop remain planned.
 
+Sent PNG, JPEG, and WebP attachments display inline in group, direct, and discussion messages. Preview bytes are fetched through the protected endpoint with the bearer token, converted to a temporary Blob URL, and never expose storage paths or tokens. Clicking the preview opens a lightweight full-screen viewer; the original authenticated download remains available. SVG, PDF, Office, text, and archive files are intentionally not rendered inline.
+
 The group, direct, and discussion message composers include a lightweight Unicode emoji picker with RU/EN search and a local frequently-used list. Recent emoji are stored in the browser under `officechat.emoji.recent`. Message reactions support `👍 ❤️ 😂 ✅ 🔥 👀 🎉 😮 😢 👎`, one reaction per user/emoji/message, repeated-click removal, and real-time channel synchronization. Custom reactions, stickers, GIFs, and reaction notifications are not implemented. Local avatar upload and avatar display in messenger messages and user lists are also available in v0.1, while optional avatar cropping/editing remains planned.
 
 Bot foundation is available for incoming webhooks:

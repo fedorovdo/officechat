@@ -103,6 +103,8 @@ WS /api/ws/discussions/{discussion_id}?token=...
 
 Discussion composer поддерживает вставку PNG/JPEG/WebP screenshot через `Ctrl+V`. Изображение получает безопасное имя и thumbnail; при уже выбранном файле оно заменяет единственное вложение v0.1.
 
+Отправленные PNG/JPEG/WebP загружаются через защищённый discussion endpoint и показываются inline в узкой боковой панели без её расширения. Клик открывает viewport-constrained lightbox; SVG и документы остаются обычными файлами.
+
 ## Ограничения v0.1
 
 - Доступен только фиксированный набор `👍 ❤️ 😂 ✅ 🔥 👀 🎉 😮 😢 👎`.

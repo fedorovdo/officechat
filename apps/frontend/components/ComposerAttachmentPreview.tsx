@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dictionary } from "../lib/i18n";
-import { formatFileSize } from "./MessageAttachments";
+import { formatFileSize } from "../lib/files";
 
 type ComposerAttachmentPreviewProps = {
   dictionary: Dictionary;

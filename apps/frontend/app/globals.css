@@ -724,6 +724,100 @@ a {
   gap: 8px;
 }
 
+.message-image-attachment {
+  width: min(560px, 100%);
+  max-width: 100%;
+  display: grid;
+  gap: 6px;
+}
+
+.message-image-placeholder,
+.message-image-preview-error {
+  min-height: 88px;
+  padding: 14px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f5f7f9;
+  color: var(--muted);
+  text-align: center;
+}
+
+.message-image-preview-button {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f5f7f9;
+  cursor: zoom-in;
+}
+
+.message-image-preview-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--app-accent, var(--accent)) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.message-image-preview {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  padding: clamp(12px, 3vw, 32px);
+  display: grid;
+  place-items: center;
+  background: rgb(12 18 24 / 88%);
+}
+
+.image-lightbox-content {
+  width: min(1200px, 100%);
+  max-height: calc(100dvh - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.image-lightbox-toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #ffffff;
+}
+
+.image-lightbox-toolbar > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-lightbox-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.image-lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100dvh - 100px);
+  margin: auto;
+  object-fit: contain;
+}
+
 .attachment-button {
   width: 100%;
   min-height: 38px;
@@ -752,6 +846,17 @@ a {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .image-lightbox-toolbar {
+    align-items: flex-start;
+  }
+
+  .image-lightbox-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 
 .attachment-button span:last-child {

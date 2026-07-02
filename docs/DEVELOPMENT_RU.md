@@ -75,7 +75,9 @@ WebSocket-подключение для онлайн-обновлений соо
 
 Upload endpoints: `POST /api/groups/{groupId}/messages/with-attachment`, `POST /api/direct/conversations/{conversationId}/messages/with-attachment` и `POST /api/discussions/{discussionId}/messages/with-attachment`. Защищённые download endpoints находятся в соответствующих `/attachments/{attachmentId}/download` и требуют membership в нужном контексте.
 
-По умолчанию разрешены расширения `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`, лимит размера - `25` MB. Текстовые и конфигурационные файлы принимают распространённые MIME-варианты и `application/octet-stream`, но extension allowlist остаётся обязательным. Форматы `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` всегда заблокированы. Volume `/data/uploads` необходимо включать в backup. Antivirus scanning, S3, previews, thumbnails, drag-and-drop и retention cleanup пока не реализованы.
+По умолчанию разрешены расширения `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`, лимит размера - `25` MB. Текстовые и конфигурационные файлы принимают распространённые MIME-варианты и `application/octet-stream`, но extension allowlist остаётся обязательным. Форматы `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` всегда заблокированы. Volume `/data/uploads` необходимо включать в backup. Antivirus scanning, S3, PDF/document previews, backend thumbnails, drag-and-drop и retention cleanup пока не реализованы.
+
+Frontend показывает PNG/JPEG/WebP inline через authenticated Blob fetch; обычный `<img src="protected-url">` не используется, token в URL не добавляется. MIME ответа проверяется повторно, object URLs освобождаются. SVG, PDF и документы не preview-ятся. Backend thumbnails и image compression пока отсутствуют.
 
 ## Bots
 

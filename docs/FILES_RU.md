@@ -50,6 +50,12 @@ ALLOWED_UPLOAD_EXTENSIONS=txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx
 
 В v0.1 сообщение содержит только одно вложение. Если файл уже выбран, вставленное изображение заменяет его с явным уведомлением. После удаления, успешной отправки, смены чата или unmount временный object URL освобождается. Обычная вставка многострочного текста не перехватывается.
 
+## Inline preview отправленных изображений
+
+PNG, JPEG и WebP отображаются непосредственно в group, direct и discussion messages. Frontend выполняет authenticated fetch защищённого `download_url`, повторно проверяет MIME ответа, создаёт временный Blob URL и освобождает его при unmount или смене attachment. Bearer token не попадает в image URL.
+
+Клик по изображению открывает простой полноэкранный lightbox; `Escape`, кнопка закрытия и клик по overlay закрывают его. Имя, размер и защищённая загрузка оригинала остаются доступны. SVG намеренно не preview-ится. PDF, Office documents, text files и archives продолжают отображаться обычной строкой файла.
+
 ## Эксплуатация
 
 Volume uploads необходимо резервировать вместе с PostgreSQL. Одна база без volume не восстановит содержимое вложений.
@@ -59,6 +65,7 @@ Volume uploads необходимо резервировать вместе с P
 - Нет antivirus scanning.
 - Нет S3/MinIO или другого object storage.
 - Нет image preview, gallery и thumbnails.
+- Нет backend thumbnail generation, image compression и gallery.
 - Нет drag-and-drop.
 - Нет нескольких вложений в одном сообщении.
 - Нет автоматической retention cleanup.

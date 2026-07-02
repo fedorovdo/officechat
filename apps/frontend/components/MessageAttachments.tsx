@@ -2,6 +2,7 @@
 
 import type { OfficeChatAttachment } from "../lib/api";
 import type { Dictionary } from "../lib/i18n";
+import { MessageAttachmentPreview } from "./MessageAttachmentPreview";
 
 type MessageAttachmentsProps = {
   attachments: OfficeChatAttachment[];
@@ -27,29 +28,18 @@ export function getAttachmentUploadError(caughtError: unknown, dictionary: Dicti
   return caughtError.message || dictionary.messages.uploadError;
 }
 
-export function formatFileSize(sizeBytes: number) {
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export function MessageAttachments({ attachments, dictionary, onDownload }: MessageAttachmentsProps) {
   if (attachments.length === 0) return null;
 
   return (
     <div className="attachments-list">
       {attachments.map((attachment) => (
-        <button
-          className="attachment-button"
+        <MessageAttachmentPreview
+          attachment={attachment}
+          dictionary={dictionary}
           key={attachment.id}
-          onClick={() => onDownload(attachment.download_url, attachment.original_filename)}
-          title={dictionary.messages.download}
-          type="button"
-        >
-          <span>{attachment.original_filename}</span>
-          <span>{formatFileSize(attachment.size_bytes)}</span>
-          <span>{dictionary.messages.download}</span>
-        </button>
+          onDownload={onDownload}
+        />
       ))}
     </div>
   );

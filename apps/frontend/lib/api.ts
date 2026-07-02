@@ -95,6 +95,15 @@ export type OfficeChatMessage = {
   reactions: OfficeChatMessageReaction[];
 };
 
+export type OfficeChatAttachment = {
+  id: string;
+  original_filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  created_at: string;
+  download_url: string;
+};
+
 export type OfficeChatMessageReplyPreview = {
   id: string;
   sender: Pick<OfficeChatUser, "id" | "username" | "display_name">;
@@ -103,14 +112,8 @@ export type OfficeChatMessageReplyPreview = {
   created_at: string;
 };
 
-export type OfficeChatMessageAttachment = {
-  id: string;
+export type OfficeChatMessageAttachment = OfficeChatAttachment & {
   group_id: string;
-  original_filename: string;
-  content_type: string | null;
-  size_bytes: number;
-  created_at: string;
-  download_url: string;
 };
 
 export type OfficeChatMessageMention = {
@@ -132,6 +135,7 @@ export type OfficeChatDirectMessage = {
   updated_at: string;
   sender: OfficeChatDirectoryUser;
   reply_to: OfficeChatDirectMessageReplyPreview | null;
+  attachments: OfficeChatAttachment[];
   reactions: OfficeChatMessageReaction[];
 };
 
@@ -194,6 +198,7 @@ export type OfficeChatDiscussionMessage = {
   created_at: string;
   updated_at: string;
   sender: OfficeChatDirectoryUser;
+  attachments: OfficeChatAttachment[];
   reactions: OfficeChatMessageReaction[];
 };
 
@@ -366,6 +371,44 @@ async function apiFetch<T>(path: string, token: string, init: RequestInit = {}):
   return (await response.json()) as T;
 }
 
+async function uploadMessageWithAttachment<T>(
+  path: string,
+  token: string,
+  body: string,
+  file: File,
+  replyToMessageId?: string | null,
+  signal?: AbortSignal
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (body.trim()) {
+    formData.append("body", body);
+  }
+  if (replyToMessageId) {
+    formData.append("reply_to_message_id", replyToMessageId);
+  }
+
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+    signal
+  });
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const responseBody = (await response.json()) as { detail?: unknown };
+      if (typeof responseBody.detail === "string") {
+        message = responseBody.detail;
+      }
+    } catch {
+      message = response.statusText;
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as T;
+}
+
 export function getCurrentUser(token: string) {
   return apiFetch<OfficeChatUser>("/api/auth/me", token);
 }
@@ -532,37 +575,13 @@ export async function sendGroupMessageWithAttachment(
   file: File,
   replyToMessageId?: string | null
 ) {
-  const formData = new FormData();
-  formData.append("file", file);
-  if (body.trim()) {
-    formData.append("body", body);
-  }
-  if (replyToMessageId) {
-    formData.append("reply_to_message_id", replyToMessageId);
-  }
-
-  const response = await fetch(`${apiBaseUrl}/api/groups/${groupId}/messages/with-attachment`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    },
-    body: formData
-  });
-
-  if (!response.ok) {
-    let message = response.statusText;
-    try {
-      const responseBody = (await response.json()) as { detail?: unknown };
-      if (typeof responseBody.detail === "string") {
-        message = responseBody.detail;
-      }
-    } catch {
-      message = response.statusText;
-    }
-    throw new Error(message);
-  }
-
-  return (await response.json()) as OfficeChatMessage;
+  return uploadMessageWithAttachment<OfficeChatMessage>(
+    `/api/groups/${groupId}/messages/with-attachment`,
+    token,
+    body,
+    file,
+    replyToMessageId
+  );
 }
 
 export function editGroupMessage(token: string, groupId: string, messageId: string, body: string) {
@@ -632,6 +651,24 @@ export function sendDirectMessage(
     signal,
     body: JSON.stringify({ body, message_type: "text", reply_to_message_id: replyToMessageId ?? null })
   });
+}
+
+export function sendDirectMessageWithAttachment(
+  token: string,
+  conversationId: string,
+  body: string,
+  file: File,
+  signal?: AbortSignal,
+  replyToMessageId?: string | null
+) {
+  return uploadMessageWithAttachment<OfficeChatDirectMessage>(
+    `/api/direct/conversations/${conversationId}/messages/with-attachment`,
+    token,
+    body,
+    file,
+    replyToMessageId,
+    signal
+  );
 }
 
 export function editDirectMessage(token: string, conversationId: string, messageId: string, body: string) {
@@ -724,6 +761,20 @@ export function sendDiscussionMessage(token: string, discussionId: string, body:
   });
 }
 
+export function sendDiscussionMessageWithAttachment(
+  token: string,
+  discussionId: string,
+  body: string,
+  file: File
+) {
+  return uploadMessageWithAttachment<OfficeChatDiscussionMessage>(
+    `/api/discussions/${discussionId}/messages/with-attachment`,
+    token,
+    body,
+    file
+  );
+}
+
 export function editDiscussionMessage(token: string, discussionId: string, messageId: string, body: string) {
   return apiFetch<OfficeChatDiscussionMessage>(`/api/discussions/${discussionId}/messages/${messageId}`, token, {
     method: "PATCH",
@@ -796,4 +847,12 @@ export async function downloadAttachment(token: string, downloadUrl: string) {
   }
 
   return response.blob();
+}
+
+export function downloadDirectAttachment(token: string, downloadUrl: string) {
+  return downloadAttachment(token, downloadUrl);
+}
+
+export function downloadDiscussionAttachment(token: string, downloadUrl: string) {
+  return downloadAttachment(token, downloadUrl);
 }

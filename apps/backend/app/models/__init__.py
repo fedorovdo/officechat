@@ -1,4 +1,4 @@
-from app.models.attachment import MessageAttachment
+from app.models.attachment import DirectMessageAttachment, DiscussionMessageAttachment, MessageAttachment
 from app.models.bot import Bot
 from app.models.direct import DirectConversation, DirectMessage
 from app.models.discussion import Discussion, DiscussionMember, DiscussionMessage
@@ -12,10 +12,12 @@ __all__ = [
     "Bot",
     "DirectConversation",
     "DirectMessage",
+    "DirectMessageAttachment",
     "DirectMessageReaction",
     "Discussion",
     "DiscussionMember",
     "DiscussionMessage",
+    "DiscussionMessageAttachment",
     "DiscussionMessageReaction",
     "Group",
     "GroupMember",

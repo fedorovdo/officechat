@@ -133,6 +133,17 @@
     "attachment": "Вложение",
     "sendWithAttachment": "Отправить с файлом",
     "downloadError": "Не удалось скачать вложение.",
+    "download": "Скачать",
+    "selectedFile": "Выбранный файл",
+    "fileTooLarge": "Файл слишком большой",
+    "unsupportedFileType": "Тип файла не разрешён",
+    "uploadError": "Не удалось загрузить вложение",
+    "noFileSelected": "Файл не выбран",
+    "clipboardImagePasted": "Изображение вставлено из буфера обмена",
+    "clipboardAttachmentReplaced": "Вложение заменено изображением из буфера обмена",
+    "removeClipboardImage": "Удалить изображение",
+    "clipboardPasteTitle": "Вставьте скриншот с помощью Ctrl+V",
+    "clipboardPasteHint": "Можно вставить скриншот через Ctrl+V",
     "sending": "Отправка",
     "send": "Отправить",
     "saveEdit": "Сохранить",
@@ -168,7 +179,7 @@
     "editError": "Не удалось обновить личное сообщение.",
     "deleteSuccess": "Сообщение удалено.",
     "deleteError": "Не удалось удалить личное сообщение.",
-    "attachmentsLater": "Вложения в личных сообщениях будут добавлены позже"
+    "attachmentsLater": "Вложения в личных сообщениях хранятся локально и скачиваются защищённо"
   },
   "discussions": {
     "ariaLabel": "Обсуждение сообщения",
@@ -203,6 +214,7 @@
     "newMessages": "Новые сообщения",
     "noRecentMessages": "Нет недавних сообщений",
     "attachment": "Вложение",
+    "attachmentWithFilename": "📎 Вложение: {filename}",
     "unread": "Непрочитано"
   },
   "appShell": {

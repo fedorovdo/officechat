@@ -741,14 +741,22 @@ a {
 }
 
 .attachment-button span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
   font-weight: 700;
 }
 
+.attachment-button span:nth-child(2),
 .attachment-button span:last-child {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 13px;
+}
+
+.attachment-button span:last-child {
+  color: var(--app-accent, var(--accent));
+  font-weight: 700;
 }
 
 .deleted-message {
@@ -2013,7 +2021,7 @@ a {
 }
 
 .messenger-composer-row-direct {
-  grid-template-columns: 40px minmax(0, 1fr) max-content;
+  grid-template-columns: 40px 40px minmax(0, 1fr) max-content;
 }
 
 .composer-textarea {
@@ -2158,20 +2166,41 @@ a {
 
 .selected-attachment {
   min-width: 0;
-  padding: 6px 8px;
+  padding: 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   border-radius: 5px;
   background: #eef4f1;
   font-size: 12px;
 }
 
-.selected-attachment span {
+.selected-attachment-details {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 2px;
+}
+
+.selected-attachment-details strong,
+.selected-attachment-details small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.selected-attachment-thumbnail {
+  width: 64px;
+  height: 48px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border: 1px solid var(--divider);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.selected-attachment-feedback {
+  color: var(--app-accent, var(--accent));
 }
 
 .visually-hidden {
@@ -2229,7 +2258,7 @@ a {
 
 .discussion-composer-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) max-content;
+  grid-template-columns: 40px 40px minmax(0, 1fr) max-content;
   align-items: end;
   gap: 8px;
 }

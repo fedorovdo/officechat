@@ -36,6 +36,7 @@ import {
   type OfficeChatDirectoryUser,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
+  type OfficeChatDiscussionMessage,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
   type OfficeChatMessage,
@@ -451,7 +452,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       return body;
     }
     if (message.attachments.length > 0) {
-      return dictionary.sidebarActivity.attachment;
+      return dictionary.sidebarActivity.attachmentWithFilename.replace(
+        "{filename}",
+        message.attachments[0].original_filename
+      );
     }
     return dictionary.sidebarActivity.noRecentMessages;
   }
@@ -460,7 +464,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     if (message.is_deleted) {
       return dictionary.messages.deletedMessage;
     }
-    return message.body.trim() || dictionary.sidebarActivity.noRecentMessages;
+    const body = message.body.trim();
+    if (body) return body;
+    if (message.attachments.length > 0) {
+      return dictionary.sidebarActivity.attachmentWithFilename.replace(
+        "{filename}",
+        message.attachments[0].original_filename
+      );
+    }
+    return dictionary.sidebarActivity.noRecentMessages;
+  }
+
+  function getNotificationMessagePreview(message: OfficeChatDirectMessage | OfficeChatDiscussionMessage) {
+    const body = message.body.trim();
+    if (body) return body;
+    if (message.attachments.length > 0) return `📎 ${message.attachments[0].original_filename}`;
+    return dictionary.sidebarActivity.attachment;
   }
 
   function getSelectedChatDebugId() {
@@ -583,7 +602,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         }
       }));
     },
-    [dictionary.messages.deletedMessage, dictionary.sidebarActivity.attachment, dictionary.sidebarActivity.noRecentMessages]
+    [
+      dictionary.messages.deletedMessage,
+      dictionary.sidebarActivity.attachmentWithFilename,
+      dictionary.sidebarActivity.noRecentMessages
+    ]
   );
 
   const updateDirectUserActivity = useCallback(
@@ -605,7 +628,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         }
       }));
     },
-    [dictionary.messages.deletedMessage, dictionary.sidebarActivity.noRecentMessages]
+    [
+      dictionary.messages.deletedMessage,
+      dictionary.sidebarActivity.attachmentWithFilename,
+      dictionary.sidebarActivity.noRecentMessages
+    ]
   );
 
   function markGroupRead(groupId: string) {
@@ -1017,7 +1044,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       upsertPersonalDirectConversation(payload);
       updateDirectUserActivity(payload.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
 
-      const preview = getDirectMessagePreview(payload.message);
+      const preview = getNotificationMessagePreview(payload.message);
       attemptBrowserNotification({
         eventType: payload.type,
         messageId: payload.message.id,
@@ -1036,7 +1063,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       payload: Extract<PersonalNotificationEvent, { type: "user.discussion.message.created" }>
     ) {
       const currentSelection = selectedRef.current;
-      const preview = payload.message.is_deleted ? dictionary.messages.deletedMessage : payload.message.body;
+      const preview = payload.message.is_deleted
+        ? dictionary.messages.deletedMessage
+        : getNotificationMessagePreview(payload.message);
       attemptBrowserNotification({
         eventType: payload.type,
         messageId: payload.message.id,

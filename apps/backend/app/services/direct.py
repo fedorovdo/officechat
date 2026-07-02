@@ -1,14 +1,17 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from fastapi import UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.attachment import DirectMessageAttachment
 from app.models.direct import DirectConversation, DirectMessage
 from app.models.reaction import DirectMessageReaction
 from app.models.user import User
 from app.schemas.direct import DirectConversationCreate, DirectMessageCreate, DirectMessageUpdate
+from app.services.attachments import remove_saved_file, save_upload, validate_attachment_message_body
 from app.services.messages import DELETED_MESSAGE_BODY, validate_message_body
 from app.services.users import get_user_by_username
 
@@ -70,6 +73,7 @@ async def get_last_direct_message(
         .options(
             selectinload(DirectMessage.sender),
             selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.attachments),
             selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
         )
         .where(DirectMessage.conversation_id == conversation.id)
@@ -130,6 +134,7 @@ async def list_direct_messages(
         .options(
             selectinload(DirectMessage.sender),
             selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.attachments),
             selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
         )
         .where(DirectMessage.conversation_id == conversation.id)
@@ -167,6 +172,53 @@ async def create_direct_message(
     return await load_direct_message(session, message.id)
 
 
+async def create_direct_message_with_attachment(
+    session: AsyncSession,
+    conversation: DirectConversation,
+    current_user: User,
+    body: str | None,
+    upload: UploadFile,
+    reply_to_message_id: UUID | None = None,
+) -> DirectMessage:
+    ensure_direct_conversation_access(conversation, current_user)
+    normalized_body = validate_attachment_message_body(body)
+    normalized_reply_to_message_id = None
+    if reply_to_message_id is not None:
+        reply_to_message = await get_direct_message(session, conversation, reply_to_message_id)
+        if reply_to_message is None:
+            raise ValueError("Reply target message not found in this conversation")
+        normalized_reply_to_message_id = reply_to_message.id
+
+    saved_upload = await save_upload("direct", conversation.id, upload)
+    try:
+        message = DirectMessage(
+            conversation_id=conversation.id,
+            sender_user_id=current_user.id,
+            reply_to_message_id=normalized_reply_to_message_id,
+            body=normalized_body,
+            message_type="text",
+        )
+        conversation.updated_at = datetime.now(timezone.utc)
+        session.add(message)
+        await session.flush()
+        session.add(
+            DirectMessageAttachment(
+                direct_message_id=message.id,
+                original_filename=saved_upload.original_filename,
+                stored_filename=saved_upload.stored_filename,
+                storage_path=saved_upload.storage_path,
+                content_type=saved_upload.content_type,
+                size_bytes=saved_upload.size_bytes,
+            )
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        remove_saved_file(saved_upload.storage_path)
+        raise
+    return await load_direct_message(session, message.id)
+
+
 async def get_direct_message(
     session: AsyncSession,
     conversation: DirectConversation,
@@ -177,6 +229,7 @@ async def get_direct_message(
         .options(
             selectinload(DirectMessage.sender),
             selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.attachments),
             selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
         )
         .where(DirectMessage.id == message_id, DirectMessage.conversation_id == conversation.id)
@@ -190,11 +243,29 @@ async def load_direct_message(session: AsyncSession, message_id: UUID) -> Direct
         .options(
             selectinload(DirectMessage.sender),
             selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.attachments),
             selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
         )
         .where(DirectMessage.id == message_id)
     )
     return result.scalar_one()
+
+
+async def get_direct_attachment(
+    session: AsyncSession,
+    conversation: DirectConversation,
+    attachment_id: UUID,
+) -> DirectMessageAttachment | None:
+    result = await session.execute(
+        select(DirectMessageAttachment)
+        .join(DirectMessage, DirectMessage.id == DirectMessageAttachment.direct_message_id)
+        .options(selectinload(DirectMessageAttachment.direct_message))
+        .where(
+            DirectMessageAttachment.id == attachment_id,
+            DirectMessage.conversation_id == conversation.id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_direct_message(

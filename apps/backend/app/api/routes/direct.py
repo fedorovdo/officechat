@@ -1,7 +1,8 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,10 +19,12 @@ from app.schemas.direct import (
 from app.schemas.reaction import MessageReactionPublic, ReactionChange, serialize_reactions
 from app.services.direct import (
     create_direct_message,
+    create_direct_message_with_attachment,
     create_or_get_direct_conversation,
     delete_direct_message,
     ensure_direct_conversation_access,
     get_direct_conversation,
+    get_direct_attachment,
     get_direct_message,
     get_last_direct_message,
     get_other_user,
@@ -29,6 +32,7 @@ from app.services.direct import (
     list_direct_messages,
     update_direct_message,
 )
+from app.services.attachments import resolve_attachment_path
 from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
 from app.services.reactions import add_direct_message_reaction, remove_direct_message_reaction
 from app.services.websocket_manager import direct_websocket_manager
@@ -140,6 +144,61 @@ async def post_message(
         raise_for_permission_error(exc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/with-attachment",
+    response_model=DirectMessagePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_message_with_attachment(
+    conversation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    body: Annotated[str | None, Form()] = None,
+    reply_to_message_id: Annotated[UUID | None, Form()] = None,
+    file: UploadFile = File(...),
+) -> DirectMessage:
+    conversation = await load_conversation_or_404(session, conversation_id)
+    try:
+        message = await create_direct_message_with_attachment(
+            session, conversation, current_user, body, file, reply_to_message_id
+        )
+        await broadcast_direct_message_created(conversation, message)
+        return serialize_message(message, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.get("/conversations/{conversation_id}/attachments/{attachment_id}/download")
+async def download_direct_attachment(
+    conversation_id: UUID,
+    attachment_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    conversation = await load_conversation_or_404(session, conversation_id)
+    try:
+        ensure_direct_conversation_access(conversation, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    attachment = await get_direct_attachment(session, conversation, attachment_id)
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    try:
+        attachment_path = resolve_attachment_path(attachment)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not attachment_path.exists() or not attachment_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file not found")
+    return FileResponse(
+        path=attachment_path,
+        media_type=attachment.content_type or "application/octet-stream",
+        filename=attachment.original_filename,
+    )
 
 
 @router.patch("/conversations/{conversation_id}/messages/{message_id}", response_model=DirectMessagePublic)

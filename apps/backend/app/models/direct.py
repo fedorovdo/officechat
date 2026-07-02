@@ -61,3 +61,7 @@ class DirectMessage(Base):
         back_populates="message",
         cascade="all, delete-orphan",
     )
+    attachments: Mapped[list["DirectMessageAttachment"]] = relationship(
+        back_populates="direct_message",
+        cascade="all, delete-orphan",
+    )

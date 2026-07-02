@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import {
   addDirectMessageReaction,
   deleteDirectMessage,
+  downloadDirectAttachment,
   editDirectMessage,
   getDirectMessages,
   getDirectWebSocketUrl,
   getStoredAccessToken,
   removeDirectMessageReaction,
   sendDirectMessage,
+  sendDirectMessageWithAttachment,
   type DirectMessageEvent,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
@@ -19,7 +21,10 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { useClipboardAttachment } from "../hooks/useClipboardAttachment";
+import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
 import { EmojiPicker } from "./EmojiPicker";
+import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 
@@ -34,6 +39,7 @@ type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
 export function DirectChatPanel({ conversation, currentUser, dictionary, locale }: DirectChatPanelProps) {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesListRef = useRef<HTMLDivElement | null>(null);
@@ -51,6 +57,22 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const {
+    clearAttachment,
+    handlePaste,
+    isClipboardImage,
+    pasteFeedback,
+    previewUrl,
+    selectFile,
+    selectedFile
+  } = useClipboardAttachment({
+    onAfterTextInsert: resizeComposer,
+    onTextChange: setMessageBody,
+    pastedMessage: dictionary.messages.clipboardImagePasted,
+    replacedMessage: dictionary.messages.clipboardAttachmentReplaced,
+    textareaRef: composerTextareaRef,
+    textValue: messageBody
+  });
 
   const dateFormatter = useMemo(
     () =>
@@ -100,6 +122,8 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     setEditingMessageId(null);
     setEditingMessageBody("");
     setMessageBody("");
+    clearAttachment();
+    if (fileInputRef.current) fileInputRef.current.value = "";
     setReplyToMessage(null);
   }, [conversation.id]);
 
@@ -263,7 +287,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSending || !messageBody.trim()) {
+    if (isSending || (!messageBody.trim() && !selectedFile)) {
       return;
     }
 
@@ -279,10 +303,23 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), 20000);
     try {
-      await sendDirectMessage(token, conversation.id, messageBody, abortController.signal, replyToMessage?.id);
+      if (selectedFile) {
+        await sendDirectMessageWithAttachment(
+          token,
+          conversation.id,
+          messageBody,
+          selectedFile,
+          abortController.signal,
+          replyToMessage?.id
+        );
+      } else {
+        await sendDirectMessage(token, conversation.id, messageBody, abortController.signal, replyToMessage?.id);
+      }
       setMessageBody("");
       setEmojiPickerResetKey((current) => current + 1);
+      clearAttachment();
       setReplyToMessage(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       if (composerTextareaRef.current) {
         composerTextareaRef.current.style.height = "44px";
       }
@@ -291,9 +328,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       setSuccess(dictionary.directMessages.sendSuccess);
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error && caughtError.name !== "AbortError"
-          ? caughtError.message
-          : dictionary.directMessages.sendError
+        selectedFile
+          ? getAttachmentUploadError(caughtError, dictionary)
+          : caughtError instanceof Error && caughtError.name !== "AbortError"
+            ? caughtError.message
+            : dictionary.directMessages.sendError
       );
     } finally {
       clearTimeout(timeout);
@@ -340,13 +379,35 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     }
   }
 
+  async function handleDownloadAttachment(downloadUrl: string, filename: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    try {
+      const blob = await downloadDirectAttachment(token, downloadUrl);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.downloadError);
+    }
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
       !event.nativeEvent.isComposing &&
       !isSending &&
-      messageBody.trim()
+      (messageBody.trim() || selectedFile)
     ) {
       event.preventDefault();
       composeFormRef.current?.requestSubmit();
@@ -365,7 +426,9 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       return dictionary.messages.originalMessageDeleted;
     }
     const body = message.body.trim();
-    return body ? (body.length > 120 ? `${body.slice(0, 117)}...` : body) : dictionary.messages.replyPreviewUnavailable;
+    if (body) return body.length > 120 ? `${body.slice(0, 117)}...` : body;
+    if (message.attachments.length > 0) return dictionary.sidebarActivity.attachment;
+    return dictionary.messages.replyPreviewUnavailable;
   }
 
   return (
@@ -382,7 +445,6 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
         </button>
       </div>
 
-      <p className="note direct-chat-note">{dictionary.directMessages.attachmentsLater}</p>
       {success ? <p className="form-success">{success}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
 
@@ -448,6 +510,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
                   </p>
                 </>
               )}
+              <MessageAttachments
+                attachments={message.attachments}
+                dictionary={dictionary}
+                onDownload={(downloadUrl, filename) => void handleDownloadAttachment(downloadUrl, filename)}
+              />
               <MessageReactions
                 canAddReaction={!message.is_deleted}
                 dictionary={dictionary}
@@ -509,7 +576,37 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
             </button>
           </div>
         ) : null}
+        {selectedFile ? (
+          <ComposerAttachmentPreview
+            dictionary={dictionary}
+            file={selectedFile}
+            isClipboardImage={isClipboardImage}
+            onRemove={() => {
+              clearAttachment();
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+            pasteFeedback={pasteFeedback}
+            previewUrl={previewUrl}
+          />
+        ) : null}
         <div className="messenger-composer-row messenger-composer-row-direct">
+          <input
+            className="visually-hidden"
+            onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
+            ref={fileInputRef}
+            tabIndex={-1}
+            type="file"
+          />
+          <button
+            aria-label={dictionary.appShell.attachFile}
+            className="composer-icon-button"
+            disabled={isSending}
+            onClick={() => fileInputRef.current?.click()}
+            title={dictionary.appShell.attachFile}
+            type="button"
+          >
+            📎
+          </button>
           <EmojiPicker
             contextKey={conversation.id}
             dictionary={dictionary}
@@ -528,17 +625,23 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
               resizeComposer(event.currentTarget);
             }}
             onKeyDown={handleComposerKeyDown}
+            onPaste={(event) => {
+              if (handlePaste(event) && fileInputRef.current) fileInputRef.current.value = "";
+            }}
             placeholder={dictionary.messages.body}
             ref={composerTextareaRef}
-            required
+            required={!selectedFile}
             rows={1}
+            title={dictionary.messages.clipboardPasteTitle}
             value={messageBody}
           />
-          <button className="composer-send-button" disabled={isSending || !messageBody.trim()} type="submit">
+          <button className="composer-send-button" disabled={isSending || (!messageBody.trim() && !selectedFile)} type="submit">
             {isSending ? dictionary.messages.sending : dictionary.messages.send}
           </button>
         </div>
-        <p className="message-compose-hint">{dictionary.appShell.composerShortcut}</p>
+        <p className="message-compose-hint">
+          {dictionary.appShell.composerShortcut} · {dictionary.messages.clipboardPasteHint}
+        </p>
       </form>
     </section>
   );

@@ -1,7 +1,8 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,17 +23,20 @@ from app.services.discussions import (
     add_discussion_member,
     can_manage_discussion_members,
     create_discussion_message,
+    create_discussion_message_with_attachment,
     create_or_get_discussion,
     delete_discussion_message,
     ensure_discussion_access,
     ensure_source_message_visible,
     get_discussion,
+    get_discussion_attachment,
     get_discussion_member,
     get_discussion_message,
     list_discussion_messages,
     remove_discussion_member,
     update_discussion_message,
 )
+from app.services.attachments import resolve_attachment_path
 from app.services.personal_notifications import (
     broadcast_discussion_message_created,
     discussion_message_event_payload,
@@ -220,6 +224,60 @@ async def post_message(
         raise_for_permission_error(exc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{discussion_id}/messages/with-attachment",
+    response_model=DiscussionMessagePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_message_with_attachment(
+    discussion_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    body: Annotated[str | None, Form()] = None,
+    file: UploadFile = File(...),
+) -> DiscussionMessage:
+    discussion = await load_discussion_or_404(session, discussion_id)
+    try:
+        message = await create_discussion_message_with_attachment(
+            session, discussion, current_user, body, file
+        )
+        await broadcast_discussion_message_created(session, discussion, message)
+        return serialize_message(message, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.get("/{discussion_id}/attachments/{attachment_id}/download")
+async def download_discussion_attachment(
+    discussion_id: UUID,
+    attachment_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    discussion = await load_discussion_or_404(session, discussion_id)
+    try:
+        await ensure_discussion_access(session, discussion, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+    attachment = await get_discussion_attachment(session, discussion, attachment_id)
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    try:
+        attachment_path = resolve_attachment_path(attachment)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not attachment_path.exists() or not attachment_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file not found")
+    return FileResponse(
+        path=attachment_path,
+        media_type=attachment.content_type or "application/octet-stream",
+        filename=attachment.original_filename,
+    )
 
 
 @router.patch("/{discussion_id}/messages/{message_id}", response_model=DiscussionMessagePublic)

@@ -133,6 +133,17 @@
     "attachment": "Attachment",
     "sendWithAttachment": "Send with file",
     "downloadError": "Could not download attachment.",
+    "download": "Download",
+    "selectedFile": "Selected file",
+    "fileTooLarge": "File is too large",
+    "unsupportedFileType": "File type is not allowed",
+    "uploadError": "Failed to upload attachment",
+    "noFileSelected": "No file selected",
+    "clipboardImagePasted": "Image pasted from clipboard",
+    "clipboardAttachmentReplaced": "The selected attachment was replaced with the clipboard image",
+    "removeClipboardImage": "Remove image",
+    "clipboardPasteTitle": "Paste a screenshot with Ctrl+V",
+    "clipboardPasteHint": "You can paste a screenshot with Ctrl+V",
     "sending": "Sending",
     "send": "Send",
     "saveEdit": "Save",
@@ -168,7 +179,7 @@
     "editError": "Could not update direct message.",
     "deleteSuccess": "Message deleted.",
     "deleteError": "Could not delete direct message.",
-    "attachmentsLater": "Direct message attachments will be added later"
+    "attachmentsLater": "Direct message attachments are stored locally and downloaded securely"
   },
   "discussions": {
     "ariaLabel": "Message discussion",
@@ -203,6 +214,7 @@
     "newMessages": "New messages",
     "noRecentMessages": "No recent messages",
     "attachment": "Attachment",
+    "attachmentWithFilename": "📎 Attachment: {filename}",
     "unread": "Unread"
   },
   "appShell": {

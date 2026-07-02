@@ -5,6 +5,14 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+DEFAULT_ALLOWED_UPLOAD_EXTENSIONS = [
+    "txt", "log", "csv", "md", "json", "xml", "yaml", "yml", "ini", "conf",
+    "pdf", "doc", "docx", "xls", "xlsx", "png", "jpg", "jpeg", "webp", "zip",
+]
+BLOCKED_UPLOAD_EXTENSIONS = {
+    "exe", "com", "bat", "cmd", "ps1", "msi", "dll", "scr", "js", "vbs", "jar", "sh", "apk",
+}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -18,7 +26,7 @@ class Settings(BaseSettings):
     message_max_length: int = 4000
     max_upload_size_mb: int = 25
     allowed_upload_extensions: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["pdf", "doc", "docx", "xls", "xlsx", "png", "jpg", "jpeg", "txt", "zip"]
+        default_factory=lambda: list(DEFAULT_ALLOWED_UPLOAD_EXTENSIONS)
     )
     avatar_max_upload_size_mb: int = 5
     allowed_avatar_extensions: Annotated[list[str], NoDecode] = Field(
@@ -68,12 +76,19 @@ class Settings(BaseSettings):
     @classmethod
     def parse_upload_extensions(cls, value: object) -> list[str]:
         if isinstance(value, str):
-            return [extension.strip().lower().lstrip(".") for extension in value.split(",") if extension.strip()]
+            extensions = [extension.strip().lower().lstrip(".") for extension in value.split(",") if extension.strip()]
+        elif isinstance(value, list):
+            extensions = [str(extension).strip().lower().lstrip(".") for extension in value if str(extension).strip()]
+        else:
+            raise ValueError("ALLOWED_UPLOAD_EXTENSIONS must be a list or comma-separated string")
 
-        if isinstance(value, list):
-            return [str(extension).strip().lower().lstrip(".") for extension in value if str(extension).strip()]
-
-        raise ValueError("ALLOWED_UPLOAD_EXTENSIONS must be a list or comma-separated string")
+        blocked_extensions = sorted(set(extensions) & BLOCKED_UPLOAD_EXTENSIONS)
+        if blocked_extensions:
+            raise ValueError(
+                "ALLOWED_UPLOAD_EXTENSIONS contains blocked executable or script types: "
+                + ", ".join(blocked_extensions)
+            )
+        return list(dict.fromkeys(extensions))
 
     @field_validator("allowed_avatar_extensions", mode="before")
     @classmethod

@@ -101,6 +101,8 @@ Direct message events:
 
 Для direct reactions используется событие `direct.message.reactions.updated` с `conversation_id`, `message_id` и массивом `reactions`.
 
+Если direct message создан с файлом, `message.attachments` содержит filename, content type, size, created time и защищённый download URL. Содержимое файла через WebSocket не передаётся.
+
 Discussion events:
 
 ```json
@@ -112,6 +114,8 @@ Discussion events:
 ```
 
 Также используются `discussion.message.updated`, `discussion.message.deleted`, `discussion.message.reactions.updated`, `discussion.member.added` и `discussion.member.removed`. Reaction events не отправляются в персональный `/api/ws/me` и не создают browser notifications.
+
+`discussion.message.created` также включает attachment metadata. Персональные direct/discussion events переиспользуют тот же message payload, поэтому sidebar/browser notification может показать имя файла для file-only сообщения.
 
 Personal notification events:
 
@@ -167,8 +171,6 @@ Personal notification events:
 
 - Нет typing indicators.
 - Нет read receipts.
-- Нет direct message attachments.
-- Нет discussion file attachments.
 - Нет reactions.
 - Нет mention autocomplete и profile links.
 - Нет multi-instance pub/sub.

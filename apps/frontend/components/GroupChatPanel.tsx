@@ -20,7 +20,10 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { useClipboardAttachment } from "../hooks/useClipboardAttachment";
+import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
 import { EmojiPicker } from "./EmojiPicker";
+import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 
@@ -54,7 +57,6 @@ export function GroupChatPanel({
   const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [replyToMessage, setReplyToMessage] = useState<OfficeChatMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageBody, setEditingMessageBody] = useState("");
@@ -63,6 +65,22 @@ export function GroupChatPanel({
   const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const {
+    clearAttachment,
+    handlePaste,
+    isClipboardImage,
+    pasteFeedback,
+    previewUrl,
+    selectFile,
+    selectedFile
+  } = useClipboardAttachment({
+    onAfterTextInsert: resizeComposer,
+    onTextChange: setMessageBody,
+    pastedMessage: dictionary.messages.clipboardImagePasted,
+    replacedMessage: dictionary.messages.clipboardAttachmentReplaced,
+    textareaRef: composerTextareaRef,
+    textValue: messageBody
+  });
 
   const dateFormatter = useMemo(
     () =>
@@ -72,16 +90,6 @@ export function GroupChatPanel({
       }),
     [locale]
   );
-
-  function formatFileSize(sizeBytes: number) {
-    if (sizeBytes < 1024) {
-      return `${sizeBytes} B`;
-    }
-    if (sizeBytes < 1024 * 1024) {
-      return `${(sizeBytes / 1024).toFixed(1)} KB`;
-    }
-    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
 
   function isNearMessagesBottom() {
     const messagesList = messagesListRef.current;
@@ -120,6 +128,8 @@ export function GroupChatPanel({
     shouldScrollToBottomRef.current = false;
     setShowNewMessagesButton(false);
     setReplyToMessage(null);
+    clearAttachment();
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }, [groupId]);
 
   useEffect(() => {
@@ -331,7 +341,7 @@ export function GroupChatPanel({
       }
       setMessageBody("");
       setEmojiPickerResetKey((current) => current + 1);
-      setSelectedFile(null);
+      clearAttachment();
       setReplyToMessage(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -343,7 +353,13 @@ export function GroupChatPanel({
       setMessages(await getGroupMessages(token, groupId));
       setSuccess(dictionary.messages.sendSuccess);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.sendError);
+      setError(
+        selectedFile
+          ? getAttachmentUploadError(caughtError, dictionary)
+          : caughtError instanceof Error
+            ? caughtError.message
+            : dictionary.messages.sendError
+      );
     } finally {
       setIsSending(false);
     }
@@ -509,23 +525,11 @@ export function GroupChatPanel({
                   </p>
                 </>
               )}
-              {message.attachments.length > 0 ? (
-                <div className="attachments-list">
-                  {message.attachments.map((attachment) => (
-                    <button
-                      className="attachment-button"
-                      key={attachment.id}
-                      onClick={() =>
-                        void handleDownloadAttachment(attachment.download_url, attachment.original_filename)
-                      }
-                      type="button"
-                    >
-                      <span>{attachment.original_filename}</span>
-                      <span>{formatFileSize(attachment.size_bytes)}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              <MessageAttachments
+                attachments={message.attachments}
+                dictionary={dictionary}
+                onDownload={(downloadUrl, filename) => void handleDownloadAttachment(downloadUrl, filename)}
+              />
               <MessageReactions
                 canAddReaction={!message.is_deleted}
                 dictionary={dictionary}
@@ -593,26 +597,22 @@ export function GroupChatPanel({
           </div>
         ) : null}
         {selectedFile ? (
-          <div className="selected-attachment">
-            <span>{selectedFile.name}</span>
-            <button
-              aria-label={dictionary.appShell.removeAttachment}
-              className="table-action"
-              onClick={() => {
-                setSelectedFile(null);
-                if (fileInputRef.current) fileInputRef.current.value = "";
-              }}
-              title={dictionary.appShell.removeAttachment}
-              type="button"
-            >
-              ×
-            </button>
-          </div>
+          <ComposerAttachmentPreview
+            dictionary={dictionary}
+            file={selectedFile}
+            isClipboardImage={isClipboardImage}
+            onRemove={() => {
+              clearAttachment();
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+            pasteFeedback={pasteFeedback}
+            previewUrl={previewUrl}
+          />
         ) : null}
         <div className="messenger-composer-row">
           <input
             className="visually-hidden"
-            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+            onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
             ref={fileInputRef}
             tabIndex={-1}
             type="file"
@@ -644,10 +644,14 @@ export function GroupChatPanel({
               resizeComposer(event.currentTarget);
             }}
             onKeyDown={handleComposerKeyDown}
+            onPaste={(event) => {
+              if (handlePaste(event) && fileInputRef.current) fileInputRef.current.value = "";
+            }}
             placeholder={dictionary.messages.body}
             ref={composerTextareaRef}
             required={!selectedFile}
             rows={1}
+            title={dictionary.messages.clipboardPasteTitle}
             value={messageBody}
           />
           <button className="composer-send-button" disabled={isSending || (!messageBody.trim() && !selectedFile)} type="submit">
@@ -655,7 +659,7 @@ export function GroupChatPanel({
           </button>
         </div>
         <p className="message-compose-hint">
-          {dictionary.messages.mentionHint} · {dictionary.appShell.composerShortcut}
+          {dictionary.messages.mentionHint} · {dictionary.appShell.composerShortcut} · {dictionary.messages.clipboardPasteHint}
         </p>
       </form>
     </section>

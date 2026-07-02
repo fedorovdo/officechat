@@ -91,3 +91,7 @@ class DiscussionMessage(Base):
         back_populates="message",
         cascade="all, delete-orphan",
     )
+    attachments: Mapped[list["DiscussionMessageAttachment"]] = relationship(
+        back_populates="discussion_message",
+        cascade="all, delete-orphan",
+    )

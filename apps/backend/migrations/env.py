@@ -8,9 +8,11 @@ from app.core.config import settings
 from app.db.base import Base
 from app.models import (
     Bot,
+    DirectMessageAttachment,
     Discussion,
     DiscussionMember,
     DiscussionMessage,
+    DiscussionMessageAttachment,
     DiscussionMessageReaction,
     DirectMessageReaction,
     Group,

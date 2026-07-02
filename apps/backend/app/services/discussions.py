@@ -1,16 +1,19 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.attachment import DiscussionMessageAttachment
 from app.models.discussion import Discussion, DiscussionMember, DiscussionMessage
 from app.models.group import GroupMember
 from app.models.message import Message
 from app.models.reaction import DiscussionMessageReaction
 from app.models.user import User
 from app.schemas.discussion import DiscussionCreate, DiscussionMemberCreate, DiscussionMessageCreate, DiscussionMessageUpdate
+from app.services.attachments import remove_saved_file, save_upload, validate_attachment_message_body
 from app.services.groups import get_group, get_group_membership, is_global_group_admin
 from app.services.messages import DELETED_MESSAGE_BODY, ensure_group_message_access, get_group_message, validate_message_body
 from app.services.users import get_user_by_username
@@ -204,6 +207,7 @@ async def list_discussion_messages(
         select(DiscussionMessage)
         .options(
             selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.attachments),
             selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
         )
         .where(DiscussionMessage.discussion_id == discussion.id)
@@ -231,6 +235,43 @@ async def create_discussion_message(
     return await load_discussion_message(session, message.id)
 
 
+async def create_discussion_message_with_attachment(
+    session: AsyncSession,
+    discussion: Discussion,
+    current_user: User,
+    body: str | None,
+    upload: UploadFile,
+) -> DiscussionMessage:
+    await ensure_discussion_access(session, discussion, current_user)
+    normalized_body = validate_attachment_message_body(body)
+    saved_upload = await save_upload("discussion", discussion.id, upload)
+    try:
+        message = DiscussionMessage(
+            discussion_id=discussion.id,
+            sender_user_id=current_user.id,
+            body=normalized_body,
+        )
+        discussion.updated_at = datetime.now(timezone.utc)
+        session.add(message)
+        await session.flush()
+        session.add(
+            DiscussionMessageAttachment(
+                discussion_message_id=message.id,
+                original_filename=saved_upload.original_filename,
+                stored_filename=saved_upload.stored_filename,
+                storage_path=saved_upload.storage_path,
+                content_type=saved_upload.content_type,
+                size_bytes=saved_upload.size_bytes,
+            )
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        remove_saved_file(saved_upload.storage_path)
+        raise
+    return await load_discussion_message(session, message.id)
+
+
 async def get_discussion_message(
     session: AsyncSession,
     discussion: Discussion,
@@ -240,6 +281,7 @@ async def get_discussion_message(
         select(DiscussionMessage)
         .options(
             selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.attachments),
             selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
         )
         .where(DiscussionMessage.id == message_id, DiscussionMessage.discussion_id == discussion.id)
@@ -252,11 +294,32 @@ async def load_discussion_message(session: AsyncSession, message_id: UUID) -> Di
         select(DiscussionMessage)
         .options(
             selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.attachments),
             selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
         )
         .where(DiscussionMessage.id == message_id)
     )
     return result.scalar_one()
+
+
+async def get_discussion_attachment(
+    session: AsyncSession,
+    discussion: Discussion,
+    attachment_id: UUID,
+) -> DiscussionMessageAttachment | None:
+    result = await session.execute(
+        select(DiscussionMessageAttachment)
+        .join(
+            DiscussionMessage,
+            DiscussionMessage.id == DiscussionMessageAttachment.discussion_message_id,
+        )
+        .options(selectinload(DiscussionMessageAttachment.discussion_message))
+        .where(
+            DiscussionMessageAttachment.id == attachment_id,
+            DiscussionMessage.discussion_id == discussion.id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_discussion_message(

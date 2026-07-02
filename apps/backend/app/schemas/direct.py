@@ -23,6 +23,17 @@ class DirectMessageUpdate(BaseModel):
     body: str = Field(min_length=1)
 
 
+class DirectMessageAttachmentPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    original_filename: str
+    content_type: str | None
+    size_bytes: int
+    created_at: datetime
+    download_url: str
+
+
 class DirectMessageReplySenderPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -75,6 +86,7 @@ class DirectMessagePublic(BaseModel):
     updated_at: datetime
     sender: UserDirectoryEntry
     reply_to: DirectMessageReplyPreviewPublic | None = None
+    attachments: list[DirectMessageAttachmentPublic] = Field(default_factory=list)
     reactions: list[MessageReactionPublic] = Field(default_factory=list)
 
     @field_validator("reactions", mode="before")

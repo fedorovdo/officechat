@@ -28,6 +28,8 @@
 - Messenger UI v0.1: полноэкранная трехрегионная раскладка, resizable/collapsible sidebar, вкладки чатов, компактные сообщения и закрепленный composer.
 - Emoji Picker v0.1: стандартные Unicode emoji в групповых, личных и discussion composer, RU/EN поиск и локальный список часто используемых emoji.
 - Message Reactions v0.1: фиксированный набор Unicode reactions, точные счётчики и real-time синхронизация для group/direct/discussion сообщений.
+- Локальные защищённые вложения для group, direct и discussion сообщений с едиными лимитами и WebSocket metadata.
+- Clipboard Image Paste v0.1: вставка PNG/JPEG/WebP скриншотов через `Ctrl+V` во всех трёх composer-ах с thumbnail и безопасным именем.
 
 ## Этап 2: Realtime
 
@@ -38,15 +40,15 @@
 - Базовые уведомления в интерфейсе.
 - Service worker и server push notifications для уведомлений без открытой вкладки.
 - Custom reactions, стикеры и GIF.
-- Расширение discussions: отдельный sidebar список, вложения, direct-message discussions и более развитое представление цепочек.
+- Расширение discussions: отдельный sidebar список, direct-message discussions и более развитое представление цепочек.
 - Autocomplete и profile links для mentions, поддержка mentions в direct messages.
-- Вложения в direct messages.
 - Read receipts и typing indicators для групп и direct messages.
 
 ## Этап 3: Файлы и администрирование
 
 - Загрузка файлов в локальный volume.
 - Ограничения размера и типа файлов.
+- Несколько вложений в одном сообщении и drag-and-drop.
 - Административные настройки.
 - Audit log для важных действий.
 

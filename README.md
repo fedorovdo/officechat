@@ -2,7 +2,7 @@
 
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
-Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, REST group messages, basic WebSocket real-time updates, local file attachments for group messages, and basic direct messages between users. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
+Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
 
 ## Tech Stack
 
@@ -82,13 +82,13 @@ Direct/private messages are available in the user app shell:
 - `DELETE /api/direct/conversations/{conversation_id}/messages/{message_id}`
 - `WS /api/ws/direct/{conversation_id}?token=...`
 
-Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct-message file attachments, read receipts, and typing indicators are not implemented yet.
+Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct messages support protected local attachments; read receipts and typing indicators are not implemented yet.
 
 Reply-to-message support is available for both group chats and direct messages. Users can reply to an existing message, see a compact quoted preview in the new message, and still edit/delete messages through the existing actions. This is a lightweight reply feature only; threaded discussions, nested reply views, forwarding, and markdown rendering are planned later.
 
 Basic `@username` mentions are available in group messages. OfficeChat detects active non-bot users who belong to the same group, includes mention metadata in REST/WebSocket payloads, highlights recognized mentions in the chat UI, and uses mention-aware browser notification text. Unknown usernames are ignored safely. Autocomplete, profile links, direct-message mentions, and markdown rendering are not implemented yet.
 
-Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, text-only discussion messages, Enter sending, Shift+Enter line breaks, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, discussion attachments, nested threads, a discussion sidebar, read receipts, and typing indicators are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
+Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, messages, local attachments, Enter sending, Shift+Enter line breaks, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, nested threads, a discussion sidebar, read receipts, and typing indicators are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
@@ -113,14 +113,23 @@ WebSocket real-time updates are available for group messages:
 - Current WebSocket manager is single-instance only. Multi-instance production should use Valkey pub/sub or another broker later.
 - Typing indicators and read receipts are not implemented yet.
 
-File attachments are available for group messages:
+File attachments are available for group, direct, and discussion messages:
 
 - `POST /api/groups/{group_id}/messages/with-attachment`
 - `GET /api/groups/{group_id}/attachments/{attachment_id}/download`
+- `POST /api/direct/conversations/{conversation_id}/messages/with-attachment`
+- `GET /api/direct/conversations/{conversation_id}/attachments/{attachment_id}/download`
+- `POST /api/discussions/{discussion_id}/messages/with-attachment`
+- `GET /api/discussions/{discussion_id}/attachments/{attachment_id}/download`
 - Files are stored in the backend uploads Docker volume mounted at `/data/uploads`.
+- Downloads require membership in the relevant group, direct conversation, or discussion; storage paths are never exposed.
 - Upload defaults: `MAX_UPLOAD_SIZE_MB=25`.
-- Allowed extensions default to `pdf,doc,docx,xls,xlsx,png,jpg,jpeg,txt,zip`.
+- Allowed extensions default to `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`.
+- Executable and script formats such as `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` remain blocked even if a browser reports a generic MIME type.
 - Antivirus scanning, previews, thumbnails, drag-and-drop, S3, and retention cleanup are not implemented yet.
+- The uploads volume must be included in backups together with PostgreSQL data.
+
+In group, direct, and discussion composers, desktop users can paste PNG, JPEG, or WebP screenshots directly with `Ctrl+V`. Clipboard images receive a safe timestamp filename and a local thumbnail before sending. OfficeChat currently supports one attachment per message, so a pasted image replaces any selected file. Multiple attachments and drag-and-drop remain planned.
 
 The group, direct, and discussion message composers include a lightweight Unicode emoji picker with RU/EN search and a local frequently-used list. Recent emoji are stored in the browser under `officechat.emoji.recent`. Message reactions support `👍 ❤️ 😂 ✅ 🔥 👀 🎉 😮 😢 👎`, one reaction per user/emoji/message, repeated-click removal, and real-time channel synchronization. Custom reactions, stickers, GIFs, and reaction notifications are not implemented. Local avatar upload and avatar display in messenger messages and user lists are also available in v0.1, while optional avatar cropping/editing remains planned.
 

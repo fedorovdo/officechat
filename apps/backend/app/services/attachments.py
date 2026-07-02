@@ -1,7 +1,9 @@
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -9,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.config import settings
+from app.core.config import BLOCKED_UPLOAD_EXTENSIONS, settings
 from app.models.attachment import MessageAttachment
 from app.models.group import Group
 from app.models.message import Message
@@ -18,10 +20,43 @@ from app.services.mentions import sync_message_mentions
 from app.services.messages import load_message_with_sender
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+AttachmentStorageKind = Literal["group", "direct", "discussion"]
+GENERIC_CONTENT_TYPES = {"", "application/octet-stream"}
+ATTACHMENT_CONTENT_TYPES: dict[str, tuple[str, ...]] = {
+    "txt": ("text/plain",),
+    "log": ("text/plain",),
+    "csv": ("text/csv", "application/csv"),
+    "md": ("text/markdown", "text/plain"),
+    "json": ("application/json", "text/json"),
+    "xml": ("application/xml", "text/xml"),
+    "yaml": ("application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml", "text/plain"),
+    "yml": ("application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml", "text/plain"),
+    "ini": ("text/plain",),
+    "conf": ("text/plain",),
+    "pdf": ("application/pdf",),
+    "doc": ("application/msword",),
+    "docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",),
+    "xls": ("application/vnd.ms-excel",),
+    "xlsx": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",),
+    "png": ("image/png",),
+    "jpg": ("image/jpeg",),
+    "jpeg": ("image/jpeg",),
+    "webp": ("image/webp",),
+    "zip": ("application/zip", "application/x-zip-compressed"),
+}
+
+
+@dataclass(frozen=True)
+class SavedUpload:
+    original_filename: str
+    stored_filename: str
+    storage_path: str
+    content_type: str | None
+    size_bytes: int
 
 
 def normalize_original_filename(filename: str | None) -> str:
-    original_filename = Path(filename or "").name.strip()
+    original_filename = Path((filename or "").replace("\\", "/")).name.strip()
     if not original_filename:
         raise ValueError("Uploaded file must have a filename")
     return original_filename[:255]
@@ -29,26 +64,48 @@ def normalize_original_filename(filename: str | None) -> str:
 
 def validate_file_extension(original_filename: str) -> str:
     extension = Path(original_filename).suffix.lower().lstrip(".")
-    if not extension:
-        raise ValueError("Uploaded file must have an allowed extension")
-    if extension not in settings.allowed_upload_extensions:
-        allowed_extensions = ", ".join(settings.allowed_upload_extensions)
-        raise ValueError(f"File extension .{extension} is not allowed. Allowed: {allowed_extensions}")
+    if not extension or extension in BLOCKED_UPLOAD_EXTENSIONS or extension not in settings.allowed_upload_extensions:
+        extension_label = f".{extension}" if extension else "missing extension"
+        raise ValueError(f"File type is not allowed: {extension_label}")
     return extension
 
 
-def build_group_upload_dir(group_id: UUID) -> Path:
-    today = datetime.now(timezone.utc)
-    return Path(settings.uploads_dir) / str(group_id) / f"{today:%Y}" / f"{today:%m}" / f"{today:%d}"
+def normalize_content_type(extension: str, content_type: str | None) -> str:
+    normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+    allowed_content_types = ATTACHMENT_CONTENT_TYPES.get(extension, ())
+    if normalized_content_type in GENERIC_CONTENT_TYPES:
+        return allowed_content_types[0] if allowed_content_types else "application/octet-stream"
+    return normalized_content_type
 
 
-async def save_upload_file(group: Group, upload: UploadFile) -> tuple[str, str, int]:
+def validate_upload(upload: UploadFile) -> tuple[str, str, str]:
     original_filename = normalize_original_filename(upload.filename)
     extension = validate_file_extension(original_filename)
-    upload_dir = build_group_upload_dir(group.id)
+    return original_filename, extension, normalize_content_type(extension, upload.content_type)
+
+
+def safe_filename(extension: str) -> str:
+    return f"{uuid.uuid4()}.{extension}"
+
+
+def build_storage_subdir(storage_kind: AttachmentStorageKind, owner_id: UUID) -> Path:
+    today = datetime.now(timezone.utc)
+    root = Path(settings.uploads_dir)
+    if storage_kind == "group":
+        root = root / str(owner_id)
+    elif storage_kind == "direct":
+        root = root / "direct" / str(owner_id)
+    else:
+        root = root / "discussions" / str(owner_id)
+    return root / f"{today:%Y}" / f"{today:%m}" / f"{today:%d}"
+
+
+async def save_upload(storage_kind: AttachmentStorageKind, owner_id: UUID, upload: UploadFile) -> SavedUpload:
+    original_filename, extension, content_type = validate_upload(upload)
+    upload_dir = build_storage_subdir(storage_kind, owner_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    stored_filename = f"{uuid.uuid4()}.{extension}"
+    stored_filename = safe_filename(extension)
     storage_path = upload_dir / stored_filename
     size_bytes = 0
 
@@ -65,12 +122,29 @@ async def save_upload_file(group: Group, upload: UploadFile) -> tuple[str, str, 
         storage_path.unlink(missing_ok=True)
         raise ValueError("Uploaded file cannot be empty")
 
-    return stored_filename, str(storage_path), size_bytes
+    return SavedUpload(
+        original_filename=original_filename,
+        stored_filename=stored_filename,
+        storage_path=str(storage_path),
+        content_type=content_type,
+        size_bytes=size_bytes,
+    )
 
 
-def resolve_attachment_path(attachment: MessageAttachment) -> Path:
+def remove_saved_file(storage_path: str) -> None:
+    Path(storage_path).unlink(missing_ok=True)
+
+
+def validate_attachment_message_body(body: str | None) -> str:
+    normalized_body = body.strip() if body else ""
+    if len(normalized_body) > settings.message_max_length:
+        raise ValueError(f"Message body cannot exceed {settings.message_max_length} characters")
+    return normalized_body
+
+
+def resolve_attachment_path(attachment: object) -> Path:
     uploads_root = Path(settings.uploads_dir).resolve()
-    attachment_path = Path(attachment.storage_path).resolve()
+    attachment_path = Path(str(getattr(attachment, "storage_path"))).resolve()
     if os.path.commonpath([uploads_root, attachment_path]) != str(uploads_root):
         raise ValueError("Attachment storage path is invalid")
     return attachment_path
@@ -84,12 +158,8 @@ async def create_message_with_attachment(
     upload: UploadFile,
     reply_to_message_id: UUID | None = None,
 ) -> Message:
-    stored_filename, storage_path, size_bytes = await save_upload_file(group, upload)
-    original_filename = normalize_original_filename(upload.filename)
-    normalized_body = body.strip() if body else ""
-    if len(normalized_body) > settings.message_max_length:
-        Path(storage_path).unlink(missing_ok=True)
-        raise ValueError(f"Message body cannot exceed {settings.message_max_length} characters")
+    normalized_body = validate_attachment_message_body(body)
+    saved_upload = await save_upload("group", group.id, upload)
 
     try:
         normalized_reply_to_message_id = None
@@ -112,18 +182,18 @@ async def create_message_with_attachment(
                 message_id=message.id,
                 group_id=group.id,
                 uploaded_by_user_id=current_user.id,
-                original_filename=original_filename,
-                stored_filename=stored_filename,
-                storage_path=storage_path,
-                content_type=upload.content_type,
-                size_bytes=size_bytes,
+                original_filename=saved_upload.original_filename,
+                stored_filename=saved_upload.stored_filename,
+                storage_path=saved_upload.storage_path,
+                content_type=saved_upload.content_type,
+                size_bytes=saved_upload.size_bytes,
             )
         )
         await sync_message_mentions(session, message)
         await session.commit()
     except Exception:
         await session.rollback()
-        Path(storage_path).unlink(missing_ok=True)
+        remove_saved_file(saved_upload.storage_path)
         raise
 
     return await load_message_with_sender(session, message.id)

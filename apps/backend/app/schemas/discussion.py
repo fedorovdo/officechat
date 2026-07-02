@@ -86,6 +86,17 @@ class DiscussionMessageUpdate(BaseModel):
     body: str = Field(min_length=1)
 
 
+class DiscussionMessageAttachmentPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    original_filename: str
+    content_type: str | None
+    size_bytes: int
+    created_at: datetime
+    download_url: str
+
+
 class DiscussionMessagePublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -98,6 +109,7 @@ class DiscussionMessagePublic(BaseModel):
     created_at: datetime
     updated_at: datetime
     sender: UserDirectoryEntry
+    attachments: list[DiscussionMessageAttachmentPublic] = Field(default_factory=list)
     reactions: list[MessageReactionPublic] = Field(default_factory=list)
 
     @field_validator("reactions", mode="before")

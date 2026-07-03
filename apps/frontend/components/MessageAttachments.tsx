@@ -50,8 +50,18 @@ export function MessageAttachments({ attachments, dictionary, onDownload }: Mess
   const [shouldLoadImages, setShouldLoadImages] = useState(false);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const images = useMemo(() => attachments.filter(isPreviewableImage), [attachments]);
-  const files = useMemo(() => attachments.filter((attachment) => !isPreviewableImage(attachment)), [attachments]);
+  const images = useMemo(
+    () => attachments.filter((attachment) => attachment.file_available && isPreviewableImage(attachment)),
+    [attachments]
+  );
+  const files = useMemo(
+    () => attachments.filter((attachment) => attachment.file_available && !isPreviewableImage(attachment)),
+    [attachments]
+  );
+  const unavailableFiles = useMemo(
+    () => attachments.filter((attachment) => !attachment.file_available),
+    [attachments]
+  );
 
   useEffect(() => {
     if (images.length === 0) return;
@@ -160,6 +170,18 @@ export function MessageAttachments({ attachments, dictionary, onDownload }: Mess
               <span>{formatFileSize(attachment.size_bytes)}</span>
               <span>{dictionary.messages.download}</span>
             </button>
+          ))}
+        </div>
+      ) : null}
+
+      {unavailableFiles.length > 0 ? (
+        <div className="message-file-list">
+          {unavailableFiles.map((attachment) => (
+            <div className="attachment-button attachment-button-unavailable" key={attachment.id}>
+              <span>{attachment.original_filename}</span>
+              <span>{formatFileSize(attachment.size_bytes)}</span>
+              <span>{dictionary.retention.fileRemoved}</span>
+            </div>
           ))}
         </div>
       ) : null}

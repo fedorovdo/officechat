@@ -28,6 +28,8 @@ class MessageAttachmentPublic(BaseModel):
     content_type: str | None
     size_bytes: int
     created_at: datetime
+    file_available: bool
+    file_deleted_at: datetime | None
 
     @computed_field
     @property
@@ -50,6 +52,8 @@ class MessageReplyPreviewPublic(BaseModel):
     sender: MessageReplySenderPublic
     body_preview: str
     is_deleted: bool
+    is_archived: bool
+    archived_at: datetime | None
     created_at: datetime
     attachment_count: int = 0
 

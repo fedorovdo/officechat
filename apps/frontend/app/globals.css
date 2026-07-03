@@ -930,6 +930,151 @@ a {
   font-size: 13px;
 }
 
+.attachment-button-unavailable {
+  cursor: default;
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.attachment-button-unavailable span:last-child {
+  color: var(--muted);
+}
+
+.admin-storage-shell {
+  width: min(1180px, 100%);
+  display: grid;
+  gap: 18px;
+}
+
+.retention-section {
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.retention-section h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.storage-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.storage-stat {
+  min-width: 0;
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.storage-stat span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.retention-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.retention-fields label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.retention-fields small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.retention-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.retention-confirm {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.chat-archive-panel {
+  position: absolute;
+  z-index: 12;
+  inset: 68px 0 0;
+  min-height: 0;
+  padding: 16px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  background: var(--surface, #ffffff);
+}
+
+.archive-messages-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.message-item-archived {
+  opacity: 0.9;
+}
+
+.archive-badge {
+  width: fit-content;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.archive-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.archive-reactions span {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafb;
+  font-size: 12px;
+}
+
+.danger-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #b42318;
+  border-radius: 6px;
+  background: #b42318;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.danger-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 640px) {
   .image-lightbox-toolbar {
     align-items: flex-start;

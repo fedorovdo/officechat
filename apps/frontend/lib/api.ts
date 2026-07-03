@@ -85,6 +85,8 @@ export type OfficeChatMessage = {
   body: string;
   message_type: string;
   is_deleted: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
   edited_at: string | null;
   created_at: string;
   updated_at: string;
@@ -102,6 +104,8 @@ export type OfficeChatAttachment = {
   size_bytes: number;
   created_at: string;
   download_url: string;
+  file_available: boolean;
+  file_deleted_at: string | null;
 };
 
 export type OfficeChatMessageReplyPreview = {
@@ -131,6 +135,8 @@ export type OfficeChatDirectMessage = {
   body: string;
   message_type: string;
   is_deleted: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
   edited_at: string | null;
   created_at: string;
   updated_at: string;
@@ -196,6 +202,8 @@ export type OfficeChatDiscussionMessage = {
   sender_user_id: string;
   body: string;
   is_deleted: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
   edited_at: string | null;
   created_at: string;
   updated_at: string;
@@ -330,6 +338,61 @@ export type AddGroupMemberPayload = {
   username?: string;
   user_id?: string;
   role: GroupRole;
+};
+
+export type RetentionSettings = {
+  retention_enabled: boolean;
+  active_history_days: number;
+  archive_enabled: boolean;
+  attachment_retention_days: number | null;
+  delete_archived_after_days: number | null;
+  cleanup_batch_size: number;
+  cleanup_interval_hours: number;
+  last_cleanup_started_at: string | null;
+  last_cleanup_finished_at: string | null;
+  last_cleanup_status: string | null;
+  last_cleanup_summary: RetentionSummary | null;
+  updated_at: string;
+  updated_by_user_id: string | null;
+};
+
+export type RetentionSettingsUpdate = Pick<
+  RetentionSettings,
+  | "retention_enabled"
+  | "active_history_days"
+  | "archive_enabled"
+  | "attachment_retention_days"
+  | "delete_archived_after_days"
+  | "cleanup_batch_size"
+  | "cleanup_interval_hours"
+>;
+
+export type RetentionSummary = {
+  group_messages_archived: number;
+  direct_messages_archived: number;
+  discussion_messages_archived: number;
+  attachments_deleted: number;
+  files_missing: number;
+  errors: string[];
+};
+
+export type RetentionRunResult = {
+  dry_run: boolean;
+  status: string;
+  summary: RetentionSummary;
+};
+
+export type StorageStats = {
+  uploads_total_bytes: number;
+  avatar_bytes: number;
+  group_attachment_bytes: number;
+  direct_attachment_bytes: number;
+  discussion_attachment_bytes: number;
+  attachment_count: number;
+  missing_file_count: number;
+  message_counts: { active: number; archived: number; soft_deleted: number };
+  oldest_active_message_at: string | null;
+  oldest_archived_message_at: string | null;
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
@@ -485,6 +548,32 @@ export function getAdminUsers(token: string) {
   return apiFetch<OfficeChatUser[]>("/api/admin/users", token);
 }
 
+export function getRetentionSettings(token: string) {
+  return apiFetch<RetentionSettings>("/api/admin/retention/settings", token);
+}
+
+export function updateRetentionSettings(token: string, payload: RetentionSettingsUpdate) {
+  return apiFetch<RetentionSettings>("/api/admin/retention/settings", token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function previewRetentionCleanup(token: string) {
+  return apiFetch<RetentionRunResult>("/api/admin/retention/dry-run", token, { method: "POST" });
+}
+
+export function runRetentionCleanup(token: string) {
+  return apiFetch<RetentionRunResult>("/api/admin/retention/run", token, {
+    method: "POST",
+    body: JSON.stringify({ confirm: true })
+  });
+}
+
+export function getStorageStats(token: string) {
+  return apiFetch<StorageStats>("/api/admin/storage/stats", token);
+}
+
 export function getUsers(token: string) {
   return apiFetch<OfficeChatDirectoryUser[]>("/api/users", token);
 }
@@ -589,6 +678,12 @@ export function getGroupMessages(token: string, groupId: string, limit = 50) {
   return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages?limit=${limit}`, token);
 }
 
+export function getArchivedGroupMessages(token: string, groupId: string, limit = 50, before?: string) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before) query.set("before", before);
+  return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages/archive?${query}`, token);
+}
+
 export function sendGroupMessage(token: string, groupId: string, body: string, replyToMessageId?: string | null) {
   return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages`, token, {
     method: "POST",
@@ -675,6 +770,15 @@ export function createDirectConversation(token: string, username: string, signal
 export function getDirectMessages(token: string, conversationId: string, limit = 50) {
   return apiFetch<OfficeChatDirectMessage[]>(
     `/api/direct/conversations/${conversationId}/messages?limit=${limit}`,
+    token
+  );
+}
+
+export function getArchivedDirectMessages(token: string, conversationId: string, limit = 50, before?: string) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before) query.set("before", before);
+  return apiFetch<OfficeChatDirectMessage[]>(
+    `/api/direct/conversations/${conversationId}/messages/archive?${query}`,
     token
   );
 }
@@ -810,6 +914,15 @@ export function getDiscussion(token: string, discussionId: string) {
 
 export function getDiscussionMessages(token: string, discussionId: string, limit = 50) {
   return apiFetch<OfficeChatDiscussionMessage[]>(`/api/discussions/${discussionId}/messages?limit=${limit}`, token);
+}
+
+export function getArchivedDiscussionMessages(token: string, discussionId: string, limit = 50, before?: string) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before) query.set("before", before);
+  return apiFetch<OfficeChatDiscussionMessage[]>(
+    `/api/discussions/${discussionId}/messages/archive?${query}`,
+    token
+  );
 }
 
 export function sendDiscussionMessage(token: string, discussionId: string, body: string) {

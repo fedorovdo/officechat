@@ -1,5 +1,7 @@
 # Auth Foundation OfficeChat
 
+Настройки retention, storage statistics и ручной cleanup доступны только `superadmin`/`admin`. Эти полномочия не дают доступа к телам чужих direct messages или их archive endpoints; direct history остаётся participant-only.
+
 OfficeChat Auth Foundation v0.1 добавляет локальную основу аутентификации без реализации чатов, WebSocket и LDAP/AD.
 
 ## Локальная аутентификация

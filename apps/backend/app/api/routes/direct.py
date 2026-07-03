@@ -31,6 +31,7 @@ from app.services.direct import (
     get_other_user,
     list_direct_conversations,
     list_direct_messages,
+    list_archived_direct_messages,
     update_direct_message,
 )
 from app.services.attachments import resolve_attachment_path
@@ -115,11 +116,29 @@ async def get_messages(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: UUID | None = None,
 ) -> list[DirectMessage]:
     conversation = await load_conversation_or_404(session, conversation_id)
     try:
         ensure_direct_conversation_access(conversation, current_user)
-        messages = await list_direct_messages(session, conversation, limit=limit)
+        messages = await list_direct_messages(session, conversation, limit=limit, before=before)
+        return [serialize_message(message, current_user) for message in messages]
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+
+@router.get("/conversations/{conversation_id}/messages/archive", response_model=list[DirectMessagePublic])
+async def get_archived_messages(
+    conversation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: UUID | None = None,
+) -> list[DirectMessagePublic]:
+    conversation = await load_conversation_or_404(session, conversation_id)
+    try:
+        ensure_direct_conversation_access(conversation, current_user)
+        messages = await list_archived_direct_messages(session, conversation, limit, before)
         return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -215,6 +234,8 @@ async def download_direct_attachment(
     attachment = await get_direct_attachment(session, conversation, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if not attachment.file_available:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="File removed by retention policy")
     try:
         attachment_path = resolve_attachment_path(attachment)
     except ValueError as exc:
@@ -241,10 +262,14 @@ async def patch_message(
         ensure_direct_conversation_access(conversation, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     message = await get_direct_message(session, conversation, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
         updated_message = await update_direct_message(session, conversation, message, current_user, payload)
@@ -275,6 +300,8 @@ async def delete_message(
     message = await get_direct_message(session, conversation, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
         deleted_message = await delete_direct_message(session, conversation, message, current_user)
@@ -285,6 +312,8 @@ async def delete_message(
         return serialize_message(deleted_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 async def change_direct_message_reaction(
@@ -304,6 +333,8 @@ async def change_direct_message_reaction(
     message = await get_direct_message(session, conversation, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
         if remove:

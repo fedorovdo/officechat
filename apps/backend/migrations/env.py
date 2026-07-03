@@ -20,6 +20,8 @@ from app.models import (
     GroupMessageReaction,
     Message,
     MessageAttachment,
+    RetentionAudit,
+    RetentionSettings,
     MessageMention,
     User,
 )

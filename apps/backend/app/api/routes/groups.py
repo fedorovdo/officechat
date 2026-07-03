@@ -46,6 +46,7 @@ from app.services.messages import (
     ensure_group_message_access,
     get_group_message,
     list_group_messages,
+    list_archived_group_messages,
     update_group_message,
 )
 from app.services.personal_notifications import broadcast_group_message_created, group_message_event_payload
@@ -249,6 +250,23 @@ async def post_message(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
+@router.get("/{group_id}/messages/archive", response_model=list[MessagePublic])
+async def get_archived_messages(
+    group_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: UUID | None = None,
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    messages = await list_archived_group_messages(session, group, limit=limit, before=before)
+    return [serialize_message(message, current_user) for message in messages]
+
+
 @router.post("/{group_id}/messages/with-attachment", response_model=MessagePublic, status_code=status.HTTP_201_CREATED)
 async def post_message_with_attachment(
     group_id: UUID,
@@ -340,6 +358,8 @@ async def download_attachment(
     attachment = await get_group_attachment(session, group, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if not attachment.file_available:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="File removed by retention policy")
 
     try:
         attachment_path = resolve_attachment_path(attachment)
@@ -368,10 +388,14 @@ async def delete_message(
         await ensure_group_message_access(session, group, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     message = await get_group_message(session, group, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
         deleted_message = await delete_group_message(session, group, message, current_user)
@@ -403,6 +427,8 @@ async def change_group_message_reaction(
     message = await get_group_message(session, group, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
         if remove:

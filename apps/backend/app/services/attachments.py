@@ -260,6 +260,8 @@ async def load_reply_target(session: AsyncSession, group: Group, reply_to_messag
     message = result.scalar_one_or_none()
     if message is None:
         raise ValueError("Reply target message not found in this group")
+    if message.is_archived:
+        raise ValueError("Archived messages cannot receive new replies")
     return message
 
 

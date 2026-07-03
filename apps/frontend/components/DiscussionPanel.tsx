@@ -9,6 +9,7 @@ import {
   deleteDiscussionMessage,
   downloadDiscussionAttachment,
   editDiscussionMessage,
+  getArchivedDiscussionMessages,
   getDiscussion,
   getDiscussionMessages,
   getDiscussionWebSocketUrl,
@@ -28,6 +29,7 @@ import type { Dictionary, Locale } from "../lib/i18n";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
+import { ChatArchivePanel } from "./ChatArchivePanel";
 import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
@@ -60,6 +62,10 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
   const [liveUpdateStatus, setLiveUpdateStatus] = useState<LiveUpdateStatus>("disconnected");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archivedMessages, setArchivedMessages] = useState<OfficeChatDiscussionMessage[]>([]);
+  const [archiveHasMore, setArchiveHasMore] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
   const {
     appendFiles,
     attachments,
@@ -117,6 +123,8 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
   useEffect(() => {
     setMessageBody("");
     clearAttachments();
+    setArchiveOpen(false);
+    setArchivedMessages([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [discussionId]);
 
@@ -227,6 +235,37 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       messageId,
       await removeDiscussionMessageReaction(token, discussionId, messageId, emoji)
     );
+  }
+
+  async function openArchive() {
+    const token = getStoredAccessToken();
+    if (!token) return router.replace(`/${locale}/login`);
+    setArchiveLoading(true);
+    setError("");
+    try {
+      const rows = await getArchivedDiscussionMessages(token, discussionId);
+      setArchivedMessages(rows);
+      setArchiveHasMore(rows.length === 50);
+      setArchiveOpen(true);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.loadError);
+    } finally {
+      setArchiveLoading(false);
+    }
+  }
+
+  async function loadMoreArchive() {
+    const token = getStoredAccessToken();
+    const cursor = archivedMessages.at(-1)?.id;
+    if (!token || !cursor) return;
+    setArchiveLoading(true);
+    try {
+      const rows = await getArchivedDiscussionMessages(token, discussionId, 50, cursor);
+      setArchivedMessages((current) => [...current, ...rows]);
+      setArchiveHasMore(rows.length === 50);
+    } finally {
+      setArchiveLoading(false);
+    }
   }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
@@ -396,13 +435,27 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
             {dictionary.messages.liveStatusLabel} {dictionary.messages.liveStatuses[liveUpdateStatus]}
           </p>
         </div>
-        <button className="table-action" onClick={onClose} type="button">
-          {dictionary.discussions.close}
-        </button>
+        <div className="actions">
+          <button className="table-action" onClick={() => void openArchive()} type="button">{dictionary.retention.messageArchive}</button>
+          <button className="table-action" onClick={onClose} type="button">{dictionary.discussions.close}</button>
+        </div>
       </div>
 
       {error ? <p className="form-error">{error}</p> : null}
       {success ? <p className="form-success">{success}</p> : null}
+
+      {archiveOpen ? (
+        <ChatArchivePanel
+          dictionary={dictionary}
+          hasMore={archiveHasMore}
+          loading={archiveLoading}
+          locale={locale}
+          messages={archivedMessages}
+          onClose={() => setArchiveOpen(false)}
+          onDownload={(downloadUrl, filename) => void handleDownloadAttachment(downloadUrl, filename)}
+          onLoadMore={() => void loadMoreArchive()}
+        />
+      ) : null}
 
       {discussion ? (
         <>

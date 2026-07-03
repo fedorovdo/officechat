@@ -95,6 +95,8 @@ class DiscussionMessageAttachmentPublic(BaseModel):
     size_bytes: int
     created_at: datetime
     download_url: str
+    file_available: bool
+    file_deleted_at: datetime | None
 
 
 class DiscussionMessagePublic(BaseModel):
@@ -105,6 +107,8 @@ class DiscussionMessagePublic(BaseModel):
     sender_user_id: UUID
     body: str
     is_deleted: bool
+    is_archived: bool
+    archived_at: datetime | None
     edited_at: datetime | None
     created_at: datetime
     updated_at: datetime

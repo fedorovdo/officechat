@@ -34,6 +34,7 @@ from app.services.discussions import (
     get_discussion_member,
     get_discussion_message,
     list_discussion_messages,
+    list_archived_discussion_messages,
     remove_discussion_member,
     update_discussion_message,
 )
@@ -96,6 +97,8 @@ async def post_discussion(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermissionError as exc:
         raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except IntegrityError as exc:
         await session.rollback()
         discussion = await ensure_source_message_visible(session, payload.source_message_id, current_user)
@@ -199,11 +202,29 @@ async def get_messages(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: UUID | None = None,
 ) -> list[DiscussionMessage]:
     discussion = await load_discussion_or_404(session, discussion_id)
     try:
         await ensure_discussion_access(session, discussion, current_user)
-        messages = await list_discussion_messages(session, discussion, limit)
+        messages = await list_discussion_messages(session, discussion, limit, before)
+        return [serialize_message(message, current_user) for message in messages]
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+
+
+@router.get("/{discussion_id}/messages/archive", response_model=list[DiscussionMessagePublic])
+async def get_archived_messages(
+    discussion_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: UUID | None = None,
+) -> list[DiscussionMessagePublic]:
+    discussion = await load_discussion_or_404(session, discussion_id)
+    try:
+        await ensure_discussion_access(session, discussion, current_user)
+        messages = await list_archived_discussion_messages(session, discussion, limit, before)
         return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -293,6 +314,8 @@ async def download_discussion_attachment(
     attachment = await get_discussion_attachment(session, discussion, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if not attachment.file_available:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="File removed by retention policy")
     try:
         attachment_path = resolve_attachment_path(attachment)
     except ValueError as exc:
@@ -342,6 +365,8 @@ async def delete_message(
     message = await get_discussion_message(session, discussion, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Discussion message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
     try:
         deleted_message = await delete_discussion_message(session, discussion, message, current_user)
         await discussion_websocket_manager.broadcast_to_discussion(
@@ -351,6 +376,8 @@ async def delete_message(
         return serialize_message(deleted_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 async def change_discussion_message_reaction(
@@ -370,6 +397,8 @@ async def change_discussion_message_reaction(
     message = await get_discussion_message(session, discussion, message_id)
     if message is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Discussion message not found")
+    if message.is_archived:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
         if remove:

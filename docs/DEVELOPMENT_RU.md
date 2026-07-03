@@ -1,5 +1,7 @@
 # Разработка OfficeChat
 
+Управление хранением доступно по `/ru/admin/storage`. Retention выключен по умолчанию. Безопасный flow: сохранить настройки, выполнить `POST /api/admin/retention/dry-run`, проверить backup, включить retention, повторить preview и подтвердить `POST /api/admin/retention/run`. Автоматического scheduler в v0.1 нет.
+
 Локальная разработка рассчитана на Windows и Docker Desktop.
 
 ## Первый запуск

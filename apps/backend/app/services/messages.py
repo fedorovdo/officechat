@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,18 +54,56 @@ async def list_group_messages(
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
             selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )
-        .where(Message.group_id == group.id)
-        .order_by(Message.created_at.desc())
+        .where(Message.group_id == group.id, Message.is_archived.is_(False))
+        .order_by(Message.created_at.desc(), Message.id.desc())
         .limit(limit)
     )
     if before is not None:
         before_message = await get_group_message(session, group, before)
         if before_message is not None:
-            query = query.where(Message.created_at < before_message.created_at)
+            query = query.where(
+                or_(
+                    Message.created_at < before_message.created_at,
+                    and_(Message.created_at == before_message.created_at, Message.id < before_message.id),
+                )
+            )
 
     result = await session.execute(query)
     messages = list(result.scalars().all())
     return list(reversed(messages))
+
+
+async def list_archived_group_messages(
+    session: AsyncSession,
+    group: Group,
+    limit: int,
+    before: UUID | None = None,
+) -> list[Message]:
+    query = (
+        select(Message)
+        .options(
+            selectinload(Message.sender),
+            selectinload(Message.attachments),
+            selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.reply_to).selectinload(Message.attachments),
+            selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
+            selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
+        )
+        .where(Message.group_id == group.id, Message.is_archived.is_(True))
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        cursor = await get_group_message(session, group, before)
+        if cursor is not None:
+            query = query.where(
+                or_(
+                    Message.created_at < cursor.created_at,
+                    and_(Message.created_at == cursor.created_at, Message.id < cursor.id),
+                )
+            )
+    result = await session.execute(query)
+    return list(result.scalars().all())
 
 
 async def create_group_message(
@@ -79,6 +117,8 @@ async def create_group_message(
         reply_to_message = await get_group_message(session, group, payload.reply_to_message_id)
         if reply_to_message is None:
             raise ValueError("Reply target message not found in this group")
+        if reply_to_message.is_archived:
+            raise ValueError("Archived messages cannot receive new replies")
         reply_to_message_id = reply_to_message.id
 
     message = Message(
@@ -136,6 +176,8 @@ async def update_group_message(
 ) -> Message:
     if message.is_deleted:
         raise ValueError("Deleted messages cannot be edited")
+    if message.is_archived:
+        raise ValueError("Archived messages cannot be edited")
     if message.sender_user_id != current_user.id:
         raise PermissionError("Only sender can edit message")
 
@@ -162,6 +204,8 @@ async def delete_group_message(
 ) -> Message:
     if not await can_delete_message(session, group, message, current_user):
         raise PermissionError("Message delete access denied")
+    if message.is_archived:
+        raise ValueError("Archived messages are read-only")
 
     message.is_deleted = True
     message.body = DELETED_MESSAGE_BODY

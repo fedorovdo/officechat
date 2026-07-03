@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -98,6 +98,8 @@ async def create_or_get_discussion(
     source_message = await get_group_message(session, group, payload.source_message_id)
     if source_message is None:
         raise LookupError("Source message not found in this group")
+    if source_message.is_archived:
+        raise ValueError("Archived messages cannot start new discussions")
 
     existing_discussion = await get_discussion_by_source_message(session, source_message.id)
     if existing_discussion is not None:
@@ -202,19 +204,66 @@ async def list_discussion_messages(
     session: AsyncSession,
     discussion: Discussion,
     limit: int,
+    before: UUID | None = None,
 ) -> list[DiscussionMessage]:
-    result = await session.execute(
+    query = (
         select(DiscussionMessage)
         .options(
             selectinload(DiscussionMessage.sender),
             selectinload(DiscussionMessage.attachments),
             selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
         )
-        .where(DiscussionMessage.discussion_id == discussion.id)
-        .order_by(DiscussionMessage.created_at.desc())
+        .where(
+            DiscussionMessage.discussion_id == discussion.id,
+            DiscussionMessage.is_archived.is_(False),
+        )
+        .order_by(DiscussionMessage.created_at.desc(), DiscussionMessage.id.desc())
         .limit(limit)
     )
+    if before is not None:
+        cursor = await get_discussion_message(session, discussion, before)
+        if cursor is not None:
+            query = query.where(
+                or_(
+                    DiscussionMessage.created_at < cursor.created_at,
+                    and_(DiscussionMessage.created_at == cursor.created_at, DiscussionMessage.id < cursor.id),
+                )
+            )
+    result = await session.execute(query)
     return list(reversed(result.scalars().all()))
+
+
+async def list_archived_discussion_messages(
+    session: AsyncSession,
+    discussion: Discussion,
+    limit: int,
+    before: UUID | None = None,
+) -> list[DiscussionMessage]:
+    query = (
+        select(DiscussionMessage)
+        .options(
+            selectinload(DiscussionMessage.sender),
+            selectinload(DiscussionMessage.attachments),
+            selectinload(DiscussionMessage.reactions).selectinload(DiscussionMessageReaction.user),
+        )
+        .where(
+            DiscussionMessage.discussion_id == discussion.id,
+            DiscussionMessage.is_archived.is_(True),
+        )
+        .order_by(DiscussionMessage.created_at.desc(), DiscussionMessage.id.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        cursor = await get_discussion_message(session, discussion, before)
+        if cursor is not None:
+            query = query.where(
+                or_(
+                    DiscussionMessage.created_at < cursor.created_at,
+                    and_(DiscussionMessage.created_at == cursor.created_at, DiscussionMessage.id < cursor.id),
+                )
+            )
+    result = await session.execute(query)
+    return list(result.scalars().all())
 
 
 async def create_discussion_message(
@@ -348,6 +397,8 @@ async def update_discussion_message(
     await ensure_discussion_access(session, discussion, current_user)
     if message.is_deleted:
         raise ValueError("Deleted messages cannot be edited")
+    if message.is_archived:
+        raise ValueError("Archived messages cannot be edited")
     if message.sender_user_id != current_user.id:
         raise PermissionError("Only sender can edit message")
 
@@ -386,6 +437,8 @@ async def delete_discussion_message(
 ) -> DiscussionMessage:
     if not await can_delete_discussion_message(session, discussion, message, current_user):
         raise PermissionError("Discussion message delete access denied")
+    if message.is_archived:
+        raise ValueError("Archived messages are read-only")
 
     message.is_deleted = True
     message.body = DELETED_MESSAGE_BODY

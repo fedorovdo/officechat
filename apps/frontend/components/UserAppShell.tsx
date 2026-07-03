@@ -1629,14 +1629,24 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 ⚙
               </button>
               {currentUser && isAdminRole(currentUser.role) ? (
-                <Link
-                  aria-label={dictionary.appShell.admin}
-                  className="sidebar-icon-button"
-                  href={`/${locale}/admin/users`}
-                  title={dictionary.appShell.admin}
-                >
-                  A
-                </Link>
+                <>
+                  <Link
+                    aria-label={dictionary.appShell.admin}
+                    className="sidebar-icon-button"
+                    href={`/${locale}/admin/users`}
+                    title={dictionary.appShell.admin}
+                  >
+                    A
+                  </Link>
+                  <Link
+                    aria-label={dictionary.retention.title}
+                    className="sidebar-icon-button"
+                    href={`/${locale}/admin/storage`}
+                    title={dictionary.retention.title}
+                  >
+                    S
+                  </Link>
+                </>
               ) : null}
               <button
                 aria-label={dictionary.dashboard.logout}

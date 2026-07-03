@@ -32,6 +32,8 @@ class DirectMessageAttachmentPublic(BaseModel):
     size_bytes: int
     created_at: datetime
     download_url: str
+    file_available: bool
+    file_deleted_at: datetime | None
 
 
 class DirectMessageReplySenderPublic(BaseModel):
@@ -49,6 +51,8 @@ class DirectMessageReplyPreviewPublic(BaseModel):
     sender: DirectMessageReplySenderPublic
     body_preview: str
     is_deleted: bool
+    is_archived: bool
+    archived_at: datetime | None
     created_at: datetime
     attachment_count: int = 0
 

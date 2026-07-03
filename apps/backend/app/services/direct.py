@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -77,8 +77,8 @@ async def get_last_direct_message(
             selectinload(DirectMessage.attachments),
             selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
         )
-        .where(DirectMessage.conversation_id == conversation.id)
-        .order_by(DirectMessage.created_at.desc())
+        .where(DirectMessage.conversation_id == conversation.id, DirectMessage.is_archived.is_(False))
+        .order_by(DirectMessage.created_at.desc(), DirectMessage.id.desc())
         .limit(1)
     )
     return result.scalar_one_or_none()
@@ -129,8 +129,9 @@ async def list_direct_messages(
     session: AsyncSession,
     conversation: DirectConversation,
     limit: int,
+    before: UUID | None = None,
 ) -> list[DirectMessage]:
-    result = await session.execute(
+    query = (
         select(DirectMessage)
         .options(
             selectinload(DirectMessage.sender),
@@ -139,12 +140,57 @@ async def list_direct_messages(
             selectinload(DirectMessage.attachments),
             selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
         )
-        .where(DirectMessage.conversation_id == conversation.id)
-        .order_by(DirectMessage.created_at.desc())
+        .where(DirectMessage.conversation_id == conversation.id, DirectMessage.is_archived.is_(False))
+        .order_by(DirectMessage.created_at.desc(), DirectMessage.id.desc())
         .limit(limit)
     )
+    if before is not None:
+        cursor = await get_direct_message(session, conversation, before)
+        if cursor is not None:
+            query = query.where(
+                or_(
+                    DirectMessage.created_at < cursor.created_at,
+                    and_(DirectMessage.created_at == cursor.created_at, DirectMessage.id < cursor.id),
+                )
+            )
+    result = await session.execute(query)
     messages = list(result.scalars().all())
     return list(reversed(messages))
+
+
+async def list_archived_direct_messages(
+    session: AsyncSession,
+    conversation: DirectConversation,
+    limit: int,
+    before: UUID | None = None,
+) -> list[DirectMessage]:
+    query = (
+        select(DirectMessage)
+        .options(
+            selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reply_to).selectinload(DirectMessage.sender),
+            selectinload(DirectMessage.reply_to).selectinload(DirectMessage.attachments),
+            selectinload(DirectMessage.attachments),
+            selectinload(DirectMessage.reactions).selectinload(DirectMessageReaction.user),
+        )
+        .where(
+            DirectMessage.conversation_id == conversation.id,
+            DirectMessage.is_archived.is_(True),
+        )
+        .order_by(DirectMessage.created_at.desc(), DirectMessage.id.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        cursor = await get_direct_message(session, conversation, before)
+        if cursor is not None:
+            query = query.where(
+                or_(
+                    DirectMessage.created_at < cursor.created_at,
+                    and_(DirectMessage.created_at == cursor.created_at, DirectMessage.id < cursor.id),
+                )
+            )
+    result = await session.execute(query)
+    return list(result.scalars().all())
 
 
 async def create_direct_message(
@@ -159,6 +205,8 @@ async def create_direct_message(
         reply_to_message = await get_direct_message(session, conversation, payload.reply_to_message_id)
         if reply_to_message is None:
             raise ValueError("Reply target message not found in this conversation")
+        if reply_to_message.is_archived:
+            raise ValueError("Archived messages cannot receive new replies")
         reply_to_message_id = reply_to_message.id
 
     message = DirectMessage(
@@ -191,6 +239,8 @@ async def create_direct_message_with_attachments(
         reply_to_message = await get_direct_message(session, conversation, reply_to_message_id)
         if reply_to_message is None:
             raise ValueError("Reply target message not found in this conversation")
+        if reply_to_message.is_archived:
+            raise ValueError("Archived messages cannot receive new replies")
         normalized_reply_to_message_id = reply_to_message.id
 
     saved_uploads = await save_uploads("direct", conversation.id, uploads) if uploads else []
@@ -299,6 +349,8 @@ async def update_direct_message(
     ensure_direct_conversation_access(conversation, current_user)
     if message.is_deleted:
         raise ValueError("Deleted messages cannot be edited")
+    if message.is_archived:
+        raise ValueError("Archived messages cannot be edited")
     if message.sender_user_id != current_user.id:
         raise PermissionError("Only sender can edit message")
 
@@ -316,6 +368,8 @@ async def delete_direct_message(
     current_user: User,
 ) -> DirectMessage:
     ensure_direct_conversation_access(conversation, current_user)
+    if message.is_archived:
+        raise ValueError("Archived messages are read-only")
     if message.sender_user_id != current_user.id:
         raise PermissionError("Only sender can delete message")
 

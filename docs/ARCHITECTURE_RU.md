@@ -1,5 +1,7 @@
 # Архитектура OfficeChat
 
+Retention subsystem использует singleton `retention_settings`, audit table и archive metadata на group/direct/discussion message tables. Attachment metadata сохраняется после удаления physical file. В v0.1 cleanup запускается только вручную: backend startup и миграции никогда не запускают retention jobs.
+
 OfficeChat строится как monorepo с отдельными приложениями backend и frontend.
 
 ## Компоненты

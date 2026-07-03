@@ -8,6 +8,7 @@ import {
   deleteGroupMessage,
   downloadAttachment,
   editGroupMessage,
+  getArchivedGroupMessages,
   getGroupMessages,
   getGroupWebSocketUrl,
   getStoredAccessToken,
@@ -23,6 +24,7 @@ import type { Dictionary, Locale } from "../lib/i18n";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
+import { ChatArchivePanel } from "./ChatArchivePanel";
 import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
@@ -67,6 +69,10 @@ export function GroupChatPanel({
   const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archivedMessages, setArchivedMessages] = useState<OfficeChatMessage[]>([]);
+  const [archiveHasMore, setArchiveHasMore] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
   const {
     appendFiles,
     attachments,
@@ -142,6 +148,8 @@ export function GroupChatPanel({
     shouldScrollToBottomRef.current = false;
     setShowNewMessagesButton(false);
     setReplyToMessage(null);
+    setArchiveOpen(false);
+    setArchivedMessages([]);
     clearAttachments();
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [groupId]);
@@ -295,6 +303,37 @@ export function GroupChatPanel({
       await refreshMessages(token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.loadError);
+    }
+  }
+
+  async function openArchive() {
+    const token = getStoredAccessToken();
+    if (!token) return router.replace(`/${locale}/login`);
+    setArchiveLoading(true);
+    setError("");
+    try {
+      const rows = await getArchivedGroupMessages(token, groupId);
+      setArchivedMessages(rows);
+      setArchiveHasMore(rows.length === 50);
+      setArchiveOpen(true);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.loadError);
+    } finally {
+      setArchiveLoading(false);
+    }
+  }
+
+  async function loadMoreArchive() {
+    const token = getStoredAccessToken();
+    const cursor = archivedMessages.at(-1)?.id;
+    if (!token || !cursor) return;
+    setArchiveLoading(true);
+    try {
+      const rows = await getArchivedGroupMessages(token, groupId, 50, cursor);
+      setArchivedMessages((current) => [...current, ...rows]);
+      setArchiveHasMore(rows.length === 50);
+    } finally {
+      setArchiveLoading(false);
     }
   }
 
@@ -467,13 +506,27 @@ export function GroupChatPanel({
             {dictionary.messages.liveStatusLabel} {dictionary.messages.liveStatuses[liveUpdateStatus]}
           </p>
         </div>
-        <button className="secondary-link" onClick={() => void handleRefreshMessages()} type="button">
-          {dictionary.messages.refresh}
-        </button>
+        <div className="actions">
+          <button className="secondary-link" onClick={() => void openArchive()} type="button">{dictionary.retention.messageArchive}</button>
+          <button className="secondary-link" onClick={() => void handleRefreshMessages()} type="button">{dictionary.messages.refresh}</button>
+        </div>
       </div>
 
       {success ? <p className="form-success">{success}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
+
+      {archiveOpen ? (
+        <ChatArchivePanel
+          dictionary={dictionary}
+          hasMore={archiveHasMore}
+          loading={archiveLoading}
+          locale={locale}
+          messages={archivedMessages}
+          onClose={() => setArchiveOpen(false)}
+          onDownload={(downloadUrl, filename) => void handleDownloadAttachment(downloadUrl, filename)}
+          onLoadMore={() => void loadMoreArchive()}
+        />
+      ) : null}
 
       <div className="messages-list" ref={messagesListRef}>
         {messages.map((message) => {

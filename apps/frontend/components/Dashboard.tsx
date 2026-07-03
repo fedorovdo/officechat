@@ -102,6 +102,9 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
                 <Link className="primary-button dashboard-admin-link" href={`/${locale}/admin/bots`}>
                   {dictionary.dashboard.adminBots}
                 </Link>
+                <Link className="primary-button dashboard-admin-link" href={`/${locale}/admin/storage`}>
+                  {dictionary.retention.title}
+                </Link>
               </>
             ) : null}
           </div>

@@ -1,5 +1,7 @@
 # Roadmap OfficeChat
 
+Retention and Storage Management v0.1 реализует disabled-by-default archive, attachment cleanup, mandatory dry-run, admin storage UI и audit. Для v0.2 запланированы отдельный worker, Valkey distributed lock и permanent deletion только после cascade audit.
+
 ## Этап 0: Scaffold
 
 - Monorepo структура.

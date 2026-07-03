@@ -4,6 +4,8 @@ OfficeChat is an open-source, self-hosted corporate chat for local networks and 
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
 
+Retention and Storage Management v0.1 adds disabled-by-default message archiving, attachment retention, mandatory dry-run/manual cleanup, storage statistics, audit records, and participant-only read-only archives. Admin UI: `http://localhost:3100/ru/admin/storage`. Cleanup never runs during migration or startup. See [docs/RETENTION_RU.md](docs/RETENTION_RU.md) and [docs/STORAGE_MANAGEMENT_RU.md](docs/STORAGE_MANAGEMENT_RU.md).
+
 ## Tech Stack
 
 - Backend: FastAPI and Python
@@ -129,7 +131,7 @@ File attachments are available for group, direct, and discussion messages:
 - Upload defaults: `ATTACHMENT_MAX_UPLOAD_SIZE_MB=25`, `ATTACHMENT_MAX_FILES_PER_MESSAGE=10`, `ATTACHMENT_MAX_TOTAL_SIZE_MB=50`.
 - Allowed extensions default to `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`.
 - Executable and script formats such as `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` remain blocked even if a browser reports a generic MIME type.
-- Antivirus scanning, backend thumbnails, PDF/document previews, S3, and retention cleanup are not implemented yet.
+- Antivirus scanning, backend thumbnails, PDF/document previews, S3, and automatic retention workers are not implemented yet.
 - The uploads volume must be included in backups together with PostgreSQL data.
 
 In group, direct, and discussion composers, users can select or drag multiple files and append PNG, JPEG, or WebP screenshots with `Ctrl+V`. Up to 10 attachments and 50 MB combined are allowed per message by default; the per-file limit remains 25 MB. Selection never uploads automatically, individual files can be removed, and failed sends preserve the composer state.

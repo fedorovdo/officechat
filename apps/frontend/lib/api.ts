@@ -113,6 +113,8 @@ export type OfficeChatMessageReplyPreview = {
   sender: Pick<OfficeChatUser, "id" | "username" | "display_name">;
   body_preview: string;
   is_deleted: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   attachment_count: number;
 };
@@ -151,6 +153,8 @@ export type OfficeChatDirectMessageReplyPreview = {
   sender: Pick<OfficeChatDirectoryUser, "id" | "username" | "display_name">;
   body_preview: string;
   is_deleted: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   attachment_count: number;
 };

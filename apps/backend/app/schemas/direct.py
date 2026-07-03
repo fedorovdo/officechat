@@ -60,7 +60,10 @@ class DirectMessageReplyPreviewPublic(BaseModel):
     @classmethod
     def build_preview(cls, data: object) -> object:
         if isinstance(data, dict):
-            return data
+            preview = dict(data)
+            preview.setdefault("is_archived", False)
+            preview.setdefault("archived_at", None)
+            return preview
 
         body = str(getattr(data, "body", "") or "").strip()
         attachments = getattr(data, "attachments", [])
@@ -73,6 +76,8 @@ class DirectMessageReplyPreviewPublic(BaseModel):
             "sender": getattr(data, "sender"),
             "body_preview": preview,
             "is_deleted": getattr(data, "is_deleted"),
+            "is_archived": getattr(data, "is_archived", False),
+            "archived_at": getattr(data, "archived_at", None),
             "created_at": getattr(data, "created_at"),
             "attachment_count": len(attachments),
         }
@@ -88,6 +93,8 @@ class DirectMessagePublic(BaseModel):
     body: str
     message_type: str
     is_deleted: bool
+    is_archived: bool
+    archived_at: datetime | None
     edited_at: datetime | None
     created_at: datetime
     updated_at: datetime

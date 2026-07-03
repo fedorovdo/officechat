@@ -116,22 +116,25 @@ WebSocket real-time updates are available for group messages:
 File attachments are available for group, direct, and discussion messages:
 
 - `POST /api/groups/{group_id}/messages/with-attachment`
+- `POST /api/groups/{group_id}/messages/with-attachments`
 - `GET /api/groups/{group_id}/attachments/{attachment_id}/download`
 - `POST /api/direct/conversations/{conversation_id}/messages/with-attachment`
+- `POST /api/direct/conversations/{conversation_id}/messages/with-attachments`
 - `GET /api/direct/conversations/{conversation_id}/attachments/{attachment_id}/download`
 - `POST /api/discussions/{discussion_id}/messages/with-attachment`
+- `POST /api/discussions/{discussion_id}/messages/with-attachments`
 - `GET /api/discussions/{discussion_id}/attachments/{attachment_id}/download`
 - Files are stored in the backend uploads Docker volume mounted at `/data/uploads`.
 - Downloads require membership in the relevant group, direct conversation, or discussion; storage paths are never exposed.
-- Upload defaults: `MAX_UPLOAD_SIZE_MB=25`.
+- Upload defaults: `ATTACHMENT_MAX_UPLOAD_SIZE_MB=25`, `ATTACHMENT_MAX_FILES_PER_MESSAGE=10`, `ATTACHMENT_MAX_TOTAL_SIZE_MB=50`.
 - Allowed extensions default to `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`.
 - Executable and script formats such as `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` remain blocked even if a browser reports a generic MIME type.
 - Antivirus scanning, backend thumbnails, PDF/document previews, S3, and retention cleanup are not implemented yet.
 - The uploads volume must be included in backups together with PostgreSQL data.
 
-In group, direct, and discussion composers, desktop users can paste PNG, JPEG, or WebP screenshots with `Ctrl+V` or drag a file from the desktop into the active chat panel. A visible overlay marks the drop target; dropping selects but does not send the file. OfficeChat supports one attachment per message, so clipboard paste or drop replaces any selected file. Multiple attachments remain planned.
+In group, direct, and discussion composers, users can select or drag multiple files and append PNG, JPEG, or WebP screenshots with `Ctrl+V`. Up to 10 attachments and 50 MB combined are allowed per message by default; the per-file limit remains 25 MB. Selection never uploads automatically, individual files can be removed, and failed sends preserve the composer state.
 
-Sent PNG, JPEG, and WebP attachments display inline in group, direct, and discussion messages. Preview bytes are fetched through the protected endpoint with the bearer token, converted to a temporary Blob URL, and never expose storage paths or tokens. Clicking the preview opens a lightweight full-screen viewer; the original authenticated download remains available. SVG, PDF, Office, text, and archive files are intentionally not rendered inline.
+Sent PNG, JPEG, and WebP attachments display as a compact responsive gallery. The protected lightbox supports previous/next navigation and keyboard arrows; non-image files remain compact authenticated download rows. Storage stays in the local Docker volume. Antivirus scanning, resumable uploads, backend thumbnails/compression, and S3/MinIO are not implemented.
 
 The group, direct, and discussion message composers include a lightweight Unicode emoji picker with RU/EN search and a local frequently-used list. Recent emoji are stored in the browser under `officechat.emoji.recent`. Message reactions support `👍 ❤️ 😂 ✅ 🔥 👀 🎉 😮 😢 👎`, one reaction per user/emoji/message, repeated-click removal, and real-time channel synchronization. Custom reactions, stickers, GIFs, and reaction notifications are not implemented. Local avatar upload and avatar display in messenger messages and user lists are also available in v0.1, while optional avatar cropping/editing remains planned.
 
@@ -160,7 +163,9 @@ Important auth environment variables:
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
 - `MESSAGE_MAX_LENGTH` - maximum text message length, default `4000`.
-- `MAX_UPLOAD_SIZE_MB` - maximum upload size in MB, default `25`.
+- `ATTACHMENT_MAX_UPLOAD_SIZE_MB` - per-file maximum in MB, default `25` (`MAX_UPLOAD_SIZE_MB` remains a compatibility alias).
+- `ATTACHMENT_MAX_FILES_PER_MESSAGE` - maximum files per message, default `10`.
+- `ATTACHMENT_MAX_TOTAL_SIZE_MB` - combined attachment size per message, default `50`.
 - `ALLOWED_UPLOAD_EXTENSIONS` - comma-separated allowlist for upload extensions.
 - `UPLOADS_DIR` - backend storage path for local uploads, default `/data/uploads`.
 

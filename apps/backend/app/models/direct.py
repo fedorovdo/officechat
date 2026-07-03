@@ -64,4 +64,5 @@ class DirectMessage(Base):
     attachments: Mapped[list["DirectMessageAttachment"]] = relationship(
         back_populates="direct_message",
         cascade="all, delete-orphan",
+        order_by="DirectMessageAttachment.sort_order",
     )

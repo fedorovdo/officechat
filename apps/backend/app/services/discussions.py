@@ -13,7 +13,7 @@ from app.models.message import Message
 from app.models.reaction import DiscussionMessageReaction
 from app.models.user import User
 from app.schemas.discussion import DiscussionCreate, DiscussionMemberCreate, DiscussionMessageCreate, DiscussionMessageUpdate
-from app.services.attachments import remove_saved_file, save_upload, validate_attachment_message_body
+from app.services.attachments import remove_saved_file, save_uploads, validate_attachment_message_body
 from app.services.groups import get_group, get_group_membership, is_global_group_admin
 from app.services.messages import DELETED_MESSAGE_BODY, ensure_group_message_access, get_group_message, validate_message_body
 from app.services.users import get_user_by_username
@@ -235,16 +235,18 @@ async def create_discussion_message(
     return await load_discussion_message(session, message.id)
 
 
-async def create_discussion_message_with_attachment(
+async def create_discussion_message_with_attachments(
     session: AsyncSession,
     discussion: Discussion,
     current_user: User,
     body: str | None,
-    upload: UploadFile,
+    uploads: list[UploadFile],
 ) -> DiscussionMessage:
     await ensure_discussion_access(session, discussion, current_user)
     normalized_body = validate_attachment_message_body(body)
-    saved_upload = await save_upload("discussion", discussion.id, upload)
+    if not normalized_body and not uploads:
+        raise ValueError("Message body or at least one attachment is required")
+    saved_uploads = await save_uploads("discussion", discussion.id, uploads) if uploads else []
     try:
         message = DiscussionMessage(
             discussion_id=discussion.id,
@@ -254,22 +256,36 @@ async def create_discussion_message_with_attachment(
         discussion.updated_at = datetime.now(timezone.utc)
         session.add(message)
         await session.flush()
-        session.add(
-            DiscussionMessageAttachment(
+        session.add_all(
+            [DiscussionMessageAttachment(
                 discussion_message_id=message.id,
                 original_filename=saved_upload.original_filename,
                 stored_filename=saved_upload.stored_filename,
                 storage_path=saved_upload.storage_path,
                 content_type=saved_upload.content_type,
                 size_bytes=saved_upload.size_bytes,
-            )
+                sort_order=sort_order,
+            ) for sort_order, saved_upload in enumerate(saved_uploads)]
         )
         await session.commit()
-    except Exception:
+    except BaseException:
         await session.rollback()
-        remove_saved_file(saved_upload.storage_path)
+        for saved_upload in saved_uploads:
+            remove_saved_file(saved_upload.storage_path)
         raise
     return await load_discussion_message(session, message.id)
+
+
+async def create_discussion_message_with_attachment(
+    session: AsyncSession,
+    discussion: Discussion,
+    current_user: User,
+    body: str | None,
+    upload: UploadFile,
+) -> DiscussionMessage:
+    return await create_discussion_message_with_attachments(
+        session, discussion, current_user, body, [upload]
+    )
 
 
 async def get_discussion_message(

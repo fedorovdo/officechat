@@ -452,6 +452,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       return body;
     }
     if (message.attachments.length > 0) {
+      if (message.attachments.length > 1) {
+        return dictionary.sidebarActivity.attachmentsCount.replace("{count}", String(message.attachments.length));
+      }
       return dictionary.sidebarActivity.attachmentWithFilename.replace(
         "{filename}",
         message.attachments[0].original_filename
@@ -467,6 +470,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     const body = message.body.trim();
     if (body) return body;
     if (message.attachments.length > 0) {
+      if (message.attachments.length > 1) {
+        return dictionary.sidebarActivity.attachmentsCount.replace("{count}", String(message.attachments.length));
+      }
       return dictionary.sidebarActivity.attachmentWithFilename.replace(
         "{filename}",
         message.attachments[0].original_filename
@@ -478,7 +484,14 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   function getNotificationMessagePreview(message: OfficeChatDirectMessage | OfficeChatDiscussionMessage) {
     const body = message.body.trim();
     if (body) return body;
-    if (message.attachments.length > 0) return `📎 ${message.attachments[0].original_filename}`;
+    if (message.attachments.length > 1) {
+      return dictionary.sidebarActivity.attachmentsCount.replace("{count}", String(message.attachments.length));
+    }
+    if (message.attachments.length === 1) {
+      return dictionary.sidebarActivity.attachmentWithFilename.replace(
+        "{filename}", message.attachments[0].original_filename
+      );
+    }
     return dictionary.sidebarActivity.attachment;
   }
 

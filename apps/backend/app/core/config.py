@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_ALLOWED_UPLOAD_EXTENSIONS = [
@@ -24,7 +24,12 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 1440
     message_max_length: int = 4000
-    max_upload_size_mb: int = 25
+    attachment_max_upload_size_mb: int = Field(
+        default=25,
+        validation_alias=AliasChoices("ATTACHMENT_MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_SIZE_MB"),
+    )
+    attachment_max_files_per_message: int = 10
+    attachment_max_total_size_mb: int = 50
     allowed_upload_extensions: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: list(DEFAULT_ALLOWED_UPLOAD_EXTENSIONS)
     )
@@ -103,7 +108,11 @@ class Settings(BaseSettings):
 
     @property
     def max_upload_size_bytes(self) -> int:
-        return self.max_upload_size_mb * 1024 * 1024
+        return self.attachment_max_upload_size_mb * 1024 * 1024
+
+    @property
+    def attachment_max_total_size_bytes(self) -> int:
+        return self.attachment_max_total_size_mb * 1024 * 1024
 
     @property
     def avatar_max_upload_size_bytes(self) -> int:

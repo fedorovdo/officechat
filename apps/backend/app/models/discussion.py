@@ -94,4 +94,5 @@ class DiscussionMessage(Base):
     attachments: Mapped[list["DiscussionMessageAttachment"]] = relationship(
         back_populates="discussion_message",
         cascade="all, delete-orphan",
+        order_by="DiscussionMessageAttachment.sort_order",
     )

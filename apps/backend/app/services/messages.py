@@ -50,6 +50,7 @@ async def list_group_messages(
             selectinload(Message.sender),
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.reply_to).selectinload(Message.attachments),
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
             selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )
@@ -102,6 +103,7 @@ async def get_group_message(session: AsyncSession, group: Group, message_id: UUI
             selectinload(Message.sender),
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.reply_to).selectinload(Message.attachments),
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
             selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )
@@ -117,6 +119,7 @@ async def load_message_with_sender(session: AsyncSession, message_id: UUID) -> M
             selectinload(Message.sender),
             selectinload(Message.attachments),
             selectinload(Message.reply_to).selectinload(Message.sender),
+            selectinload(Message.reply_to).selectinload(Message.attachments),
             selectinload(Message.mentions).selectinload(MessageMention.mentioned_user),
             selectinload(Message.reactions).selectinload(GroupMessageReaction.user),
         )

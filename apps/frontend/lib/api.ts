@@ -110,6 +110,7 @@ export type OfficeChatMessageReplyPreview = {
   body_preview: string;
   is_deleted: boolean;
   created_at: string;
+  attachment_count: number;
 };
 
 export type OfficeChatMessageAttachment = OfficeChatAttachment & {
@@ -145,6 +146,7 @@ export type OfficeChatDirectMessageReplyPreview = {
   body_preview: string;
   is_deleted: boolean;
   created_at: string;
+  attachment_count: number;
 };
 
 export type OfficeChatDirectConversation = {
@@ -409,6 +411,32 @@ async function uploadMessageWithAttachment<T>(
   return (await response.json()) as T;
 }
 
+async function uploadMessageWithAttachments<T>(
+  path: string,
+  token: string,
+  body: string,
+  files: File[],
+  replyToMessageId?: string | null,
+  signal?: AbortSignal
+) {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("files", file));
+  if (body.trim()) formData.append("body", body);
+  if (replyToMessageId) formData.append("reply_to_message_id", replyToMessageId);
+
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+    signal
+  });
+  if (!response.ok) {
+    const responseBody = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new Error(typeof responseBody?.detail === "string" ? responseBody.detail : response.statusText);
+  }
+  return (await response.json()) as T;
+}
+
 export function getCurrentUser(token: string) {
   return apiFetch<OfficeChatUser>("/api/auth/me", token);
 }
@@ -584,6 +612,18 @@ export async function sendGroupMessageWithAttachment(
   );
 }
 
+export function sendGroupMessageWithAttachments(
+  token: string,
+  groupId: string,
+  body: string,
+  files: File[],
+  replyToMessageId?: string | null
+) {
+  return uploadMessageWithAttachments<OfficeChatMessage>(
+    `/api/groups/${groupId}/messages/with-attachments`, token, body, files, replyToMessageId
+  );
+}
+
 export function editGroupMessage(token: string, groupId: string, messageId: string, body: string) {
   return apiFetch<OfficeChatMessage>(`/api/groups/${groupId}/messages/${messageId}`, token, {
     method: "PATCH",
@@ -666,6 +706,24 @@ export function sendDirectMessageWithAttachment(
     token,
     body,
     file,
+    replyToMessageId,
+    signal
+  );
+}
+
+export function sendDirectMessageWithAttachments(
+  token: string,
+  conversationId: string,
+  body: string,
+  files: File[],
+  signal?: AbortSignal,
+  replyToMessageId?: string | null
+) {
+  return uploadMessageWithAttachments<OfficeChatDirectMessage>(
+    `/api/direct/conversations/${conversationId}/messages/with-attachments`,
+    token,
+    body,
+    files,
     replyToMessageId,
     signal
   );
@@ -772,6 +830,17 @@ export function sendDiscussionMessageWithAttachment(
     token,
     body,
     file
+  );
+}
+
+export function sendDiscussionMessageWithAttachments(
+  token: string,
+  discussionId: string,
+  body: string,
+  files: File[]
+) {
+  return uploadMessageWithAttachments<OfficeChatDiscussionMessage>(
+    `/api/discussions/${discussionId}/messages/with-attachments`, token, body, files
   );
 }
 

@@ -30,7 +30,9 @@ docker compose up -d --build
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_DISPLAY_NAME`
 - `MESSAGE_MAX_LENGTH`
-- `MAX_UPLOAD_SIZE_MB`
+- `ATTACHMENT_MAX_UPLOAD_SIZE_MB`
+- `ATTACHMENT_MAX_FILES_PER_MESSAGE`
+- `ATTACHMENT_MAX_TOTAL_SIZE_MB`
 - `ALLOWED_UPLOAD_EXTENSIONS`
 - `UPLOADS_DIR`
 
@@ -73,9 +75,9 @@ WebSocket-подключение для онлайн-обновлений соо
 /data/uploads
 ```
 
-Upload endpoints: `POST /api/groups/{groupId}/messages/with-attachment`, `POST /api/direct/conversations/{conversationId}/messages/with-attachment` и `POST /api/discussions/{discussionId}/messages/with-attachment`. Защищённые download endpoints находятся в соответствующих `/attachments/{attachmentId}/download` и требуют membership в нужном контексте.
+Plural upload endpoints: `POST /api/groups/{groupId}/messages/with-attachments`, `POST /api/direct/conversations/{conversationId}/messages/with-attachments` и `POST /api/discussions/{discussionId}/messages/with-attachments`. Поле `files` повторяется. Старые `/with-attachment` endpoints остаются совместимыми. Download требует membership в нужном контексте.
 
-По умолчанию разрешены расширения `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`, лимит размера - `25` MB. Текстовые и конфигурационные файлы принимают распространённые MIME-варианты и `application/octet-stream`, но extension allowlist остаётся обязательным. Форматы `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` всегда заблокированы. Volume `/data/uploads` необходимо включать в backup. Antivirus scanning, S3, PDF/document previews, backend thumbnails, drag-and-drop и retention cleanup пока не реализованы.
+По умолчанию разрешены расширения `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`. Лимиты: `ATTACHMENT_MAX_UPLOAD_SIZE_MB=25` на файл, `ATTACHMENT_MAX_FILES_PER_MESSAGE=10`, `ATTACHMENT_MAX_TOTAL_SIZE_MB=50`. MIME `application/octet-stream` допустим при разрешённом extension. Executable/script denylist остаётся обязательным. Volume `/data/uploads` включается в backup. Antivirus scanning, S3, resumable uploads и backend thumbnails пока не реализованы.
 
 Frontend показывает PNG/JPEG/WebP inline через authenticated Blob fetch; обычный `<img src="protected-url">` не используется, token в URL не добавляется. MIME ответа проверяется повторно, object URLs освобождаются. SVG, PDF и документы не preview-ятся. Backend thumbnails и image compression пока отсутствуют.
 

@@ -38,6 +38,7 @@ class Message(Base):
     attachments: Mapped[list["MessageAttachment"]] = relationship(
         back_populates="message",
         cascade="all, delete-orphan",
+        order_by="MessageAttachment.sort_order",
     )
     mentions: Mapped[list["MessageMention"]] = relationship(
         back_populates="message",

@@ -10,7 +10,7 @@ type DragDropAttachmentOptions = {
   emptyFileError: string;
   failedReadError: string;
   folderError: string;
-  onDropFile: (file: File) => void;
+  onDropFiles: (files: File[]) => void;
   onError: (message: string) => void;
 };
 
@@ -22,7 +22,7 @@ export function useDragDropAttachment({
   emptyFileError,
   failedReadError,
   folderError,
-  onDropFile,
+  onDropFiles,
   onError
 }: DragDropAttachmentOptions) {
   const dragDepthRef = useRef(0);
@@ -80,26 +80,23 @@ export function useDragDropAttachment({
     event.stopPropagation();
     resetDragState();
 
-    const firstFileItem = Array.from(event.dataTransfer.items).find((item) => item.kind === "file") as
-      | DropFileItem
-      | undefined;
-    if (firstFileItem?.webkitGetAsEntry?.()?.isDirectory) {
+    const fileItems = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file") as DropFileItem[];
+    if (fileItems.some((item) => item.webkitGetAsEntry?.()?.isDirectory)) {
       onError(folderError);
       return;
     }
 
-    const file = event.dataTransfer.files[0] ?? firstFileItem?.getAsFile();
-    if (!file) {
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length === 0) {
       onError(failedReadError);
       return;
     }
-    if (file.size === 0) {
+    if (files.some((file) => file.size === 0)) {
       onError(emptyFileError);
       return;
     }
 
-    onError("");
-    onDropFile(file);
+    onDropFiles(files);
   }
 
   return {

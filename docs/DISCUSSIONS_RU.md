@@ -55,6 +55,7 @@ DELETE /api/discussions/{discussion_id}/members/{member_id}
 GET /api/discussions/{discussion_id}/messages
 POST /api/discussions/{discussion_id}/messages
 POST /api/discussions/{discussion_id}/messages/with-attachment
+POST /api/discussions/{discussion_id}/messages/with-attachments
 GET /api/discussions/{discussion_id}/attachments/{attachment_id}/download
 PATCH /api/discussions/{discussion_id}/messages/{message_id}
 DELETE /api/discussions/{discussion_id}/messages/{message_id}
@@ -101,11 +102,11 @@ WS /api/ws/discussions/{discussion_id}?token=...
 
 Созданное сообщение передаёт attachment metadata в REST, discussion WebSocket и персональный WebSocket. Содержимое файла через WebSocket не отправляется. Скачать файл может только участник соответствующего discussion.
 
-Discussion composer поддерживает вставку PNG/JPEG/WebP screenshot через `Ctrl+V`. Изображение получает безопасное имя и thumbnail; при уже выбранном файле оно заменяет единственное вложение v0.1.
+Discussion composer поддерживает multiple file picker, multi-file drop и добавление PNG/JPEG/WebP screenshot через `Ctrl+V`. Каждый файл можно удалить до отправки.
 
-Desktop drag-and-drop работает внутри discussion panel и не расширяет её. Drop выбирает первый файл, сохраняет текст composer и заменяет ранее выбранное единственное вложение.
+Desktop drag-and-drop работает внутри discussion panel и не расширяет её. Drop добавляет все допустимые файлы, включая non-image форматы, сохраняя текст composer.
 
-Отправленные PNG/JPEG/WebP загружаются через защищённый discussion endpoint и показываются inline в узкой боковой панели без её расширения. Клик открывает viewport-constrained lightbox; SVG и документы остаются обычными файлами.
+Отправленные PNG/JPEG/WebP показываются compact gallery без расширения панели. Lightbox поддерживает навигацию; SVG и документы остаются защищёнными file rows.
 
 ## Ограничения v0.1
 

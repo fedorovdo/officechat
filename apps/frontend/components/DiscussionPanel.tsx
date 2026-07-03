@@ -17,7 +17,7 @@ import {
   removeDiscussionMember,
   removeDiscussionMessageReaction,
   sendDiscussionMessage,
-  sendDiscussionMessageWithAttachment,
+  sendDiscussionMessageWithAttachments,
   type DiscussionEvent,
   type OfficeChatDiscussion,
   type OfficeChatDiscussionMessage,
@@ -25,9 +25,9 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
-import { useClipboardAttachment } from "../hooks/useClipboardAttachment";
+import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
-import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
+import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
 import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
@@ -61,27 +61,31 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const {
-    clearAttachment,
+    appendFiles,
+    attachments,
+    clearAttachments,
+    feedback,
     handlePaste,
-    isClipboardImage,
-    pasteFeedback,
-    previewUrl,
-    selectFile,
-    selectDroppedFile,
-    selectedFile
-  } = useClipboardAttachment({
+    removeAttachment,
+    selectedFiles,
+    totalSize
+  } = useComposerAttachments({
+    emptyFileError: dictionary.messages.emptyFileNotAllowed,
     onAfterTextInsert: resizeComposer,
+    onError: setError,
     onTextChange: setMessageBody,
     pastedMessage: dictionary.messages.clipboardImagePasted,
-    replacedMessage: dictionary.messages.clipboardAttachmentReplaced,
     textareaRef: composerTextareaRef,
-    textValue: messageBody
+    textValue: messageBody,
+    tooManyFilesError: dictionary.messages.tooManyFiles,
+    totalSizeError: dictionary.messages.totalAttachmentSizeTooLarge,
+    unsupportedFileError: dictionary.messages.unsupportedFileType
   });
   const { dropZoneProps, isFileDragging } = useDragDropAttachment({
     emptyFileError: dictionary.messages.emptyFileNotAllowed,
     failedReadError: dictionary.messages.droppedFileReadError,
     folderError: dictionary.messages.folderAttachmentError,
-    onDropFile: (file) => selectDroppedFile(file, dictionary.messages.droppedAttachmentReplaced),
+    onDropFiles: (files) => appendFiles(files),
     onError: setError
   });
 
@@ -112,7 +116,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
 
   useEffect(() => {
     setMessageBody("");
-    clearAttachment();
+    clearAttachments();
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [discussionId]);
 
@@ -227,7 +231,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSending || (!messageBody.trim() && !selectedFile)) {
+    if (isSending || (!messageBody.trim() && selectedFiles.length === 0)) {
       return;
     }
     const token = getStoredAccessToken();
@@ -239,21 +243,21 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
     setSuccess("");
     setIsSending(true);
     try {
-      if (selectedFile) {
-        await sendDiscussionMessageWithAttachment(token, discussionId, messageBody, selectedFile);
+      if (selectedFiles.length > 0) {
+        await sendDiscussionMessageWithAttachments(token, discussionId, messageBody, selectedFiles);
       } else {
         await sendDiscussionMessage(token, discussionId, messageBody);
       }
       setMessageBody("");
       setEmojiPickerResetKey((current) => current + 1);
-      clearAttachment();
+      clearAttachments();
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (composerTextareaRef.current) composerTextareaRef.current.style.height = "42px";
       setMessages(await getDiscussionMessages(token, discussionId));
       setSuccess(dictionary.discussions.sendSuccess);
     } catch (caughtError) {
       setError(
-        selectedFile
+        selectedFiles.length > 0
           ? getAttachmentUploadError(caughtError, dictionary)
           : caughtError instanceof Error
             ? caughtError.message
@@ -371,7 +375,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       !event.shiftKey &&
       !event.nativeEvent.isComposing &&
       !isSending &&
-      (messageBody.trim() || selectedFile)
+      (messageBody.trim() || selectedFiles.length > 0)
     ) {
       event.preventDefault();
       composeFormRef.current?.requestSubmit();
@@ -536,33 +540,35 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       </section>
 
       <form className="admin-form discussion-compose" onSubmit={handleSendMessage} ref={composeFormRef}>
-        {selectedFile ? (
-          <ComposerAttachmentPreview
+        {attachments.length > 0 ? (
+          <ComposerAttachmentsPreview
+            attachments={attachments}
             dictionary={dictionary}
-            file={selectedFile}
-            isClipboardImage={isClipboardImage}
-            onRemove={() => {
-              clearAttachment();
-              if (fileInputRef.current) fileInputRef.current.value = "";
-            }}
-            pasteFeedback={pasteFeedback}
-            previewUrl={previewUrl}
+            feedback={feedback}
+            onClear={clearAttachments}
+            onRemove={removeAttachment}
+            totalSize={totalSize}
           />
         ) : null}
         <div className="discussion-composer-row">
           <input
             className="visually-hidden"
-            onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
+            accept={COMPOSER_FILE_ACCEPT}
+            multiple
+            onChange={(event) => {
+              appendFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
             ref={fileInputRef}
             tabIndex={-1}
             type="file"
           />
           <button
-            aria-label={dictionary.appShell.attachFile}
+            aria-label={dictionary.messages.attachFiles}
             className="composer-icon-button"
             disabled={isSending}
             onClick={() => fileInputRef.current?.click()}
-            title={dictionary.appShell.attachFile}
+            title={dictionary.messages.attachFiles}
             type="button"
           >
             📎
@@ -590,12 +596,12 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
             }}
             placeholder={dictionary.discussions.message}
             ref={composerTextareaRef}
-            required={!selectedFile}
+            required={selectedFiles.length === 0}
             rows={1}
             title={dictionary.messages.clipboardPasteTitle}
             value={messageBody}
           />
-          <button className="composer-send-button" disabled={isSending || (!messageBody.trim() && !selectedFile)} type="submit">
+          <button className="composer-send-button" disabled={isSending || (!messageBody.trim() && selectedFiles.length === 0)} type="submit">
             {isSending ? dictionary.messages.sending : dictionary.messages.send}
           </button>
         </div>

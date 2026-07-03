@@ -22,6 +22,7 @@ POST /api/direct/conversations
 GET /api/direct/conversations/{conversation_id}/messages
 POST /api/direct/conversations/{conversation_id}/messages
 POST /api/direct/conversations/{conversation_id}/messages/with-attachment
+POST /api/direct/conversations/{conversation_id}/messages/with-attachments
 GET /api/direct/conversations/{conversation_id}/attachments/{attachment_id}/download
 PATCH /api/direct/conversations/{conversation_id}/messages/{message_id}
 DELETE /api/direct/conversations/{conversation_id}/messages/{message_id}
@@ -68,11 +69,11 @@ DELETE /api/direct/conversations/{conversation_id}/messages/{message_id}
 
 ## Вложения
 
-Direct composer принимает текст с файлом или только файл. Multipart endpoint поддерживает `file`, необязательный `body` и необязательный `reply_to_message_id`. Скачивание доступно только двум участникам разговора; административная роль не даёт доступа к чужому файлу. WebSocket `direct.message.created` и персональное событие содержат только metadata вложения, без содержимого файла.
+Direct composer принимает текст, один или несколько файлов либо file-only сообщение. Plural multipart endpoint использует повторяемое поле `files`, необязательные `body` и `reply_to_message_id`; single-file endpoint сохранён. Скачивание доступно только двум участникам разговора. WebSocket содержит массив metadata без file bytes.
 
-Скриншот PNG/JPEG/WebP можно вставить в direct composer через `Ctrl+V`, в том числе вместе с текстом или reply. Показываются thumbnail, безопасное timestamp-имя и размер. В v0.1 доступно одно вложение; pasted image заменяет выбранный файл.
+Скриншот PNG/JPEG/WebP через `Ctrl+V` добавляется к выбранным файлам, сохраняя текст и reply. Composer показывает thumbnails, filenames, размеры, общий count/size и индивидуальное удаление.
 
-Любой разрешённый файл можно перетащить в активную direct chat panel. Drop выбирает файл без автоматической отправки и сохраняет введённый текст/reply; ранее выбранное вложение заменяется.
+Несколько разрешённых файлов, включая `txt`, можно перетащить в active direct panel. Drop добавляет их без отправки и сохраняет текст/reply.
 
 Отправленные PNG/JPEG/WebP отображаются inline и открываются в lightbox. Preview получает Blob через participant-only endpoint с bearer token; Download original использует тот же защищённый доступ. Ошибка preview не мешает читать сообщение или скачать файл.
 

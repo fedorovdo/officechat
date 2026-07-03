@@ -50,6 +50,7 @@ class DirectMessageReplyPreviewPublic(BaseModel):
     body_preview: str
     is_deleted: bool
     created_at: datetime
+    attachment_count: int = 0
 
     @model_validator(mode="before")
     @classmethod
@@ -58,6 +59,7 @@ class DirectMessageReplyPreviewPublic(BaseModel):
             return data
 
         body = str(getattr(data, "body", "") or "").strip()
+        attachments = getattr(data, "attachments", [])
         preview = "Message deleted" if getattr(data, "is_deleted", False) else body
         if len(preview) > REPLY_PREVIEW_MAX_LENGTH:
             preview = f"{preview[: REPLY_PREVIEW_MAX_LENGTH - 3]}..."
@@ -68,6 +70,7 @@ class DirectMessageReplyPreviewPublic(BaseModel):
             "body_preview": preview,
             "is_deleted": getattr(data, "is_deleted"),
             "created_at": getattr(data, "created_at"),
+            "attachment_count": len(attachments),
         }
 
 

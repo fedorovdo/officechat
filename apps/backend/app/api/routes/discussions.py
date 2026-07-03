@@ -24,6 +24,7 @@ from app.services.discussions import (
     can_manage_discussion_members,
     create_discussion_message,
     create_discussion_message_with_attachment,
+    create_discussion_message_with_attachments,
     create_or_get_discussion,
     delete_discussion_message,
     ensure_discussion_access,
@@ -242,6 +243,31 @@ async def post_message_with_attachment(
     try:
         message = await create_discussion_message_with_attachment(
             session, discussion, current_user, body, file
+        )
+        await broadcast_discussion_message_created(session, discussion, message)
+        return serialize_message(message, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{discussion_id}/messages/with-attachments",
+    response_model=DiscussionMessagePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_message_with_attachments(
+    discussion_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    body: Annotated[str | None, Form()] = None,
+    files: Annotated[list[UploadFile] | None, File()] = None,
+) -> DiscussionMessage:
+    discussion = await load_discussion_or_404(session, discussion_id)
+    try:
+        message = await create_discussion_message_with_attachments(
+            session, discussion, current_user, body, files or []
         )
         await broadcast_discussion_message_created(session, discussion, message)
         return serialize_message(message, current_user)

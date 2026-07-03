@@ -21,6 +21,7 @@ from app.schemas.message import MessageCreate, MessagePublic, MessageUpdate
 from app.schemas.reaction import MessageReactionPublic, ReactionChange, serialize_reactions
 from app.services.attachments import (
     create_message_with_attachment,
+    create_message_with_attachments,
     get_group_attachment,
     resolve_attachment_path,
 )
@@ -261,6 +262,29 @@ async def post_message_with_attachment(
     try:
         await ensure_group_message_access(session, group, current_user)
         message = await create_message_with_attachment(session, group, current_user, body, file, reply_to_message_id)
+        await broadcast_group_message_created(session, group, message)
+        return serialize_message(message, current_user)
+    except PermissionError as exc:
+        raise_for_permission_error(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.post("/{group_id}/messages/with-attachments", response_model=MessagePublic, status_code=status.HTTP_201_CREATED)
+async def post_message_with_attachments(
+    group_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    body: Annotated[str | None, Form()] = None,
+    reply_to_message_id: Annotated[UUID | None, Form()] = None,
+    files: Annotated[list[UploadFile] | None, File()] = None,
+):
+    group = await load_group_or_404(session, group_id)
+    try:
+        await ensure_group_message_access(session, group, current_user)
+        message = await create_message_with_attachments(
+            session, group, current_user, body, files or [], reply_to_message_id
+        )
         await broadcast_group_message_created(session, group, message)
         return serialize_message(message, current_user)
     except PermissionError as exc:

@@ -12,9 +12,9 @@ export function ComposerDropOverlay({ dictionary, visible }: ComposerDropOverlay
   return (
     <div aria-hidden="true" className="composer-drop-overlay">
       <span className="composer-drop-icon">📎</span>
-      <strong>{dictionary.messages.dropFileHere}</strong>
+      <strong>{dictionary.messages.dropFilesHere}</strong>
       <span>{dictionary.messages.dropFileDescription}</span>
-      <small>{dictionary.messages.onlyOneAttachment}</small>
+      <small>{dictionary.messages.upToFiles.replace("{count}", "10")}</small>
     </div>
   );
 }

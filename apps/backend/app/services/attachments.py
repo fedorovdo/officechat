@@ -92,7 +92,7 @@ def build_storage_subdir(storage_kind: AttachmentStorageKind, owner_id: UUID) ->
     today = datetime.now(timezone.utc)
     root = Path(settings.uploads_dir)
     if storage_kind == "group":
-        root = root / str(owner_id)
+        root = root / "groups" / str(owner_id)
     elif storage_kind == "direct":
         root = root / "direct" / str(owner_id)
     else:
@@ -100,35 +100,72 @@ def build_storage_subdir(storage_kind: AttachmentStorageKind, owner_id: UUID) ->
     return root / f"{today:%Y}" / f"{today:%m}" / f"{today:%d}"
 
 
-async def save_upload(storage_kind: AttachmentStorageKind, owner_id: UUID, upload: UploadFile) -> SavedUpload:
-    original_filename, extension, content_type = validate_upload(upload)
+async def save_uploads(
+    storage_kind: AttachmentStorageKind,
+    owner_id: UUID,
+    uploads: list[UploadFile],
+) -> list[SavedUpload]:
+    if not uploads:
+        raise ValueError("At least one attachment is required")
+    if len(uploads) > settings.attachment_max_files_per_message:
+        raise ValueError(
+            f"A message can contain at most {settings.attachment_max_files_per_message} attachments"
+        )
+
+    # Validate every filename and extension before writing any request data.
+    validated_uploads = [(upload, *validate_upload(upload)) for upload in uploads]
     upload_dir = build_storage_subdir(storage_kind, owner_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
+    saved_uploads: list[SavedUpload] = []
+    total_size_bytes = 0
 
-    stored_filename = safe_filename(extension)
-    storage_path = upload_dir / stored_filename
-    size_bytes = 0
+    try:
+        for upload, original_filename, extension, content_type in validated_uploads:
+            stored_filename = safe_filename(extension)
+            storage_path = upload_dir / stored_filename
+            size_bytes = 0
 
-    with storage_path.open("wb") as destination:
-        while chunk := await upload.read(UPLOAD_CHUNK_SIZE):
-            size_bytes += len(chunk)
-            if size_bytes > settings.max_upload_size_bytes:
-                destination.close()
+            try:
+                with storage_path.open("wb") as destination:
+                    while chunk := await upload.read(UPLOAD_CHUNK_SIZE):
+                        size_bytes += len(chunk)
+                        total_size_bytes += len(chunk)
+                        if size_bytes > settings.max_upload_size_bytes:
+                            raise ValueError(
+                                f"Uploaded file exceeds {settings.attachment_max_upload_size_mb} MB"
+                            )
+                        if total_size_bytes > settings.attachment_max_total_size_bytes:
+                            raise ValueError(
+                                "Total attachment size exceeds "
+                                f"{settings.attachment_max_total_size_mb} MB"
+                            )
+                        destination.write(chunk)
+            except BaseException:
                 storage_path.unlink(missing_ok=True)
-                raise ValueError(f"Uploaded file exceeds {settings.max_upload_size_mb} MB")
-            destination.write(chunk)
+                raise
 
-    if size_bytes == 0:
-        storage_path.unlink(missing_ok=True)
-        raise ValueError("Uploaded file cannot be empty")
+            if size_bytes == 0:
+                storage_path.unlink(missing_ok=True)
+                raise ValueError("Uploaded file cannot be empty")
 
-    return SavedUpload(
-        original_filename=original_filename,
-        stored_filename=stored_filename,
-        storage_path=str(storage_path),
-        content_type=content_type,
-        size_bytes=size_bytes,
-    )
+            saved_uploads.append(
+                SavedUpload(
+                    original_filename=original_filename,
+                    stored_filename=stored_filename,
+                    storage_path=str(storage_path),
+                    content_type=content_type,
+                    size_bytes=size_bytes,
+                )
+            )
+        return saved_uploads
+    except BaseException:
+        for saved_upload in saved_uploads:
+            remove_saved_file(saved_upload.storage_path)
+        raise
+
+
+async def save_upload(storage_kind: AttachmentStorageKind, owner_id: UUID, upload: UploadFile) -> SavedUpload:
+    return (await save_uploads(storage_kind, owner_id, [upload]))[0]
 
 
 def remove_saved_file(storage_path: str) -> None:
@@ -150,16 +187,18 @@ def resolve_attachment_path(attachment: object) -> Path:
     return attachment_path
 
 
-async def create_message_with_attachment(
+async def create_message_with_attachments(
     session: AsyncSession,
     group: Group,
     current_user: User,
     body: str | None,
-    upload: UploadFile,
+    uploads: list[UploadFile],
     reply_to_message_id: UUID | None = None,
 ) -> Message:
     normalized_body = validate_attachment_message_body(body)
-    saved_upload = await save_upload("group", group.id, upload)
+    if not normalized_body and not uploads:
+        raise ValueError("Message body or at least one attachment is required")
+    saved_uploads = await save_uploads("group", group.id, uploads) if uploads else []
 
     try:
         normalized_reply_to_message_id = None
@@ -177,8 +216,8 @@ async def create_message_with_attachment(
         session.add(message)
         await session.flush()
 
-        session.add(
-            MessageAttachment(
+        session.add_all(
+            [MessageAttachment(
                 message_id=message.id,
                 group_id=group.id,
                 uploaded_by_user_id=current_user.id,
@@ -187,16 +226,31 @@ async def create_message_with_attachment(
                 storage_path=saved_upload.storage_path,
                 content_type=saved_upload.content_type,
                 size_bytes=saved_upload.size_bytes,
-            )
+                sort_order=sort_order,
+            ) for sort_order, saved_upload in enumerate(saved_uploads)]
         )
         await sync_message_mentions(session, message)
         await session.commit()
-    except Exception:
+    except BaseException:
         await session.rollback()
-        remove_saved_file(saved_upload.storage_path)
+        for saved_upload in saved_uploads:
+            remove_saved_file(saved_upload.storage_path)
         raise
 
     return await load_message_with_sender(session, message.id)
+
+
+async def create_message_with_attachment(
+    session: AsyncSession,
+    group: Group,
+    current_user: User,
+    body: str | None,
+    upload: UploadFile,
+    reply_to_message_id: UUID | None = None,
+) -> Message:
+    return await create_message_with_attachments(
+        session, group, current_user, body, [upload], reply_to_message_id
+    )
 
 
 async def load_reply_target(session: AsyncSession, group: Group, reply_to_message_id: UUID) -> Message:

@@ -30,6 +30,7 @@ class MessageAttachment(Base):
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     message: Mapped["Message"] = relationship(back_populates="attachments")
@@ -49,6 +50,7 @@ class DirectMessageAttachment(Base):
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     direct_message: Mapped[DirectMessage] = relationship(back_populates="attachments")
@@ -73,6 +75,7 @@ class DiscussionMessageAttachment(Base):
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     discussion_message: Mapped[DiscussionMessage] = relationship(back_populates="attachments")

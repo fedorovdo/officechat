@@ -50,6 +50,12 @@ ALLOWED_UPLOAD_EXTENSIONS=txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx
 
 В v0.1 сообщение содержит только одно вложение. Если файл уже выбран, вставленное изображение заменяет его с явным уведомлением. После удаления, успешной отправки, смены чата или unmount временный object URL освобождается. Обычная вставка многострочного текста не перехватывается.
 
+## Drag-and-drop
+
+На desktop файл можно перетащить в активную панель group, direct или discussion chat. Во время file drag внутри текущего panel показывается overlay; обычный text drag не перехватывается. Drop выбирает только первый файл и не отправляет сообщение автоматически, поэтому пользователь может дописать текст или сохранить reply context.
+
+Если вложение уже выбрано, dropped file заменяет его с явным уведомлением. Папки и пустые файлы отклоняются frontend, остальные проверки повторяет backend. File picker и clipboard paste остаются доступными.
+
 ## Inline preview отправленных изображений
 
 PNG, JPEG и WebP отображаются непосредственно в group, direct и discussion messages. Frontend выполняет authenticated fetch защищённого `download_url`, повторно проверяет MIME ответа, создаёт временный Blob URL и освобождает его при unmount или смене attachment. Bearer token не попадает в image URL.
@@ -64,9 +70,7 @@ Volume uploads необходимо резервировать вместе с P
 
 - Нет antivirus scanning.
 - Нет S3/MinIO или другого object storage.
-- Нет image preview, gallery и thumbnails.
 - Нет backend thumbnail generation, image compression и gallery.
-- Нет drag-and-drop.
 - Нет нескольких вложений в одном сообщении.
 - Нет автоматической retention cleanup.
 - Боты пока не загружают файлы через incoming webhook.

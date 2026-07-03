@@ -25,7 +25,7 @@ export function ComposerAttachmentPreview({
       {previewUrl ? <img alt={file.name} className="selected-attachment-thumbnail" src={previewUrl} /> : null}
       <span className="selected-attachment-details">
         <strong>{file.name}</strong>
-        {isClipboardImage ? <small>{formatFileSize(file.size)}</small> : null}
+        <small>{formatFileSize(file.size)}</small>
         {pasteFeedback ? <small className="selected-attachment-feedback">{pasteFeedback}</small> : null}
       </span>
       <button

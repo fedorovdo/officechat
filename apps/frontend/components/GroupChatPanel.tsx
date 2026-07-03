@@ -21,7 +21,9 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { useClipboardAttachment } from "../hooks/useClipboardAttachment";
+import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
+import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
@@ -72,6 +74,7 @@ export function GroupChatPanel({
     pasteFeedback,
     previewUrl,
     selectFile,
+    selectDroppedFile,
     selectedFile
   } = useClipboardAttachment({
     onAfterTextInsert: resizeComposer,
@@ -80,6 +83,13 @@ export function GroupChatPanel({
     replacedMessage: dictionary.messages.clipboardAttachmentReplaced,
     textareaRef: composerTextareaRef,
     textValue: messageBody
+  });
+  const { dropZoneProps, isFileDragging } = useDragDropAttachment({
+    emptyFileError: dictionary.messages.emptyFileNotAllowed,
+    failedReadError: dictionary.messages.droppedFileReadError,
+    folderError: dictionary.messages.folderAttachmentError,
+    onDropFile: (file) => selectDroppedFile(file, dictionary.messages.droppedAttachmentReplaced),
+    onError: setError
   });
 
   const dateFormatter = useMemo(
@@ -441,7 +451,8 @@ export function GroupChatPanel({
   }
 
   return (
-    <section className="messages-panel" aria-label={dictionary.messages.ariaLabel}>
+    <section className="messages-panel" aria-label={dictionary.messages.ariaLabel} {...dropZoneProps}>
+      <ComposerDropOverlay dictionary={dictionary} visible={isFileDragging} />
       <div className="dashboard-header messages-toolbar">
         <div>
           <h2 className="section-title">{dictionary.messages.title}</h2>

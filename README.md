@@ -126,10 +126,10 @@ File attachments are available for group, direct, and discussion messages:
 - Upload defaults: `MAX_UPLOAD_SIZE_MB=25`.
 - Allowed extensions default to `txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip`.
 - Executable and script formats such as `exe,com,bat,cmd,ps1,msi,dll,scr,js,vbs,jar,sh,apk` remain blocked even if a browser reports a generic MIME type.
-- Antivirus scanning, previews, thumbnails, drag-and-drop, S3, and retention cleanup are not implemented yet.
+- Antivirus scanning, backend thumbnails, PDF/document previews, S3, and retention cleanup are not implemented yet.
 - The uploads volume must be included in backups together with PostgreSQL data.
 
-In group, direct, and discussion composers, desktop users can paste PNG, JPEG, or WebP screenshots directly with `Ctrl+V`. Clipboard images receive a safe timestamp filename and a local thumbnail before sending. OfficeChat currently supports one attachment per message, so a pasted image replaces any selected file. Multiple attachments and drag-and-drop remain planned.
+In group, direct, and discussion composers, desktop users can paste PNG, JPEG, or WebP screenshots with `Ctrl+V` or drag a file from the desktop into the active chat panel. A visible overlay marks the drop target; dropping selects but does not send the file. OfficeChat supports one attachment per message, so clipboard paste or drop replaces any selected file. Multiple attachments remain planned.
 
 Sent PNG, JPEG, and WebP attachments display inline in group, direct, and discussion messages. Preview bytes are fetched through the protected endpoint with the bearer token, converted to a temporary Blob URL, and never expose storage paths or tokens. Clicking the preview opens a lightweight full-screen viewer; the original authenticated download remains available. SVG, PDF, Office, text, and archive files are intentionally not rendered inline.
 

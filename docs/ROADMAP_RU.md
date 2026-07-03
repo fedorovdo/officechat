@@ -31,6 +31,7 @@
 - Локальные защищённые вложения для group, direct и discussion сообщений с едиными лимитами и WebSocket metadata.
 - Clipboard Image Paste v0.1: вставка PNG/JPEG/WebP скриншотов через `Ctrl+V` во всех трёх composer-ах с thumbnail и безопасным именем.
 - Inline Image Previews v0.1: authenticated Blob preview PNG/JPEG/WebP и lightbox для group/direct/discussion messages.
+- Drag-and-Drop Attachments v0.1: выбор первого desktop-файла через drop overlay в group/direct/discussion chats.
 
 ## Этап 2: Realtime
 
@@ -49,7 +50,7 @@
 
 - Загрузка файлов в локальный volume.
 - Ограничения размера и типа файлов.
-- Несколько вложений в одном сообщении и drag-and-drop.
+- Несколько вложений в одном сообщении.
 - Backend thumbnails, image compression и previews PDF/documents.
 - Административные настройки.
 - Audit log для важных действий.

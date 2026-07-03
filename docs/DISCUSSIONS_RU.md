@@ -103,6 +103,8 @@ WS /api/ws/discussions/{discussion_id}?token=...
 
 Discussion composer поддерживает вставку PNG/JPEG/WebP screenshot через `Ctrl+V`. Изображение получает безопасное имя и thumbnail; при уже выбранном файле оно заменяет единственное вложение v0.1.
 
+Desktop drag-and-drop работает внутри discussion panel и не расширяет её. Drop выбирает первый файл, сохраняет текст composer и заменяет ранее выбранное единственное вложение.
+
 Отправленные PNG/JPEG/WebP загружаются через защищённый discussion endpoint и показываются inline в узкой боковой панели без её расширения. Клик открывает viewport-constrained lightbox; SVG и документы остаются обычными файлами.
 
 ## Ограничения v0.1

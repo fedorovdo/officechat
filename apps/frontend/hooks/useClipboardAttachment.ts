@@ -64,6 +64,15 @@ export function useClipboardAttachment({
     setPasteFeedback("");
   }, []);
 
+  const selectDroppedFile = useCallback(
+    (file: File, droppedReplacementMessage: string) => {
+      setSelectedFileState(file);
+      setIsClipboardImage(Boolean(CLIPBOARD_IMAGE_EXTENSIONS[file.type]));
+      setPasteFeedback(selectedFile ? droppedReplacementMessage : "");
+    },
+    [selectedFile]
+  );
+
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const imageItem = Array.from(event.clipboardData.items).find(
       (item) => item.kind === "file" && Boolean(CLIPBOARD_IMAGE_EXTENSIONS[item.type])
@@ -108,6 +117,7 @@ export function useClipboardAttachment({
     pasteFeedback,
     previewUrl,
     selectFile,
+    selectDroppedFile,
     selectedFile
   };
 }

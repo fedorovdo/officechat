@@ -89,6 +89,8 @@ async def create_or_get_discussion(
     session: AsyncSession,
     payload: DiscussionCreate,
     current_user: User,
+    *,
+    commit: bool = True,
 ) -> Discussion:
     group = await get_group(session, payload.source_group_id)
     if group is None:
@@ -103,6 +105,7 @@ async def create_or_get_discussion(
 
     existing_discussion = await get_discussion_by_source_message(session, source_message.id)
     if existing_discussion is not None:
+        existing_discussion._was_created = False
         return existing_discussion
 
     discussion = Discussion(
@@ -114,8 +117,13 @@ async def create_or_get_discussion(
     session.add(discussion)
     await session.flush()
     session.add(DiscussionMember(discussion_id=discussion.id, user_id=current_user.id, role="owner"))
-    await session.commit()
-    return await load_discussion(session, discussion.id)
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
+    loaded = await load_discussion(session, discussion.id)
+    loaded._was_created = True
+    return loaded
 
 
 async def load_discussion(session: AsyncSession, discussion_id: UUID) -> Discussion:
@@ -138,6 +146,8 @@ async def add_discussion_member(
     discussion: Discussion,
     payload: DiscussionMemberCreate,
     current_user: User,
+    *,
+    commit: bool = True,
 ) -> DiscussionMember:
     if not await can_manage_discussion_members(session, discussion, current_user):
         raise PermissionError("Discussion member management access denied")
@@ -155,7 +165,10 @@ async def add_discussion_member(
 
     member = DiscussionMember(discussion_id=discussion.id, user_id=user.id, role=payload.role)
     session.add(member)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     return await load_discussion_member(session, member.id)
 
 
@@ -190,6 +203,8 @@ async def remove_discussion_member(
     discussion: Discussion,
     member: DiscussionMember,
     current_user: User,
+    *,
+    commit: bool = True,
 ) -> None:
     if not await can_manage_discussion_members(session, discussion, current_user):
         raise PermissionError("Discussion member management access denied")
@@ -197,7 +212,10 @@ async def remove_discussion_member(
         raise ValueError("Cannot remove the last discussion owner")
 
     await session.delete(member)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
 
 
 async def list_discussion_messages(

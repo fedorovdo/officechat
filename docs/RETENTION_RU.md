@@ -1,5 +1,9 @@
 # Политика хранения OfficeChat
 
+## Связь с Audit Log
+
+Изменение retention settings, dry-run и cleanup записываются и в legacy `retention_audit`, и в централизованный `audit_events`. Это сохраняет совместимость v0.1 и даёт единый admin search/export. Chat retention не удаляет `audit_events`; `AUDIT_RETENTION_DAYS` пока документирует будущую отдельную политику без автоматического удаления.
+
 Retention and Storage Management v0.1 добавляет безопасную архивацию истории и управляемое удаление содержимого файлов. По умолчанию политика выключена: `retention_enabled=false`, `active_history_days=0`, `attachment_retention_days=null`. Миграция и запуск backend не архивируют и не удаляют существующие данные.
 
 ## Архив и удаление

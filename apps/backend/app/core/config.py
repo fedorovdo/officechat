@@ -26,6 +26,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_SECRET_KEY", "JWT_SECRET"),
     )
     access_token_expire_minutes: int = 1440
+    audit_retention_days: int = 365
+    audit_max_export_rows: int = 10000
     message_max_length: int = 4000
     attachment_max_upload_size_mb: int = Field(
         default=25,

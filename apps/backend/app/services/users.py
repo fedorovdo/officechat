@@ -29,13 +29,16 @@ async def get_user_by_id(session: AsyncSession, user_id: str | UUID) -> User | N
     return result.scalar_one_or_none()
 
 
-async def authenticate_user(session: AsyncSession, username: str, password: str) -> User | None:
+async def authenticate_user(session: AsyncSession, username: str, password: str, *, commit: bool = True) -> User | None:
     user = await get_user_by_username(session, username)
     if not user or not user.is_active or not verify_password(password, user.password_hash):
         return None
 
     user.last_login_at = datetime.now(timezone.utc)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(user)
     return user
 
@@ -52,7 +55,7 @@ async def list_active_users(session: AsyncSession) -> list[User]:
     return list(result.scalars().all())
 
 
-async def create_local_user(session: AsyncSession, payload: AdminUserCreate) -> User:
+async def create_local_user(session: AsyncSession, payload: AdminUserCreate, *, commit: bool = True) -> User:
     user = User(
         username=normalize_username(payload.username),
         display_name=payload.display_name.strip(),
@@ -63,12 +66,15 @@ async def create_local_user(session: AsyncSession, payload: AdminUserCreate) -> 
         auth_provider="local",
     )
     session.add(user)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(user)
     return user
 
 
-async def update_user(session: AsyncSession, user: User, payload: AdminUserUpdate) -> User:
+async def update_user(session: AsyncSession, user: User, payload: AdminUserUpdate, *, commit: bool = True) -> User:
     update_fields = payload.model_fields_set
     if "display_name" in update_fields and payload.display_name is not None:
         user.display_name = payload.display_name.strip()
@@ -79,14 +85,20 @@ async def update_user(session: AsyncSession, user: User, payload: AdminUserUpdat
     if "is_active" in update_fields and payload.is_active is not None:
         user.is_active = payload.is_active
 
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(user)
     return user
 
 
-async def update_user_profile(session: AsyncSession, user: User, payload: UserProfileUpdate) -> User:
+async def update_user_profile(session: AsyncSession, user: User, payload: UserProfileUpdate, *, commit: bool = True) -> User:
     user.display_name = payload.display_name
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(user)
     return user
 
@@ -95,8 +107,13 @@ async def reset_local_user_password(
     session: AsyncSession,
     user: User,
     payload: AdminPasswordReset,
+    *,
+    commit: bool = True,
 ) -> User:
     user.password_hash = hash_password(payload.new_password)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(user)
     return user

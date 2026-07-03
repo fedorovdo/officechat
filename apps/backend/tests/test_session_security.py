@@ -25,9 +25,13 @@ class FakeWebSocket:
 
 
 class AuthenticationTests(unittest.IsolatedAsyncioTestCase):
+    def request(self):
+        return SimpleNamespace(client=None, state=SimpleNamespace(request_id="test-request"), url=SimpleNamespace(path="/test"), method="GET")
+
     async def test_invalid_jwt_returns_401(self):
-        with self.assertRaises(HTTPException) as raised:
-            await get_current_user("not-a-jwt", AsyncMock())
+        with patch("app.api.deps.record_audit_event_best_effort", AsyncMock()):
+            with self.assertRaises(HTTPException) as raised:
+                await get_current_user(self.request(), "not-a-jwt", AsyncMock())
         self.assertEqual(raised.exception.status_code, 401)
 
     async def test_expired_jwt_returns_401(self):
@@ -36,15 +40,16 @@ class AuthenticationTests(unittest.IsolatedAsyncioTestCase):
             settings.app_secret_key,
             algorithm="HS256",
         )
-        with self.assertRaises(HTTPException) as raised:
-            await get_current_user(token, AsyncMock())
+        with patch("app.api.deps.record_audit_event_best_effort", AsyncMock()):
+            with self.assertRaises(HTTPException) as raised:
+                await get_current_user(self.request(), token, AsyncMock())
         self.assertEqual(raised.exception.status_code, 401)
 
     async def test_valid_jwt_loads_active_user(self):
         user = SimpleNamespace(id=uuid4(), username="dmitrii", role="user", is_active=True)
         token = create_access_token(user.id, user.username, user.role)
         with patch("app.api.deps.get_user_by_id", AsyncMock(return_value=user)):
-            result = await get_current_user(token, AsyncMock())
+            result = await get_current_user(self.request(), token, AsyncMock())
         self.assertIs(result, user)
 
     async def test_websocket_invalid_token_closes_with_4401(self):
@@ -142,6 +147,7 @@ class ErrorResponseTests(unittest.IsolatedAsyncioTestCase):
         headers = dict(start["headers"])
         self.assertEqual(start["status"], 500)
         self.assertEqual(headers.get(b"access-control-allow-origin"), b"http://localhost:3100")
+        self.assertRegex(headers.get(b"x-request-id", b"").decode(), r"^[0-9a-f-]{36}$")
 
 
 if __name__ == "__main__":

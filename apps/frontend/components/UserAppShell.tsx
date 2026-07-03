@@ -1522,6 +1522,14 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   >
                     S
                   </Link>
+                  <Link
+                    aria-label={dictionary.audit.title}
+                    className="sidebar-icon-button"
+                    href={`/${locale}/admin/audit`}
+                    title={dictionary.audit.title}
+                  >
+                    L
+                  </Link>
                 </>
               ) : null}
               <button

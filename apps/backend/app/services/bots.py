@@ -46,7 +46,9 @@ async def list_bots(session: AsyncSession) -> list[Bot]:
     return list(result.scalars().all())
 
 
-async def create_bot(session: AsyncSession, payload: BotCreate, current_user: User) -> tuple[Bot, str]:
+async def create_bot(
+    session: AsyncSession, payload: BotCreate, current_user: User, *, commit: bool = True
+) -> tuple[Bot, str]:
     token = generate_secure_token()
     user = User(
         username=await generate_bot_username(session, payload.name),
@@ -71,14 +73,17 @@ async def create_bot(session: AsyncSession, payload: BotCreate, current_user: Us
         created_by_user_id=current_user.id,
     )
     session.add(bot)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     loaded_bot = await load_bot_with_user(session, bot.id)
     if loaded_bot is None:
         raise RuntimeError("Created bot could not be loaded")
     return loaded_bot, token
 
 
-async def update_bot(session: AsyncSession, bot: Bot, payload: BotUpdate) -> Bot:
+async def update_bot(session: AsyncSession, bot: Bot, payload: BotUpdate, *, commit: bool = True) -> Bot:
     update_fields = payload.model_fields_set
     if "name" in update_fields and payload.name is not None:
         bot.name = payload.name.strip()
@@ -89,18 +94,24 @@ async def update_bot(session: AsyncSession, bot: Bot, payload: BotUpdate) -> Bot
         bot.is_active = payload.is_active
         bot.user.is_active = payload.is_active
 
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     loaded_bot = await load_bot_with_user(session, bot.id)
     if loaded_bot is None:
         raise RuntimeError("Updated bot could not be loaded")
     return loaded_bot
 
 
-async def rotate_bot_token(session: AsyncSession, bot: Bot) -> tuple[Bot, str]:
+async def rotate_bot_token(session: AsyncSession, bot: Bot, *, commit: bool = True) -> tuple[Bot, str]:
     token = generate_secure_token()
     bot.token_hash = hash_token(token)
     bot.token_preview = token_preview(token)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     loaded_bot = await load_bot_with_user(session, bot.id)
     if loaded_bot is None:
         raise RuntimeError("Updated bot could not be loaded")

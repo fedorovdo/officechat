@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ from app.services.discussions import (
     update_discussion_message,
 )
 from app.services.attachments import resolve_attachment_path
+from app.services.audit import record_audit_event
 from app.services.personal_notifications import (
     broadcast_discussion_message_created,
     discussion_message_event_payload,
@@ -87,11 +88,21 @@ async def serialize_discussion(
 @router.post("", response_model=DiscussionPublic)
 async def post_discussion(
     payload: DiscussionCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> DiscussionPublic:
     try:
-        discussion = await create_or_get_discussion(session, payload, current_user)
+        discussion = await create_or_get_discussion(session, payload, current_user, commit=False)
+        if getattr(discussion, "_was_created", False):
+            await record_audit_event(
+                session, event_type="discussion.created", category="discussions", action="create", status="success",
+                actor=current_user, target_type="discussion", target_id=discussion.id,
+                target_label=discussion.title or str(discussion.id),
+                details={"source_group_id": discussion.source_group_id,
+                         "source_message_id": discussion.source_message_id}, request=request,
+            )
+            await session.commit()
         return await serialize_discussion(session, discussion, current_user)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -140,12 +151,20 @@ async def get_discussion_by_id(
 async def post_member(
     discussion_id: UUID,
     payload: DiscussionMemberCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> DiscussionMember:
     discussion = await load_discussion_or_404(session, discussion_id)
     try:
-        member = await add_discussion_member(session, discussion, payload, current_user)
+        member = await add_discussion_member(session, discussion, payload, current_user, commit=False)
+        await record_audit_event(
+            session, event_type="discussion.member_added", category="discussions", action="add_member",
+            status="success", actor=current_user, target_type="discussion", target_id=discussion.id,
+            target_label=discussion.title or str(discussion.id),
+            details={"member_username": member.user.username, "role": member.role}, request=request,
+        )
+        await session.commit()
         await discussion_websocket_manager.broadcast_to_discussion(
             discussion.id,
             {
@@ -170,6 +189,7 @@ async def post_member(
 async def delete_member(
     discussion_id: UUID,
     member_id: UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
@@ -179,7 +199,16 @@ async def delete_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Discussion member not found")
 
     try:
-        await remove_discussion_member(session, discussion, member, current_user)
+        member_username = member.user.username
+        member_role = member.role
+        await remove_discussion_member(session, discussion, member, current_user, commit=False)
+        await record_audit_event(
+            session, event_type="discussion.member_removed", category="discussions", action="remove_member",
+            status="success", actor=current_user, target_type="discussion", target_id=discussion.id,
+            target_label=discussion.title or str(discussion.id),
+            details={"member_username": member_username, "role": member_role}, request=request,
+        )
+        await session.commit()
         await discussion_websocket_manager.broadcast_to_discussion(
             discussion.id,
             {

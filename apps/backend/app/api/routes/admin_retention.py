@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_admin_user
@@ -34,26 +34,29 @@ async def get_settings(
 @router.patch("/retention/settings", response_model=RetentionSettingsPublic)
 async def patch_settings(
     payload: RetentionSettingsUpdate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin_user)],
 ) -> RetentionSettingsPublic:
     current = await get_retention_settings(session)
-    updated = await update_retention_settings(session, current, payload, current_user)
+    updated = await update_retention_settings(session, current, payload, current_user, request)
     return RetentionSettingsPublic.model_validate(updated)
 
 
 @router.post("/retention/dry-run", response_model=RetentionRunResult)
 async def post_dry_run(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin_user)],
 ) -> RetentionRunResult:
     current = await get_retention_settings(session)
-    return await audit_dry_run(session, current, current_user)
+    return await audit_dry_run(session, current, current_user, request)
 
 
 @router.post("/retention/run", response_model=RetentionRunResult)
 async def post_run(
     payload: RetentionRunRequest,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin_user)],
 ) -> RetentionRunResult:
@@ -64,7 +67,7 @@ async def post_run(
         )
     current = await get_retention_settings(session)
     try:
-        return await run_retention_cleanup(session, current, current_user)
+        return await run_retention_cleanup(session, current, current_user, request)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RuntimeError as exc:

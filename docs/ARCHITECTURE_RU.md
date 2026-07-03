@@ -1,5 +1,11 @@
 # Архитектура OfficeChat
 
+## Audit subsystem
+
+Централизованный `AuditEvent` хранится в PostgreSQL отдельно от chat messages и legacy `retention_audit`. Route/service boundary добавляет успешные admin events в ту же транзакцию, что и изменение данных. Неуспешные authentication/security events используют короткую отдельную session и rate-limited best-effort запись. Request ID middleware связывает HTTP response, server logs и audit event.
+
+Audit subsystem не зависит от Valkey и не очищается chat retention policy. Все `details` проходят рекурсивный sanitizer до записи.
+
 Retention subsystem использует singleton `retention_settings`, audit table и archive metadata на group/direct/discussion message tables. Attachment metadata сохраняется после удаления physical file. В v0.1 cleanup запускается только вручную: backend startup и миграции никогда не запускают retention jobs.
 
 OfficeChat строится как monorepo с отдельными приложениями backend и frontend.

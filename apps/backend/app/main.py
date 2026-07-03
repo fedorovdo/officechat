@@ -5,7 +5,7 @@ from app.api.routes import api_router
 from app.api.routes.health import router as health_router
 from app.core.config import settings
 from app.core.logging import configure_sensitive_log_redaction
-from app.core.middleware import UnexpectedErrorMiddleware
+from app.core.middleware import RequestIdMiddleware, UnexpectedErrorMiddleware
 from app.services.bootstrap import bootstrap_superadmin
 
 
@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestIdMiddleware)
 
     app.include_router(health_router)
     app.include_router(api_router, prefix="/api")

@@ -1,5 +1,9 @@
 # Auth Foundation OfficeChat
 
+## События аутентификации
+
+Журнал аудита записывает `auth.login.succeeded`, `auth.login.failed`, `auth.logout`, `auth.session.expired` и `security.invalid_token`. Пароль и JWT не сохраняются; для rate-limited диагностики недействительного JWT используется только первые 12 hex-символов SHA-256 fingerprint.
+
 ## Усиление сессий v0.1
 
 Frontend централизованно обрабатывает истёкший или недействительный JWT. Ответ `401` удаляет только `officechat.access_token`, останавливает polling и WebSocket reconnect, затем выполняет переход через `window.location.replace` на локализованный `/ru/login` или `/en/login`. Ответ `403` означает недостаток прав и не завершает сессию. Сетевые ошибки и ответы `500` также не удаляют действующий токен.

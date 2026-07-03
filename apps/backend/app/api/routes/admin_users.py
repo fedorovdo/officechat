@@ -1,13 +1,14 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_admin_user
 from app.models.user import User
 from app.schemas.user import AdminPasswordReset, AdminUserCreate, AdminUserUpdate, UserPublic
+from app.services.audit import record_audit_event
 from app.services.users import (
     create_local_user,
     get_user_by_id,
@@ -30,6 +31,7 @@ async def get_users(
 @router.post("", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: AdminUserCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin_user)],
 ) -> User:
@@ -40,7 +42,15 @@ async def create_user(
         )
 
     try:
-        return await create_local_user(session, payload)
+        user = await create_local_user(session, payload, commit=False)
+        await record_audit_event(
+            session, event_type="user.created", category="users", action="create", status="success",
+            actor=current_user, target_type="user", target_id=user.id, target_label=user.username,
+            details={"role": user.role, "is_active": user.is_active, "auth_provider": user.auth_provider}, request=request,
+        )
+        await session.commit()
+        await session.refresh(user)
+        return user
     except IntegrityError as exc:
         await session.rollback()
         raise HTTPException(
@@ -53,6 +63,7 @@ async def create_user(
 async def patch_user(
     user_id: UUID,
     payload: AdminUserUpdate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin_user)],
 ) -> User:
@@ -78,8 +89,35 @@ async def patch_user(
             detail="Users cannot disable their own account",
         )
 
+    before = {field: getattr(target_user, field) for field in ("display_name", "email", "role", "is_active")}
     try:
-        return await update_user(session, target_user, payload)
+        updated = await update_user(session, target_user, payload, commit=False)
+        changes = {
+            field: {"old": before[field], "new": getattr(updated, field)}
+            for field in before
+            if before[field] != getattr(updated, field)
+        }
+        await record_audit_event(
+            session, event_type="user.updated", category="users", action="update", status="success",
+            actor=current_user, target_type="user", target_id=updated.id, target_label=updated.username,
+            details={"changes": changes}, request=request,
+        )
+        if "role" in changes:
+            await record_audit_event(
+                session, event_type="user.role_changed", category="users", action="change_role", status="success",
+                actor=current_user, target_type="user", target_id=updated.id, target_label=updated.username,
+                details={"changes": {"role": changes["role"]}}, request=request,
+            )
+        if "is_active" in changes:
+            await record_audit_event(
+                session, event_type="user.enabled" if updated.is_active else "user.disabled", category="users",
+                action="enable" if updated.is_active else "disable", status="success", actor=current_user,
+                target_type="user", target_id=updated.id, target_label=updated.username,
+                details={"changes": {"is_active": changes["is_active"]}}, request=request,
+            )
+        await session.commit()
+        await session.refresh(updated)
+        return updated
     except IntegrityError as exc:
         await session.rollback()
         raise HTTPException(
@@ -92,6 +130,7 @@ async def patch_user(
 async def reset_password(
     user_id: UUID,
     payload: AdminPasswordReset,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin_user)],
 ) -> User:
@@ -111,4 +150,12 @@ async def reset_password(
             detail="Admin cannot reset superadmin passwords",
         )
 
-    return await reset_local_user_password(session, target_user, payload)
+    updated = await reset_local_user_password(session, target_user, payload, commit=False)
+    await record_audit_event(
+        session, event_type="user.password_reset", category="users", action="reset_password", status="success",
+        actor=current_user, target_type="user", target_id=updated.id, target_label=updated.username,
+        details={"password_reset": True}, request=request,
+    )
+    await session.commit()
+    await session.refresh(updated)
+    return updated

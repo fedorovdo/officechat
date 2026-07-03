@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ from app.services.attachments import (
     get_group_attachment,
     resolve_attachment_path,
 )
+from app.services.audit import record_audit_event
 from app.services.groups import (
     add_group_member,
     create_group,
@@ -85,6 +86,7 @@ async def list_groups(
 @router.post("", response_model=GroupPublic, status_code=status.HTTP_201_CREATED)
 async def post_group(
     payload: GroupCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Group:
@@ -92,7 +94,15 @@ async def post_group(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
     try:
-        return await create_group(session, payload, current_user)
+        group = await create_group(session, payload, current_user, commit=False)
+        await record_audit_event(
+            session, event_type="group.created", category="groups", action="create", status="success",
+            actor=current_user, target_type="group", target_id=group.id, target_label=group.name,
+            details={"slug": group.slug, "is_private": group.is_private, "is_active": group.is_active}, request=request,
+        )
+        await session.commit()
+        await session.refresh(group)
+        return group
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except IntegrityError as exc:
@@ -118,6 +128,7 @@ async def get_group_by_id(
 async def patch_group(
     group_id: UUID,
     payload: GroupUpdate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Group:
@@ -126,7 +137,23 @@ async def patch_group(
         await ensure_group_manageable(session, group, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
-    return await update_group(session, group, payload)
+    before = {field: getattr(group, field) for field in ("name", "description", "is_private", "is_active")}
+    updated = await update_group(session, group, payload, commit=False)
+    changes = {
+        field: {"old": before[field], "new": getattr(updated, field)}
+        for field in before if before[field] != getattr(updated, field)
+    }
+    event_type = "group.restored" if "is_active" in changes and updated.is_active else (
+        "group.archived" if "is_active" in changes else "group.updated"
+    )
+    await record_audit_event(
+        session, event_type=event_type, category="groups", action="update", status="success",
+        actor=current_user, target_type="group", target_id=updated.id, target_label=updated.name,
+        details={"slug": updated.slug, "changes": changes}, request=request,
+    )
+    await session.commit()
+    await session.refresh(updated)
+    return updated
 
 
 @router.get("/{group_id}/members", response_model=list[GroupMemberPublic])
@@ -147,13 +174,22 @@ async def get_members(
 async def post_member(
     group_id: UUID,
     payload: GroupMemberCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> GroupMember:
     group = await load_group_or_404(session, group_id)
     try:
         await ensure_group_manageable(session, group, current_user)
-        return await add_group_member(session, group, payload)
+        member = await add_group_member(session, group, payload, commit=False)
+        await record_audit_event(
+            session, event_type="group.member_added", category="groups", action="add_member", status="success",
+            actor=current_user, target_type="group", target_id=group.id, target_label=group.name,
+            details={"group_slug": group.slug, "member_username": member.user.username, "group_role": member.role},
+            request=request,
+        )
+        await session.commit()
+        return member
     except PermissionError as exc:
         raise_for_permission_error(exc)
     except LookupError as exc:
@@ -170,6 +206,7 @@ async def patch_member(
     group_id: UUID,
     member_id: UUID,
     payload: GroupMemberUpdate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> GroupMember:
@@ -184,7 +221,16 @@ async def patch_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group member not found")
 
     try:
-        return await update_group_member(session, member, payload)
+        old_role = member.role
+        updated = await update_group_member(session, member, payload, commit=False)
+        await record_audit_event(
+            session, event_type="group.member_role_changed", category="groups", action="change_member_role",
+            status="success", actor=current_user, target_type="group", target_id=group.id, target_label=group.name,
+            details={"group_slug": group.slug, "member_username": updated.user.username,
+                     "role": {"old": old_role, "new": updated.role}}, request=request,
+        )
+        await session.commit()
+        return updated
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -193,6 +239,7 @@ async def patch_member(
 async def delete_member(
     group_id: UUID,
     member_id: UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
@@ -207,7 +254,16 @@ async def delete_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group member not found")
 
     try:
-        await remove_group_member(session, member)
+        member_username = member.user.username
+        member_role = member.role
+        await remove_group_member(session, member, commit=False)
+        await record_audit_event(
+            session, event_type="group.member_removed", category="groups", action="remove_member", status="success",
+            actor=current_user, target_type="group", target_id=group.id, target_label=group.name,
+            details={"group_slug": group.slug, "member_username": member_username, "group_role": member_role},
+            request=request,
+        )
+        await session.commit()
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

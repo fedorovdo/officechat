@@ -1,5 +1,11 @@
 # Roadmap OfficeChat
 
+## Audit Log v0.1
+
+- Добавлены централизованные admin/security events, фильтры, детали и CSV export.
+- Audit events отделены от chat retention и пока не удаляются автоматически.
+- В будущем: подтверждаемая audit retention cleanup, trusted proxy configuration, внешний SIEM/syslog export и tamper-evident signing.
+
 ## Session hardening
 
 - Реализована централизованная обработка `401`, локализованный возврат к login, остановка polling/WebSocket и безопасный локальный logout.

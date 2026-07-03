@@ -85,7 +85,9 @@ async def ensure_group_manageable(session: AsyncSession, group: Group, current_u
         raise PermissionError("Group owner role required")
 
 
-async def create_group(session: AsyncSession, payload: GroupCreate, current_user: User) -> Group:
+async def create_group(
+    session: AsyncSession, payload: GroupCreate, current_user: User, *, commit: bool = True
+) -> Group:
     group = Group(
         name=payload.name.strip(),
         slug=normalize_slug(payload.slug),
@@ -100,12 +102,15 @@ async def create_group(session: AsyncSession, payload: GroupCreate, current_user
     if current_user.role != "bot":
         session.add(GroupMember(group_id=group.id, user_id=current_user.id, role="owner"))
 
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(group)
     return group
 
 
-async def update_group(session: AsyncSession, group: Group, payload: GroupUpdate) -> Group:
+async def update_group(session: AsyncSession, group: Group, payload: GroupUpdate, *, commit: bool = True) -> Group:
     update_fields = payload.model_fields_set
     if "name" in update_fields and payload.name is not None:
         group.name = payload.name.strip()
@@ -116,7 +121,10 @@ async def update_group(session: AsyncSession, group: Group, payload: GroupUpdate
     if "is_active" in update_fields and payload.is_active is not None:
         group.is_active = payload.is_active
 
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(group)
     return group
 
@@ -147,6 +155,8 @@ async def add_group_member(
     session: AsyncSession,
     group: Group,
     payload: GroupMemberCreate,
+    *,
+    commit: bool = True,
 ) -> GroupMember:
     user = None
     if payload.user_id is not None:
@@ -161,7 +171,10 @@ async def add_group_member(
 
     member = GroupMember(group_id=group.id, user_id=user.id, role=payload.role)
     session.add(member)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(member)
 
     result = await session.execute(
@@ -175,12 +188,17 @@ async def update_group_member(
     session: AsyncSession,
     member: GroupMember,
     payload: GroupMemberUpdate,
+    *,
+    commit: bool = True,
 ) -> GroupMember:
     if member.role == "owner" and payload.role != "owner" and await count_group_owners(session, member.group_id) <= 1:
         raise ValueError("Cannot remove the last group owner")
 
     member.role = payload.role
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(member)
 
     result = await session.execute(
@@ -199,9 +217,12 @@ async def get_group_member(session: AsyncSession, group_id: UUID, member_id: UUI
     return result.scalar_one_or_none()
 
 
-async def remove_group_member(session: AsyncSession, member: GroupMember) -> None:
+async def remove_group_member(session: AsyncSession, member: GroupMember, *, commit: bool = True) -> None:
     if member.role == "owner" and await count_group_owners(session, member.group_id) <= 1:
         raise ValueError("Cannot remove the last group owner")
 
     await session.delete(member)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()

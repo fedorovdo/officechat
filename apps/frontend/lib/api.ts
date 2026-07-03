@@ -407,6 +407,44 @@ export type StorageStats = {
   oldest_archived_message_at: string | null;
 };
 
+export type AuditEvent = {
+  id: string;
+  actor_user_id: string | null;
+  actor_username: string | null;
+  actor_display_name: string | null;
+  actor_role: string | null;
+  event_type: string;
+  category: string;
+  action: string;
+  status: string;
+  target_type: string | null;
+  target_id: string | null;
+  target_label: string | null;
+  source_ip: string | null;
+  user_agent: string | null;
+  request_id: string | null;
+  details: Record<string, unknown> | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+};
+
+export type AuditEventPage = { items: AuditEvent[]; total: number; page: number; limit: number };
+export type AuditFilterOptions = { categories: string[]; statuses: string[]; event_types: string[] };
+export type AuditQuery = {
+  page?: number;
+  limit?: number;
+  date_from?: string;
+  date_to?: string;
+  actor_username?: string;
+  category?: string;
+  event_type?: string;
+  status?: string;
+  target_type?: string;
+  target_id?: string;
+  search?: string;
+};
+
 const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
 
 // TODO: Move production auth storage to secure cookies or a stronger session mechanism.
@@ -603,6 +641,36 @@ export function getAdminUsers(token: string) {
 
 export function getRetentionSettings(token: string) {
   return apiFetch<RetentionSettings>("/api/admin/retention/settings", token);
+}
+
+function buildAuditQuery(query: AuditQuery) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  return params.toString();
+}
+
+export function getAuditEvents(token: string, query: AuditQuery = {}) {
+  return apiFetch<AuditEventPage>(`/api/admin/audit/events?${buildAuditQuery(query)}`, token);
+}
+
+export function getAuditEvent(token: string, eventId: string) {
+  return apiFetch<AuditEvent>(`/api/admin/audit/events/${eventId}`, token);
+}
+
+export function getAuditFilters(token: string) {
+  return apiFetch<AuditFilterOptions>("/api/admin/audit/filters", token);
+}
+
+export async function downloadAuditCsv(token: string, query: AuditQuery = {}) {
+  const response = await authenticatedFetch(
+    `${apiBaseUrl}/api/admin/audit/export.csv?${buildAuditQuery(query)}`,
+    token,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) throw new ApiResponseError(response.status, response.statusText);
+  return response.blob();
 }
 
 export function updateRetentionSettings(token: string, payload: RetentionSettingsUpdate) {

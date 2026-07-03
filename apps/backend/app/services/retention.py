@@ -3,6 +3,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from fastapi import Request
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
@@ -22,6 +24,7 @@ from app.schemas.retention import (
     StorageMessageCounts,
     StorageStats,
 )
+from app.services.audit import record_audit_event
 from app.services.attachments import resolve_attachment_path
 
 RETENTION_SETTINGS_ID = 1
@@ -72,6 +75,7 @@ async def update_retention_settings(
     current: RetentionSettings,
     payload: RetentionSettingsUpdate,
     actor: User,
+    request: Request | None = None,
 ) -> RetentionSettings:
     old_values = settings_snapshot(current)
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -83,6 +87,11 @@ async def update_retention_settings(
         "settings.updated",
         actor.id,
         {"old": old_values, "new": settings_snapshot(current)},
+    )
+    await record_audit_event(
+        session, event_type="retention.settings_updated", category="retention", action="update_settings",
+        status="success", actor=actor, target_type="retention_settings", target_id=str(current.id),
+        target_label="retention", details={"old": old_values, "new": settings_snapshot(current)}, request=request,
     )
     await session.commit()
     await session.refresh(current)
@@ -218,6 +227,7 @@ async def run_retention_cleanup(
     session: AsyncSession,
     current: RetentionSettings,
     actor: User,
+    request: Request | None = None,
 ) -> RetentionRunResult:
     now = datetime.now(timezone.utc)
     recent_running_cleanup = (
@@ -249,6 +259,11 @@ async def run_retention_cleanup(
         current.last_cleanup_status = "running"
         current.last_cleanup_summary = None
         await record_retention_audit(session, "cleanup.started", actor.id, {"settings": settings_snapshot(current)})
+        await record_audit_event(
+            session, event_type="retention.cleanup_started", category="retention", action="cleanup",
+            status="success", actor=actor, target_type="retention_settings", target_id=str(current.id),
+            target_label="retention", details={"settings": settings_snapshot(current)}, request=request,
+        )
         await session.commit()
 
         summary = RetentionSummary()
@@ -288,6 +303,12 @@ async def run_retention_cleanup(
             actor.id,
             {"status": status, "summary": summary.model_dump()},
         )
+        await record_audit_event(
+            session, event_type="retention.cleanup_completed", category="retention", action="cleanup",
+            status="warning" if summary.errors else "success", actor=actor, target_type="retention_settings",
+            target_id=str(current.id), target_label="retention",
+            details={"status": status, "summary": summary.model_dump()}, request=request,
+        )
         await session.commit()
         return RetentionRunResult(dry_run=False, status=status, summary=summary)
 
@@ -296,6 +317,7 @@ async def audit_dry_run(
     session: AsyncSession,
     current: RetentionSettings,
     actor: User,
+    request: Request | None = None,
 ) -> RetentionRunResult:
     summary = await calculate_retention_summary(session, current)
     await record_retention_audit(
@@ -303,6 +325,11 @@ async def audit_dry_run(
         "cleanup.dry_run",
         actor.id,
         {"settings": settings_snapshot(current), "summary": summary.model_dump()},
+    )
+    await record_audit_event(
+        session, event_type="retention.dry_run", category="retention", action="dry_run", status="success",
+        actor=actor, target_type="retention_settings", target_id=str(current.id), target_label="retention",
+        details={"settings": settings_snapshot(current), "summary": summary.model_dump()}, request=request,
     )
     await session.commit()
     return RetentionRunResult(dry_run=True, status="preview", summary=summary)

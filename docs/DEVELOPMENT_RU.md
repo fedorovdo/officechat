@@ -1,5 +1,11 @@
 # Разработка OfficeChat
 
+## Audit Log
+
+Admin UI: `http://localhost:3100/ru/admin/audit`. Для проверки создайте пользователя, измените роль/статус, выполните password reset и bot token rotation, затем убедитесь, что секретные значения отсутствуют в details и CSV. Каждый response содержит `X-Request-ID`.
+
+Настройки: `AUDIT_RETENTION_DAYS=365`, `AUDIT_MAX_EXPORT_ROWS=10000`. Автоматическое удаление audit events в v0.1 отключено.
+
 ## Проверка истечения сессии
 
 1. Войдите в `/ru/app` и измените либо удалите `officechat.access_token` в DevTools.

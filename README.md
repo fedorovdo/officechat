@@ -6,6 +6,10 @@ Protected frontend routes centrally handle expired or invalid JWTs: only `office
 
 WebSocket access logs redact `token`, `access_token`, `authorization`, and `ticket` query values. `APP_SECRET_KEY` (also accepted as `JWT_SECRET`) must be long and persistent in production. Changing it invalidates every active session. JWT storage remains in `localStorage` for the development architecture; secure cookie/session migration remains planned.
 
+## Audit log
+
+Administrators can review and export sanitized security and administrative events at `http://localhost:3100/ru/admin/audit`. The log records authentication, user/group/bot management, profile changes, discussions and retention operations without passwords, tokens, message bodies, attachment contents or filesystem paths. See [docs/AUDIT_LOG_RU.md](docs/AUDIT_LOG_RU.md).
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.

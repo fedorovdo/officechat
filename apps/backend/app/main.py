@@ -4,10 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import api_router
 from app.api.routes.health import router as health_router
 from app.core.config import settings
+from app.core.logging import configure_sensitive_log_redaction
+from app.core.middleware import UnexpectedErrorMiddleware
 from app.services.bootstrap import bootstrap_superadmin
 
 
 def create_app() -> FastAPI:
+    configure_sensitive_log_redaction()
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -15,6 +18,7 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
+    app.add_middleware(UnexpectedErrorMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.backend_cors_origins,

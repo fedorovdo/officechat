@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_ALLOWED_UPLOAD_EXTENSIONS = [
@@ -21,7 +21,10 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     environment: str = "development"
     self_registration_enabled: bool = False
-    app_secret_key: str = "change-me-in-production"
+    app_secret_key: str = Field(
+        default="change-me-in-production",
+        validation_alias=AliasChoices("APP_SECRET_KEY", "JWT_SECRET"),
+    )
     access_token_expire_minutes: int = 1440
     message_max_length: int = 4000
     attachment_max_upload_size_mb: int = Field(
@@ -58,6 +61,12 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3100"]
     )
     uploads_dir: str = "/data/uploads"
+
+    @model_validator(mode="after")
+    def require_persistent_production_secret(self) -> "Settings":
+        if self.environment.lower() == "production" and self.app_secret_key == "change-me-in-production":
+            raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
+        return self
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

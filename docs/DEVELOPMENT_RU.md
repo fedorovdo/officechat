@@ -1,5 +1,15 @@
 # Разработка OfficeChat
 
+## Проверка истечения сессии
+
+1. Войдите в `/ru/app` и измените либо удалите `officechat.access_token` в DevTools.
+2. После reload приложение должно перейти на `/ru/login`, не запуская API/WebSocket storm.
+3. Настройки языка, sidebar, уведомлений и emoji должны сохраниться.
+4. Ответ `403` не должен завершать сессию; недоступность backend также не удаляет JWT.
+5. Явный logout должен завершаться локально даже при остановленном backend.
+
+Для разработки допустим документированный `APP_SECRET_KEY=change-me-in-production`. В production задайте длинный постоянный секрет. Docker Compose не генерирует его при перезапуске. Изменение `APP_SECRET_KEY`/`JWT_SECRET` инвалидирует все выданные токены. В backend logs WebSocket URL должен отображаться как `?token=[REDACTED]`.
+
 Управление хранением доступно по `/ru/admin/storage`. Retention выключен по умолчанию. Безопасный flow: сохранить настройки, выполнить `POST /api/admin/retention/dry-run`, проверить backup, включить retention, повторить preview и подтвердить `POST /api/admin/retention/run`. Автоматического scheduler в v0.1 нет.
 
 Локальная разработка рассчитана на Windows и Docker Desktop.

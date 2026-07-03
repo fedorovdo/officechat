@@ -1,3 +1,11 @@
+import {
+  clearStoredAccessToken,
+  expireAuthentication,
+  getStoredAccessToken,
+  requireStoredAccessToken,
+  storeAccessToken
+} from "./session";
+
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
 export type GroupRole = "owner" | "moderator" | "member";
 export type DiscussionMemberRole = "owner" | "member";
@@ -402,16 +410,54 @@ export type StorageStats = {
 const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
 
 // TODO: Move production auth storage to secure cookies or a stronger session mechanism.
-export function getStoredAccessToken() {
-  return localStorage.getItem("officechat.access_token");
+export { clearStoredAccessToken, getStoredAccessToken, requireStoredAccessToken, storeAccessToken };
+
+export class AuthenticationError extends Error {}
+export class PermissionError extends Error {}
+export class BackendUnavailableError extends Error {}
+export class ApiResponseError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
 }
 
-export function clearStoredAccessToken() {
-  localStorage.removeItem("officechat.access_token");
+export function getLocalizedApiError(
+  error: unknown,
+  messages: {
+    expired: string;
+    serverUnavailable: string;
+    loadError: string;
+    accessDenied: string;
+  }
+) {
+  if (error instanceof AuthenticationError) return messages.expired;
+  if (error instanceof PermissionError) return messages.accessDenied;
+  if (error instanceof BackendUnavailableError) return messages.serverUnavailable;
+  if (error instanceof ApiResponseError && error.status >= 500) return messages.loadError;
+  return error instanceof Error && error.message !== "Failed to fetch" ? error.message : messages.loadError;
+}
+
+async function authenticatedFetch(url: string, token: string, init: RequestInit = {}) {
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new BackendUnavailableError("Server is unavailable", { cause: error });
+  }
+  if (response.status === 401) {
+    expireAuthentication("expired");
+    throw new AuthenticationError("Your session has expired. Please sign in again.");
+  }
+  if (response.status === 403) {
+    const body = (await response.clone().json().catch(() => null)) as { detail?: unknown } | null;
+    throw new PermissionError(typeof body?.detail === "string" ? body.detail : "Access denied");
+  }
+  return response;
 }
 
 async function apiFetch<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}${path}`, token, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -430,7 +476,7 @@ async function apiFetch<T>(path: string, token: string, init: RequestInit = {}):
     } catch {
       message = response.statusText;
     }
-    throw new Error(message);
+    throw new ApiResponseError(response.status, message);
   }
 
   if (response.status === 204) {
@@ -457,7 +503,7 @@ async function uploadMessageWithAttachment<T>(
     formData.append("reply_to_message_id", replyToMessageId);
   }
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}${path}`, token, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
@@ -473,7 +519,7 @@ async function uploadMessageWithAttachment<T>(
     } catch {
       message = response.statusText;
     }
-    throw new Error(message);
+    throw new ApiResponseError(response.status, message);
   }
   return (await response.json()) as T;
 }
@@ -491,7 +537,7 @@ async function uploadMessageWithAttachments<T>(
   if (body.trim()) formData.append("body", body);
   if (replyToMessageId) formData.append("reply_to_message_id", replyToMessageId);
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}${path}`, token, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
@@ -499,7 +545,10 @@ async function uploadMessageWithAttachments<T>(
   });
   if (!response.ok) {
     const responseBody = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new Error(typeof responseBody?.detail === "string" ? responseBody.detail : response.statusText);
+    throw new ApiResponseError(
+      response.status,
+      typeof responseBody?.detail === "string" ? responseBody.detail : response.statusText
+    );
   }
   return (await response.json()) as T;
 }
@@ -518,14 +567,14 @@ export function updateCurrentUser(token: string, displayName: string) {
 export async function uploadMyAvatar(token: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch(`${apiBaseUrl}/api/auth/me/avatar`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/auth/me/avatar`, token, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new Error(typeof body?.detail === "string" ? body.detail : response.statusText);
+    throw new ApiResponseError(response.status, typeof body?.detail === "string" ? body.detail : response.statusText);
   }
   return (await response.json()) as OfficeChatUser;
 }
@@ -539,11 +588,11 @@ export function buildUserAvatarUrl(avatarUrl: string) {
 }
 
 export async function fetchUserAvatar(token: string, avatarUrl: string) {
-  const response = await fetch(buildUserAvatarUrl(avatarUrl), {
+  const response = await authenticatedFetch(buildUserAvatarUrl(avatarUrl), token, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!response.ok) {
-    throw new Error(response.statusText);
+    throw new ApiResponseError(response.status, response.statusText);
   }
   return response.blob();
 }
@@ -1022,7 +1071,7 @@ export function buildAttachmentDownloadUrl(downloadUrl: string) {
 }
 
 export async function downloadAttachment(token: string, downloadUrl: string) {
-  const response = await fetch(buildAttachmentDownloadUrl(downloadUrl), {
+  const response = await authenticatedFetch(buildAttachmentDownloadUrl(downloadUrl), token, {
     headers: {
       Authorization: `Bearer ${token}`
     }

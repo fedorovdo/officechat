@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import type { Dictionary, Locale } from "../lib/i18n";
+import { getSafeLoginNext, storeAccessToken } from "../lib/session";
 
 type LoginFormProps = {
   dictionary: Dictionary;
@@ -16,7 +17,17 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "session-expired") {
+      setNotice(dictionary.session.expired);
+    } else if (reason === "sign-in-required") {
+      setNotice(dictionary.session.signInRequired);
+    }
+  }, [dictionary.session.expired, dictionary.session.signInRequired]);
 
   function handleLanguageChange(nextLocale: Locale) {
     router.push(`/${nextLocale}/login`);
@@ -43,8 +54,8 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
 
       const data = (await response.json()) as { access_token: string };
       // TODO: Move production auth storage to secure cookies or a stronger session mechanism.
-      localStorage.setItem("officechat.access_token", data.access_token);
-      router.push(`/${locale}/dashboard`);
+      storeAccessToken(data.access_token);
+      window.location.replace(getSafeLoginNext() ?? `/${locale}/app`);
     } catch {
       setError(dictionary.login.networkError);
     } finally {
@@ -60,6 +71,7 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
         </Link>
         <h1 className="auth-title">{dictionary.login.title}</h1>
         <p className="auth-description">{dictionary.login.description}</p>
+        {notice ? <p className="form-success">{notice}</p> : null}
 
         <label className="field auth-language-field">
           <span className="field-label">{dictionary.login.language}</span>

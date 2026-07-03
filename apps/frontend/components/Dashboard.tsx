@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
-import { clearStoredAccessToken, getCurrentUser, getStoredAccessToken, isAdminRole } from "../lib/api";
+import { getCurrentUser, getLocalizedApiError, isAdminRole, requireStoredAccessToken } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { logoutSession } from "../lib/session";
 
 type DashboardProps = {
   dictionary: Dictionary;
@@ -19,43 +19,27 @@ type CurrentUser = {
 };
 
 export function Dashboard({ dictionary, locale }: DashboardProps) {
-  const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     const accessToken = token;
 
     async function loadUser() {
       try {
         setUser((await getCurrentUser(accessToken)) as CurrentUser);
-      } catch {
-        clearStoredAccessToken();
-        router.replace(`/${locale}/login`);
+      } catch (caughtError) {
+        setError(getLocalizedApiError(caughtError, dictionary.session));
       }
     }
 
     void loadUser();
-  }, [locale, router]);
+  }, [dictionary.dashboard.loadError, locale]);
 
   async function logout() {
-    const token = getStoredAccessToken();
-    if (token) {
-      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/logout`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }).catch(() => undefined);
-    }
-
-    clearStoredAccessToken();
-    router.replace(`/${locale}/login`);
+    await logoutSession(locale, process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100");
   }
 
   return (

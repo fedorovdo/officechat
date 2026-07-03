@@ -1,5 +1,11 @@
 # Roadmap OfficeChat
 
+## Session hardening
+
+- Реализована централизованная обработка `401`, локализованный возврат к login, остановка polling/WebSocket и безопасный локальный logout.
+- Реализованы bounded WebSocket reconnect, close codes `4401`/`4403` и маскирование query-токенов в backend logs.
+- На будущий production-этап остаются HttpOnly cookie sessions, CSRF-защита, ротация refresh tokens и отказ от WebSocket query token.
+
 Retention and Storage Management v0.1 реализует disabled-by-default archive, attachment cleanup, mandatory dry-run, admin storage UI и audit. Для v0.2 запланированы отдельный worker, Valkey distributed lock и permanent deletion только после cascade audit.
 
 ## Этап 0: Scaffold

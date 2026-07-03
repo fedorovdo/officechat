@@ -29,6 +29,13 @@
     "invalidCredentials": "Неверное имя пользователя или пароль.",
     "networkError": "Не удалось подключиться к backend."
   },
+  "session": {
+    "expired": "Сессия истекла. Войдите снова.",
+    "signInRequired": "Требуется повторный вход",
+    "serverUnavailable": "Сервер недоступен",
+    "loadError": "Не удалось загрузить данные",
+    "accessDenied": "Доступ запрещён"
+  },
   "dashboard": {
     "ariaLabel": "Панель OfficeChat",
     "title": "Панель",

@@ -2,7 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionLocal
@@ -21,6 +21,8 @@ from app.services.websocket_manager import (
 )
 
 router = APIRouter()
+WS_UNAUTHORIZED = 4401
+WS_FORBIDDEN = 4403
 
 
 async def get_websocket_user(session: AsyncSession, token: str) -> User | None:
@@ -39,66 +41,66 @@ async def get_websocket_user(session: AsyncSession, token: str) -> User | None:
     return user
 
 
-async def authorize_group_websocket(group_id: UUID, token: str) -> bool:
+async def authorize_group_websocket(group_id: UUID, token: str) -> int | None:
     async with AsyncSessionLocal() as session:
         current_user = await get_websocket_user(session, token)
         if current_user is None:
-            return False
+            return WS_UNAUTHORIZED
 
         group = await get_group(session, group_id)
         if group is None:
-            return False
+            return WS_FORBIDDEN
 
         try:
             await ensure_group_message_access(session, group, current_user)
         except PermissionError:
-            return False
+            return WS_FORBIDDEN
 
-        return True
+        return None
 
 
-async def authorize_direct_websocket(conversation_id: UUID, token: str) -> bool:
+async def authorize_direct_websocket(conversation_id: UUID, token: str) -> int | None:
     async with AsyncSessionLocal() as session:
         current_user = await get_websocket_user(session, token)
         if current_user is None:
-            return False
+            return WS_UNAUTHORIZED
 
         conversation = await get_direct_conversation(session, conversation_id)
         if conversation is None:
-            return False
+            return WS_FORBIDDEN
 
         try:
             ensure_direct_conversation_access(conversation, current_user)
         except PermissionError:
-            return False
+            return WS_FORBIDDEN
 
-        return True
+        return None
 
 
-async def authorize_user_websocket(token: str) -> UUID | None:
+async def authorize_user_websocket(token: str) -> tuple[UUID | None, int | None]:
     async with AsyncSessionLocal() as session:
         current_user = await get_websocket_user(session, token)
         if current_user is None:
-            return None
-        return current_user.id
+            return None, WS_UNAUTHORIZED
+        return current_user.id, None
 
 
-async def authorize_discussion_websocket(discussion_id: UUID, token: str) -> UUID | None:
+async def authorize_discussion_websocket(discussion_id: UUID, token: str) -> tuple[UUID | None, int | None]:
     async with AsyncSessionLocal() as session:
         current_user = await get_websocket_user(session, token)
         if current_user is None:
-            return None
+            return None, WS_UNAUTHORIZED
 
         discussion = await get_discussion(session, discussion_id)
         if discussion is None:
-            return None
+            return None, WS_FORBIDDEN
 
         try:
             await ensure_discussion_access(session, discussion, current_user)
         except PermissionError:
-            return None
+            return None, WS_FORBIDDEN
 
-        return current_user.id
+        return current_user.id, None
 
 
 @router.websocket("/groups/{group_id}")
@@ -108,11 +110,12 @@ async def group_messages_websocket(
     token: Annotated[str | None, Query()] = None,
 ) -> None:
     if token is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=WS_UNAUTHORIZED)
         return
 
-    if not await authorize_group_websocket(group_id, token):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    close_code = await authorize_group_websocket(group_id, token)
+    if close_code is not None:
+        await websocket.close(code=close_code)
         return
 
     await group_websocket_manager.connect(group_id, websocket)
@@ -130,11 +133,12 @@ async def direct_messages_websocket(
     token: Annotated[str | None, Query()] = None,
 ) -> None:
     if token is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=WS_UNAUTHORIZED)
         return
 
-    if not await authorize_direct_websocket(conversation_id, token):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    close_code = await authorize_direct_websocket(conversation_id, token)
+    if close_code is not None:
+        await websocket.close(code=close_code)
         return
 
     await direct_websocket_manager.connect(conversation_id, websocket)
@@ -151,12 +155,12 @@ async def personal_notifications_websocket(
     token: Annotated[str | None, Query()] = None,
 ) -> None:
     if token is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=WS_UNAUTHORIZED)
         return
 
-    user_id = await authorize_user_websocket(token)
-    if user_id is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    user_id, close_code = await authorize_user_websocket(token)
+    if close_code is not None or user_id is None:
+        await websocket.close(code=close_code or WS_UNAUTHORIZED)
         return
 
     await user_websocket_manager.connect_user(user_id, websocket)
@@ -174,12 +178,12 @@ async def discussion_messages_websocket(
     token: Annotated[str | None, Query()] = None,
 ) -> None:
     if token is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=WS_UNAUTHORIZED)
         return
 
-    user_id = await authorize_discussion_websocket(discussion_id, token)
-    if user_id is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    user_id, close_code = await authorize_discussion_websocket(discussion_id, token)
+    if close_code is not None or user_id is None:
+        await websocket.close(code=close_code or WS_FORBIDDEN)
         return
 
     await discussion_websocket_manager.connect(discussion_id, user_id, websocket)

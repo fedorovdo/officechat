@@ -6,12 +6,13 @@ import { useRouter } from "next/navigation";
 
 import {
   addGroupMember,
-  clearStoredAccessToken,
   getCurrentUser,
+  getLocalizedApiError,
   getGroup,
   getGroupMembers,
   getStoredAccessToken,
   isAdminRole,
+  requireStoredAccessToken,
   removeGroupMember,
   updateGroup,
   updateGroupMember,
@@ -89,20 +90,16 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   }
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     const accessToken = token;
 
     async function loadPage() {
       try {
         setCurrentUser(await getCurrentUser(accessToken));
         await reload(accessToken);
-      } catch {
-        clearStoredAccessToken();
-        router.replace(`/${locale}/login`);
+      } catch (caughtError) {
+        setError(getLocalizedApiError(caughtError, dictionary.session));
       } finally {
         setIsLoading(false);
       }

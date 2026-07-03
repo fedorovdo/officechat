@@ -14,25 +14,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
-  clearStoredAccessToken,
   createDirectConversation,
   createDiscussion,
   deleteMyAvatar,
   getCurrentUser,
   getDirectConversations,
-  getDirectWebSocketUrl,
   getGroups,
   getGroupMembers,
   getGroupMessages,
-  getGroupWebSocketUrl,
+  getLocalizedApiError,
   getPersonalWebSocketUrl,
+  requireStoredAccessToken,
   getStoredAccessToken,
   getUsers,
   isAdminRole,
   uploadMyAvatar,
   updateCurrentUser,
-  type DirectMessageEvent,
-  type GroupMessageEvent,
   type OfficeChatDirectoryUser,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
@@ -44,6 +41,8 @@ import {
   type PersonalNotificationEvent
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { connectResilientWebSocket } from "../lib/resilientWebSocket";
+import { logoutSession, onAuthenticationExpired } from "../lib/session";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
@@ -720,11 +719,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     if (!currentUser) {
       return;
     }
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     setError("");
     try {
       const discussion = await createDiscussion(token, message.group_id, message.id);
@@ -810,11 +806,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }, [currentUser, sidebarActivity]);
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     const accessToken = token;
 
     async function loadApp() {
@@ -832,7 +825,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         setSidebarActivity(readSidebarActivity(loadedUser.id));
         setSelected(loadedGroups[0] ? { type: "group", groupId: loadedGroups[0].id } : { type: "empty" });
       } catch (caughtError) {
-        setError(caughtError instanceof Error ? caughtError.message : dictionary.appShell.loadError);
+        setError(getLocalizedApiError(caughtError, dictionary.session));
       } finally {
         setIsLoading(false);
       }
@@ -909,84 +902,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }, [currentUser, directConversations, updateDirectUserActivity]);
 
   useEffect(() => {
-    if (!currentUser || groups.length === 0) {
-      return;
-    }
-
-    const token = getStoredAccessToken();
-    if (!token) {
-      return;
-    }
-
-    const sockets = groups.map((group) => {
-      const websocket = new WebSocket(getGroupWebSocketUrl(token, group.id));
-      websocket.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data as string) as GroupMessageEvent;
-          if (payload.type === "message.reactions.updated" || !payload.type.startsWith("message.")) {
-            return;
-          }
-          const isSelectedGroup = selected.type === "group" && selected.groupId === payload.group_id;
-          const isOwnMessage = payload.message.sender_user_id === currentUser.id;
-          const isMentioned = payload.message.mentions.some((mention) => mention.user_id === currentUser.id);
-          updateGroupActivity(
-            payload.group_id,
-            payload.message,
-            !isSelectedGroup && !isOwnMessage,
-            isMentioned && !isSelectedGroup && !isOwnMessage
-          );
-        } catch {
-          return;
-        }
-      };
-      return websocket;
-    });
-
-    return () => {
-      for (const socket of sockets) {
-        socket.close();
-      }
-    };
-  }, [currentUser, groups, selected, updateGroupActivity]);
-
-  useEffect(() => {
-    if (!currentUser || directConversations.length === 0) {
-      return;
-    }
-
-    // Conversation-specific sockets keep known direct-chat sidebar previews fresh; /api/ws/me handles global notifications.
-    const token = getStoredAccessToken();
-    if (!token) {
-      return;
-    }
-
-    const sockets = directConversations.map((conversation) => {
-      const websocket = new WebSocket(getDirectWebSocketUrl(token, conversation.id));
-      websocket.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data as string) as DirectMessageEvent;
-          if (payload.type === "direct.message.reactions.updated" || !payload.type.startsWith("direct.message.")) {
-            return;
-          }
-          const isSelectedConversation =
-            selected.type === "direct" && selected.conversationId === payload.conversation_id;
-          const isOwnMessage = payload.message.sender_user_id === currentUser.id;
-          updateDirectUserActivity(conversation.other_user.id, payload.message, !isSelectedConversation && !isOwnMessage);
-        } catch {
-          return;
-        }
-      };
-      return websocket;
-    });
-
-    return () => {
-      for (const socket of sockets) {
-        socket.close();
-      }
-    };
-  }, [currentUser, directConversations, selected, updateDirectUserActivity]);
-
-  useEffect(() => {
     if (!currentUser) {
       return;
     }
@@ -997,26 +912,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       return;
     }
     const accessToken = token;
-
-    let websocket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let shouldReconnect = true;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 10;
-
-    function scheduleReconnect() {
-      if (!shouldReconnect) {
-        return;
-      }
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        setPersonalSocketStatus("disconnected");
-        return;
-      }
-
-      reconnectAttempts += 1;
-      setPersonalSocketStatus("reconnecting");
-      reconnectTimer = setTimeout(connect, 3000);
-    }
 
     function handleGroupPersonalEvent(payload: Extract<PersonalNotificationEvent, { type: "user.group.message.created" }>) {
       const currentSelection = selectedRef.current;
@@ -1092,13 +987,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       });
     }
 
-    function connect() {
-      websocket = new WebSocket(getPersonalWebSocketUrl(accessToken));
-      websocket.onopen = () => {
-        reconnectAttempts = 0;
-        setPersonalSocketStatus("connected");
-      };
-      websocket.onmessage = (event) => {
+    return connectResilientWebSocket({
+      getUrl: () => getPersonalWebSocketUrl(accessToken),
+      onStatusChange: setPersonalSocketStatus,
+      onForbidden: () => setError(dictionary.session.accessDenied),
+      onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as PersonalNotificationEvent;
           if (payload.type === "user.group.message.created") {
@@ -1115,29 +1008,12 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         } catch {
           return;
         }
-      };
-      websocket.onclose = () => {
-        websocket = null;
-        scheduleReconnect();
-      };
-      websocket.onerror = () => {
-        websocket?.close();
-      };
-    }
-
-    connect();
-
-    return () => {
-      shouldReconnect = false;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
       }
-      websocket?.close();
-      setPersonalSocketStatus("disconnected");
-    };
+    });
   }, [
     currentUser,
     dictionary.discussions.newMessageNotification,
+    dictionary.session.accessDenied,
     dictionary.messages.deletedMessage,
     dictionary.messages.mentionedYou,
     updateDirectUserActivity,
@@ -1156,9 +1032,12 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
     const accessToken = token;
 
+    let stopped = false;
     async function refreshDirectConversations() {
+      if (stopped) return;
       try {
         const loadedConversations = await getDirectConversations(accessToken);
+        if (stopped) return;
         setDirectConversations(loadedConversations);
         setSidebarActivity((currentActivity) => {
           const nextDirectUsers = { ...currentActivity.directUsers };
@@ -1194,7 +1073,15 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
 
     const timer = setInterval(() => void refreshDirectConversations(), 20000);
-    return () => clearInterval(timer);
+    const unsubscribe = onAuthenticationExpired(() => {
+      stopped = true;
+      clearInterval(timer);
+    });
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, [currentUser, selected, dictionary.messages.deletedMessage, dictionary.sidebarActivity.noRecentMessages]);
 
   function updateSettings(nextSettings: AppSettings) {
@@ -1434,18 +1321,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }
 
   async function logout() {
-    const token = getStoredAccessToken();
-    if (token) {
-      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/logout`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }).catch(() => undefined);
-    }
-
-    clearStoredAccessToken();
-    router.replace(`/${locale}/login`);
+    await logoutSession(locale, process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100");
   }
 
   async function handleOpenDirectUser(user: OfficeChatDirectoryUser) {

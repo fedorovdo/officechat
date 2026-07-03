@@ -22,6 +22,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { connectResilientWebSocket } from "../lib/resilientWebSocket";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -183,12 +184,6 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     }
     const accessToken = token;
 
-    let websocket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let shouldReconnect = true;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 10;
-
     function markIncomingMessage() {
       if (isNearMessagesBottom()) {
         shouldScrollToBottomRef.current = true;
@@ -197,27 +192,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       }
     }
 
-    function scheduleReconnect() {
-      if (!shouldReconnect) {
-        return;
-      }
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        setLiveUpdateStatus("disconnected");
-        return;
-      }
-
-      reconnectAttempts += 1;
-      setLiveUpdateStatus("reconnecting");
-      reconnectTimer = setTimeout(connect, 3000);
-    }
-
-    function connect() {
-      websocket = new WebSocket(getDirectWebSocketUrl(accessToken, conversation.id));
-      websocket.onopen = () => {
-        reconnectAttempts = 0;
-        setLiveUpdateStatus("connected");
-      };
-      websocket.onmessage = (event) => {
+    return connectResilientWebSocket({
+      getUrl: () => getDirectWebSocketUrl(accessToken, conversation.id),
+      onStatusChange: setLiveUpdateStatus,
+      onForbidden: () => setError(dictionary.session.accessDenied),
+      onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DirectMessageEvent;
           if (payload.type === "direct.message.reactions.updated") {
@@ -233,31 +212,9 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
           markIncomingMessage();
           void refreshMessages(accessToken);
         }
-      };
-      websocket.onclose = (event) => {
-        websocket = null;
-        if (event.code === 1008) {
-          setLiveUpdateStatus("disconnected");
-          return;
-        }
-        scheduleReconnect();
-      };
-      websocket.onerror = () => {
-        websocket?.close();
-      };
-    }
-
-    setLiveUpdateStatus("reconnecting");
-    connect();
-
-    return () => {
-      shouldReconnect = false;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
       }
-      websocket?.close();
-    };
-  }, [conversation.id, currentUser.id, locale, refreshMessages, router]);
+    });
+  }, [conversation.id, currentUser.id, dictionary.session.accessDenied, locale, refreshMessages, router]);
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);

@@ -29,6 +29,13 @@
     "invalidCredentials": "Invalid username or password.",
     "networkError": "Could not reach the backend."
   },
+  "session": {
+    "expired": "Your session has expired. Please sign in again.",
+    "signInRequired": "Sign-in required",
+    "serverUnavailable": "Server is unavailable",
+    "loadError": "Could not load data",
+    "accessDenied": "Access denied"
+  },
   "dashboard": {
     "ariaLabel": "OfficeChat dashboard",
     "title": "Dashboard",

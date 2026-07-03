@@ -26,6 +26,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { connectResilientWebSocket } from "../lib/resilientWebSocket";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -146,29 +147,11 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       return;
     }
     const accessToken = token;
-    let websocket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let shouldReconnect = true;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 10;
-
-    function scheduleReconnect() {
-      if (!shouldReconnect || reconnectAttempts >= maxReconnectAttempts) {
-        setLiveUpdateStatus("disconnected");
-        return;
-      }
-      reconnectAttempts += 1;
-      setLiveUpdateStatus("reconnecting");
-      reconnectTimer = setTimeout(connect, 3000);
-    }
-
-    function connect() {
-      websocket = new WebSocket(getDiscussionWebSocketUrl(accessToken, discussionId));
-      websocket.onopen = () => {
-        reconnectAttempts = 0;
-        setLiveUpdateStatus("connected");
-      };
-      websocket.onmessage = (event) => {
+    return connectResilientWebSocket({
+      getUrl: () => getDiscussionWebSocketUrl(accessToken, discussionId),
+      onStatusChange: setLiveUpdateStatus,
+      onForbidden: () => setError(dictionary.session.accessDenied),
+      onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DiscussionEvent;
           if (payload.type === "discussion.message.reactions.updated") {
@@ -182,28 +165,9 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
         } catch {
           void refreshDiscussion(accessToken);
         }
-      };
-      websocket.onclose = (event) => {
-        websocket = null;
-        if (event.code === 1008) {
-          setLiveUpdateStatus("disconnected");
-          return;
-        }
-        scheduleReconnect();
-      };
-      websocket.onerror = () => websocket?.close();
-    }
-
-    setLiveUpdateStatus("reconnecting");
-    connect();
-    return () => {
-      shouldReconnect = false;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
       }
-      websocket?.close();
-    };
-  }, [currentUser.id, discussionId, locale, refreshDiscussion, router]);
+    });
+  }, [currentUser.id, dictionary.session.accessDenied, discussionId, locale, refreshDiscussion, router]);
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);

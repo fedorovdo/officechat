@@ -5,12 +5,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  clearStoredAccessToken,
   getCurrentUser,
+  getLocalizedApiError,
   getRetentionSettings,
   getStorageStats,
   getStoredAccessToken,
   isAdminRole,
+  requireStoredAccessToken,
   previewRetentionCleanup,
   runRetentionCleanup,
   updateRetentionSettings,
@@ -55,11 +56,8 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
   }
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     void getCurrentUser(token)
       .then((user) => {
         if (!isAdminRole(user.role)) throw new Error("access-denied");
@@ -70,8 +68,7 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
           router.replace(`/${locale}/dashboard`);
           return;
         }
-        clearStoredAccessToken();
-        router.replace(`/${locale}/login`);
+        setError(getLocalizedApiError(caughtError, dictionary.session));
       });
   }, [locale, router]);
 

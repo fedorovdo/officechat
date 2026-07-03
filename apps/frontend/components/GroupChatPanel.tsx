@@ -21,6 +21,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { connectResilientWebSocket } from "../lib/resilientWebSocket";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -188,12 +189,6 @@ export function GroupChatPanel({
     }
     const accessToken = token;
 
-    let websocket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let shouldReconnect = true;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 10;
-
     function markIncomingMessage() {
       if (isNearMessagesBottom()) {
         shouldScrollToBottomRef.current = true;
@@ -202,27 +197,11 @@ export function GroupChatPanel({
       }
     }
 
-    function scheduleReconnect() {
-      if (!shouldReconnect) {
-        return;
-      }
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        setLiveUpdateStatus("disconnected");
-        return;
-      }
-
-      reconnectAttempts += 1;
-      setLiveUpdateStatus("reconnecting");
-      reconnectTimer = setTimeout(connect, 3000);
-    }
-
-    function connect() {
-      websocket = new WebSocket(getGroupWebSocketUrl(accessToken, groupId));
-      websocket.onopen = () => {
-        reconnectAttempts = 0;
-        setLiveUpdateStatus("connected");
-      };
-      websocket.onmessage = (event) => {
+    return connectResilientWebSocket({
+      getUrl: () => getGroupWebSocketUrl(accessToken, groupId),
+      onStatusChange: setLiveUpdateStatus,
+      onForbidden: () => setError(dictionary.session.accessDenied),
+      onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as GroupMessageEvent;
           if (payload.type === "message.reactions.updated") {
@@ -238,31 +217,9 @@ export function GroupChatPanel({
           markIncomingMessage();
           void refreshMessages(accessToken);
         }
-      };
-      websocket.onclose = (event) => {
-        websocket = null;
-        if (event.code === 1008) {
-          setLiveUpdateStatus("disconnected");
-          return;
-        }
-        scheduleReconnect();
-      };
-      websocket.onerror = () => {
-        websocket?.close();
-      };
-    }
-
-    setLiveUpdateStatus("reconnecting");
-    connect();
-
-    return () => {
-      shouldReconnect = false;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
       }
-      websocket?.close();
-    };
-  }, [currentUser.id, groupId, locale, refreshMessages, router]);
+    });
+  }, [currentUser.id, dictionary.session.accessDenied, groupId, locale, refreshMessages, router]);
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);

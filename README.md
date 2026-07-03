@@ -1,5 +1,11 @@
 # OfficeChat
 
+## Session hardening
+
+Protected frontend routes centrally handle expired or invalid JWTs: only `officechat.access_token` is removed, UI preferences remain intact, active WebSockets stop, and the browser returns to the localized login page. HTTP 401 ends the local session; HTTP 403 reports denied access without logging the user out.
+
+WebSocket access logs redact `token`, `access_token`, `authorization`, and `ticket` query values. `APP_SECRET_KEY` (also accepted as `JWT_SECRET`) must be long and persistent in production. Changing it invalidates every active session. JWT storage remains in `localStorage` for the development architecture; secure cookie/session migration remains planned.
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.

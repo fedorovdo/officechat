@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
-  clearStoredAccessToken,
   createGroup,
   getCurrentUser,
+  getLocalizedApiError,
   getGroups,
   getStoredAccessToken,
   isAdminRole,
+  requireStoredAccessToken,
   updateGroup,
   type CreateGroupPayload,
   type OfficeChatGroup,
@@ -47,11 +48,8 @@ export function Groups({ dictionary, locale }: GroupsProps) {
   }
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     const accessToken = token;
 
     async function loadPage() {
@@ -59,9 +57,8 @@ export function Groups({ dictionary, locale }: GroupsProps) {
         const loadedUser = await getCurrentUser(accessToken);
         setCurrentUser(loadedUser);
         await reloadGroups(accessToken, loadedUser);
-      } catch {
-        clearStoredAccessToken();
-        router.replace(`/${locale}/login`);
+      } catch (caughtError) {
+        setError(getLocalizedApiError(caughtError, dictionary.session));
       } finally {
         setIsLoading(false);
       }

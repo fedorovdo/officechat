@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
-  clearStoredAccessToken,
   createAdminBot,
   getAdminBots,
   getCurrentUser,
+  getLocalizedApiError,
   getStoredAccessToken,
   isAdminRole,
+  requireStoredAccessToken,
   rotateAdminBotToken,
   updateAdminBot,
   type CreateAdminBotPayload,
@@ -73,11 +74,8 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
   }
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace(`/${locale}/login`);
-      return;
-    }
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
     const accessToken = token;
 
     async function loadPage() {
@@ -91,9 +89,8 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
         }
 
         await reloadBots(accessToken);
-      } catch {
-        clearStoredAccessToken();
-        router.replace(`/${locale}/login`);
+      } catch (caughtError) {
+        setError(getLocalizedApiError(caughtError, dictionary.session));
       } finally {
         setIsLoading(false);
       }

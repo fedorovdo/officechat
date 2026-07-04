@@ -23,6 +23,7 @@ export type OfficeChatUser = {
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
+  last_seen_at: string | null;
 };
 
 export type OfficeChatDirectoryUser = {
@@ -32,6 +33,20 @@ export type OfficeChatDirectoryUser = {
   role: UserRole;
   is_active: boolean;
   avatar_url: string | null;
+  last_seen_at: string | null;
+};
+
+export type OfficeChatPresence = {
+  user_id: string;
+  status: "online" | "offline";
+  last_seen_at: string | null;
+};
+
+export type TypingEvent = {
+  type: "typing.updated";
+  user_id: string;
+  display_name: string;
+  is_typing: boolean;
 };
 
 export type CreateAdminUserPayload = {
@@ -270,7 +285,8 @@ export type GroupMessageEvent =
       group_id: string;
       message_id: string;
       reactions: OfficeChatMessageReaction[];
-    };
+    }
+  | TypingEvent;
 
 export type DirectMessageEvent =
   | {
@@ -284,7 +300,8 @@ export type DirectMessageEvent =
       conversation_id: string;
       message_id: string;
       reactions: OfficeChatMessageReaction[];
-    };
+    }
+  | TypingEvent;
 
 export type DiscussionEvent =
   | {
@@ -308,7 +325,8 @@ export type DiscussionEvent =
       discussion_id: string;
       message_id: string;
       reactions: OfficeChatMessageReaction[];
-    };
+    }
+  | TypingEvent;
 
 export type PersonalNotificationEvent =
   | {
@@ -329,6 +347,12 @@ export type PersonalNotificationEvent =
       discussion_id: string;
       discussion: Pick<OfficeChatDiscussion, "id" | "title" | "source_group_id">;
       message: OfficeChatDiscussionMessage;
+    }
+  | {
+      type: "presence.updated";
+      user_id: string;
+      status: "online" | "offline";
+      last_seen_at: string | null;
     };
 
 export type CreateGroupPayload = {
@@ -697,6 +721,14 @@ export function getStorageStats(token: string) {
 
 export function getUsers(token: string) {
   return apiFetch<OfficeChatDirectoryUser[]>("/api/users", token);
+}
+
+export function getPresence(token: string, userIds: string[]) {
+  const query = new URLSearchParams();
+  for (const userId of Array.from(new Set(userIds)).slice(0, 100)) {
+    query.append("user_ids", userId);
+  }
+  return apiFetch<OfficeChatPresence[]>(`/api/presence?${query.toString()}`, token);
 }
 
 export function createAdminUser(token: string, payload: CreateAdminUserPayload) {

@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     valkey_host: str = "valkey"
     valkey_port: int = 6379
     valkey_db: int = 0
+    presence_connection_ttl_seconds: int = Field(default=90, ge=30, le=600)
+    presence_heartbeat_seconds: int = Field(default=25, ge=10, le=120)
+    presence_offline_grace_seconds: int = Field(default=15, ge=0, le=120)
+    typing_ttl_seconds: int = Field(default=5, ge=2, le=30)
 
     backend_cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3100"]
@@ -68,6 +72,8 @@ class Settings(BaseSettings):
     def require_persistent_production_secret(self) -> "Settings":
         if self.environment.lower() == "production" and self.app_secret_key == "change-me-in-production":
             raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
+        if self.presence_heartbeat_seconds >= self.presence_connection_ttl_seconds:
+            raise ValueError("PRESENCE_HEARTBEAT_SECONDS must be lower than PRESENCE_CONNECTION_TTL_SECONDS")
         return self
 
     @field_validator("backend_cors_origins", mode="before")

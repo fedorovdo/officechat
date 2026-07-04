@@ -247,6 +247,22 @@
     "attachmentsCount": "📎 Файлов: {count}",
     "unread": "Непрочитано"
   },
+  "presence": {
+    "online": "В сети",
+    "offline": "Не в сети",
+    "unknown": "Статус недоступен",
+    "justNow": "Последняя активность: только что",
+    "minutesAgo": "Последняя активность: {count} мин. назад",
+    "todayAt": "Последняя активность: сегодня в {time}",
+    "yesterdayAt": "Последняя активность: вчера в {time}",
+    "dateAt": "Последняя активность: {date} в {time}"
+  },
+  "typing": {
+    "one": "{name} печатает...",
+    "two": "{first} и {second} печатают...",
+    "several": "Несколько пользователей печатают...",
+    "direct": "Печатает..."
+  },
   "appShell": {
     "title": "Чат",
     "loading": "Загрузка OfficeChat...",

@@ -76,6 +76,8 @@ Reliable in-app notification delivery uses a personal WebSocket channel:
 - Browser notifications in `/ru/app` use this personal channel, while group/direct chat panels keep their existing channel-specific WebSocket updates.
 - Current WebSocket delivery is single-instance only; multi-instance production should use Valkey pub/sub or another broker later.
 
+Presence, persistent last seen, and typing indicators are available in v0.1. `/api/ws/me` maintains one Valkey-backed presence connection per browser tab/device with heartbeat and offline grace handling; `GET /api/presence` returns a bounded privacy-filtered snapshot. Group, direct, and discussion room sockets carry throttled typing events without storing draft text. PostgreSQL is updated only when a user actually transitions offline. See [docs/PRESENCE_RU.md](docs/PRESENCE_RU.md).
+
 Current development uses one frontend on port `3100`. User routes live under `/ru/app`, while admin routes remain under `/ru/admin/*`. Future production deployment can split user/admin surfaces with nginx hostnames or separate frontend entrypoints.
 
 User app settings are stored in browser `localStorage` for now. Future versions should persist language, sidebar side, font size, accent color, and profile preferences in backend user preferences.
@@ -94,13 +96,13 @@ Direct/private messages are available in the user app shell:
 - `DELETE /api/direct/conversations/{conversation_id}/messages/{message_id}`
 - `WS /api/ws/direct/{conversation_id}?token=...`
 
-Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct messages support protected local attachments; read receipts and typing indicators are not implemented yet.
+Direct messages are participant-only in the MVP: `superadmin` and `admin` users have no special ability to read private conversations where they are not participants. Bot users are excluded from direct messages in this version. Direct messages support protected local attachments and ephemeral typing indicators; read receipts are not implemented yet.
 
 Reply-to-message support is available for both group chats and direct messages. Users can reply to an existing message, see a compact quoted preview in the new message, and still edit/delete messages through the existing actions. This is a lightweight reply feature only; threaded discussions, nested reply views, forwarding, and markdown rendering are planned later.
 
 Basic `@username` mentions are available in group messages. OfficeChat detects active non-bot users who belong to the same group, includes mention metadata in REST/WebSocket payloads, highlights recognized mentions in the chat UI, and uses mention-aware browser notification text. Unknown usernames are ignored safely. Autocomplete, profile links, direct-message mentions, and markdown rendering are not implemented yet.
 
-Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, messages, local attachments, Enter sending, Shift+Enter line breaks, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, nested threads, a discussion sidebar, read receipts, and typing indicators are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
+Message discussions are available from group messages in the user app shell. Use the `Discuss` / `Обсудить` action to open a right-side panel with the source-message preview, participants, messages, local attachments, Enter sending, Shift+Enter line breaks, typing indicators, and WebSocket updates. Discussion owners, source-group owners, `admin`, and `superadmin` users can invite active source-group members by username. Direct-message discussions, nested threads, a discussion sidebar, and read receipts are not implemented yet. See [docs/DISCUSSIONS_RU.md](docs/DISCUSSIONS_RU.md).
 
 Groups foundation is available. Admins can create groups, group owners can manage members, and regular users can see groups where they are members.
 
@@ -123,7 +125,7 @@ WebSocket real-time updates are available for group messages:
 - Development clients pass the JWT token in the query string.
 - Sending and reaction changes happen through REST; WebSocket receives message lifecycle events and compact `*.message.reactions.updated` updates.
 - Current WebSocket manager is single-instance only. Multi-instance production should use Valkey pub/sub or another broker later.
-- Typing indicators and read receipts are not implemented yet.
+- Typing indicators are available; read receipts are not implemented yet.
 
 File attachments are available for group, direct, and discussion messages:
 
@@ -180,6 +182,10 @@ Important auth environment variables:
 - `ATTACHMENT_MAX_TOTAL_SIZE_MB` - combined attachment size per message, default `50`.
 - `ALLOWED_UPLOAD_EXTENSIONS` - comma-separated allowlist for upload extensions.
 - `UPLOADS_DIR` - backend storage path for local uploads, default `/data/uploads`.
+- `PRESENCE_CONNECTION_TTL_SECONDS` - Valkey connection TTL, default `90`.
+- `PRESENCE_HEARTBEAT_SECONDS` - personal socket heartbeat interval, default `25`.
+- `PRESENCE_OFFLINE_GRACE_SECONDS` - reconnect grace before offline, default `15`.
+- `TYPING_TTL_SECONDS` - stale typing state TTL, default `5`.
 
 ## Useful Docker Compose Commands
 

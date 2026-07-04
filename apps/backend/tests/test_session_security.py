@@ -54,13 +54,13 @@ class AuthenticationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_websocket_invalid_token_closes_with_4401(self):
         websocket = FakeWebSocket()
-        with patch("app.api.routes.ws.authorize_group_websocket", AsyncMock(return_value=WS_UNAUTHORIZED)):
+        with patch("app.api.routes.ws.authorize_group_websocket", AsyncMock(return_value=(None, WS_UNAUTHORIZED))):
             await group_messages_websocket(websocket, uuid4(), "invalid")
         self.assertEqual(websocket.close_code, 4401)
 
     async def test_websocket_forbidden_access_closes_with_4403(self):
         websocket = FakeWebSocket()
-        with patch("app.api.routes.ws.authorize_group_websocket", AsyncMock(return_value=WS_FORBIDDEN)):
+        with patch("app.api.routes.ws.authorize_group_websocket", AsyncMock(return_value=(None, WS_FORBIDDEN))):
             await group_messages_websocket(websocket, uuid4(), "valid-but-forbidden")
         self.assertEqual(websocket.close_code, 4403)
 

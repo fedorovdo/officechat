@@ -22,6 +22,7 @@ class UserPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_login_at: datetime | None
+    last_seen_at: datetime | None
 
 
 class UserDirectoryEntry(BaseModel):
@@ -33,6 +34,13 @@ class UserDirectoryEntry(BaseModel):
     role: UserRole
     is_active: bool
     avatar_url: str | None
+    last_seen_at: datetime | None
+
+
+class PresencePublic(BaseModel):
+    user_id: UUID
+    status: Literal["online", "offline"]
+    last_seen_at: datetime | None
 
 
 class UserProfileUpdate(BaseModel):

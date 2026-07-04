@@ -10,6 +10,7 @@ import {
   getLocalizedApiError,
   getGroup,
   getGroupMembers,
+  getPresence,
   getStoredAccessToken,
   isAdminRole,
   requireStoredAccessToken,
@@ -19,11 +20,14 @@ import {
   type GroupRole,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
+  type OfficeChatPresence,
   type OfficeChatUser,
   type UpdateGroupPayload
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { GroupChatPanel } from "./GroupChatPanel";
+import { PresenceStatus } from "./PresenceStatus";
+import { UserAvatar } from "./UserAvatar";
 
 type GroupDetailsProps = {
   dictionary: Dictionary;
@@ -38,6 +42,7 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [group, setGroup] = useState<OfficeChatGroup | null>(null);
   const [members, setMembers] = useState<OfficeChatGroupMember[]>([]);
+  const [presenceByUserId, setPresenceByUserId] = useState<Record<string, OfficeChatPresence>>({});
   const [groupForm, setGroupForm] = useState<UpdateGroupPayload>({
     name: "",
     description: "",
@@ -81,6 +86,12 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
     ]);
     setGroup(loadedGroup);
     setMembers(loadedMembers);
+    try {
+      const presenceRows = await getPresence(token, loadedMembers.map((member) => member.user_id));
+      setPresenceByUserId(Object.fromEntries(presenceRows.map((presence) => [presence.user_id, presence])));
+    } catch {
+      setPresenceByUserId({});
+    }
     setGroupForm({
       name: loadedGroup.name,
       description: loadedGroup.description ?? "",
@@ -321,7 +332,19 @@ export function GroupDetails({ dictionary, groupId, locale }: GroupDetailsProps)
                     <tbody>
                       {members.map((member) => (
                         <tr key={member.id}>
-                          <td>{member.user.display_name}</td>
+                          <td>
+                            <span className="member-presence-cell">
+                              <UserAvatar size={30} user={member.user} />
+                              <span>
+                                <strong>{member.user.display_name}</strong>
+                                <PresenceStatus
+                                  dictionary={dictionary}
+                                  locale={locale}
+                                  presence={presenceByUserId[member.user_id]}
+                                />
+                              </span>
+                            </span>
+                          </td>
                           <td>{member.user.username}</td>
                           <td>{member.user.role}</td>
                           <td>

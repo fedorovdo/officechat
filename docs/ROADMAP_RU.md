@@ -51,7 +51,8 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 ## Этап 2: Realtime
 
 - WebSocket messaging.
-- Presence через Valkey.
+- Presence через Valkey, multi-tab heartbeat и persistent last seen реализованы в v0.1.
+- Typing indicators для групп, direct messages и discussions реализованы в v0.1.
 - Доставка и статусы сообщений.
 - Backend read receipts и server-side unread counters.
 - Базовые уведомления в интерфейсе.
@@ -59,7 +60,17 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Custom reactions, стикеры и GIF.
 - Расширение discussions: отдельный sidebar список, direct-message discussions и более развитое представление цепочек.
 - Autocomplete и profile links для mentions, поддержка mentions в direct messages.
-- Read receipts и typing indicators для групп и direct messages.
+- Away, do not disturb, пользовательский статус и настройки приватности presence.
+- Read receipts для групп и direct messages.
+
+## Branding and About
+
+- Логотип и favicon.
+- Страница или диалог About.
+- Версия приложения и build information.
+- Автор или организация.
+- Ссылки на документацию и репозиторий.
+- Информация о лицензии.
 
 ## Этап 3: Файлы и администрирование
 

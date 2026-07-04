@@ -707,6 +707,78 @@ a {
   box-shadow: -16px 0 40px rgba(20, 28, 45, 0.2);
 }
 
+.presence-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.presence-avatar-wrap > .presence-status {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--surface, #fff);
+}
+
+.presence-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.presence-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border: 1px solid #94a3b8;
+  border-radius: 50%;
+  background: #e2e8f0;
+}
+
+.presence-status-online {
+  color: #166534;
+}
+
+.presence-status-online .presence-dot {
+  border-color: #15803d;
+  background: #22c55e;
+}
+
+.typing-indicator {
+  min-height: 20px;
+  padding: 0 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-presence-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.member-presence-cell > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.discussion-member-identity .presence-status {
+  display: flex;
+  margin-top: 2px;
+}
+
 .admin-user-drawer-header {
   position: sticky;
   top: -26px;

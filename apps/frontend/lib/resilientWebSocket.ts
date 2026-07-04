@@ -7,6 +7,11 @@ type ResilientWebSocketOptions = {
   onMessage: (event: MessageEvent<string>) => void;
   onStatusChange?: (status: WebSocketConnectionStatus) => void;
   onForbidden?: () => void;
+  heartbeatIntervalMs?: number;
+};
+
+export type ResilientWebSocketConnection = (() => void) & {
+  send: (payload: object) => boolean;
 };
 
 const reconnectDelays = [1000, 2000, 5000, 10000, 20000, 30000];
@@ -16,6 +21,12 @@ export function connectResilientWebSocket(options: ResilientWebSocketOptions) {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
   let stopped = false;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
 
   function cancelReconnect() {
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -26,6 +37,7 @@ export function connectResilientWebSocket(options: ResilientWebSocketOptions) {
     if (stopped) return;
     stopped = true;
     cancelReconnect();
+    stopHeartbeat();
     const currentSocket = socket;
     socket = null;
     currentSocket?.close(1000, "Session ended");
@@ -51,10 +63,19 @@ export function connectResilientWebSocket(options: ResilientWebSocketOptions) {
     socket.onopen = () => {
       reconnectAttempt = 0;
       options.onStatusChange?.("connected");
+      if (options.heartbeatIntervalMs) {
+        stopHeartbeat();
+        heartbeatTimer = setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "heartbeat" }));
+          }
+        }, options.heartbeatIntervalMs);
+      }
     };
     socket.onmessage = options.onMessage;
     socket.onerror = () => socket?.close();
     socket.onclose = (event) => {
+      stopHeartbeat();
       socket = null;
       if (stopped) return;
       if (event.code === 4401) {
@@ -74,8 +95,14 @@ export function connectResilientWebSocket(options: ResilientWebSocketOptions) {
   const unsubscribe = onAuthenticationExpired(() => stop());
   connect();
 
-  return () => {
+  const cleanup = (() => {
     unsubscribe();
     stop();
+  }) as ResilientWebSocketConnection;
+  cleanup.send = (payload: object) => {
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(payload));
+    return true;
   };
+  return cleanup;
 }

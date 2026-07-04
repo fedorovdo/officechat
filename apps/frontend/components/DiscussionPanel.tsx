@@ -23,10 +23,12 @@ import {
   type OfficeChatDiscussion,
   type OfficeChatDiscussionMessage,
   type OfficeChatMessageReaction,
+  type OfficeChatPresence,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
-import { connectResilientWebSocket } from "../lib/resilientWebSocket";
+import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
+import { useTyping } from "../lib/useTyping";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -36,6 +38,8 @@ import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
+import { TypingIndicator } from "./TypingIndicator";
+import { PresenceStatus } from "./PresenceStatus";
 
 type DiscussionPanelProps = {
   currentUser: OfficeChatUser;
@@ -43,15 +47,24 @@ type DiscussionPanelProps = {
   discussionId: string;
   locale: Locale;
   onClose: () => void;
+  presenceByUserId?: Record<string, OfficeChatPresence>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
-export function DiscussionPanel({ currentUser, dictionary, discussionId, locale, onClose }: DiscussionPanelProps) {
+export function DiscussionPanel({
+  currentUser,
+  dictionary,
+  discussionId,
+  locale,
+  onClose,
+  presenceByUserId = {}
+}: DiscussionPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const socketRef = useRef<ResilientWebSocketConnection | null>(null);
   const [discussion, setDiscussion] = useState<OfficeChatDiscussion | null>(null);
   const [messages, setMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
@@ -67,6 +80,11 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
   const [archivedMessages, setArchivedMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
+    socketRef,
+    currentUser.id,
+    discussionId
+  );
   const {
     appendFiles,
     attachments,
@@ -147,14 +165,16 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
       return;
     }
     const accessToken = token;
-    return connectResilientWebSocket({
+    const connection = connectResilientWebSocket({
       getUrl: () => getDiscussionWebSocketUrl(accessToken, discussionId),
       onStatusChange: setLiveUpdateStatus,
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DiscussionEvent;
-          if (payload.type === "discussion.message.reactions.updated") {
+          if (payload.type === "typing.updated") {
+            handleTypingEvent(payload);
+          } else if (payload.type === "discussion.message.reactions.updated") {
             const reactions = reactionsForCurrentUser(payload.reactions, currentUser.id);
             setMessages((current) =>
               current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
@@ -167,7 +187,13 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
         }
       }
     });
-  }, [currentUser.id, dictionary.session.accessDenied, discussionId, locale, refreshDiscussion, router]);
+    socketRef.current = connection;
+    return () => {
+      stopTyping();
+      if (socketRef.current === connection) socketRef.current = null;
+      connection();
+    };
+  }, [currentUser.id, dictionary.session.accessDenied, discussionId, handleTypingEvent, locale, refreshDiscussion, router, stopTyping]);
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);
@@ -252,6 +278,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
         await sendDiscussionMessage(token, discussionId, messageBody);
       }
       setMessageBody("");
+      stopTyping();
       setEmojiPickerResetKey((current) => current + 1);
       clearAttachments();
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -443,6 +470,11 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
                     <UserAvatar size={30} user={member.user} />
                     <span>
                       <strong>{member.user.display_name}</strong> @{member.user.username}
+                      <PresenceStatus
+                        dictionary={dictionary}
+                        locale={locale}
+                        presence={presenceByUserId[member.user_id]}
+                      />
                     </span>
                   </span>
                   <span className="role-badge">{member.role}</span>
@@ -567,6 +599,7 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
             totalSize={totalSize}
           />
         ) : null}
+        <TypingIndicator dictionary={dictionary} users={typingUsers} />
         <div className="discussion-composer-row">
           <input
             className="visually-hidden"
@@ -605,8 +638,10 @@ export function DiscussionPanel({ currentUser, dictionary, discussionId, locale,
             className="field-input composer-textarea"
             onChange={(event) => {
               setMessageBody(event.target.value);
+              notifyTyping(event.target.value);
               resizeComposer(event.currentTarget);
             }}
+            onBlur={stopTyping}
             onKeyDown={handleComposerKeyDown}
             onPaste={(event) => {
               if (handlePaste(event) && fileInputRef.current) fileInputRef.current.value = "";

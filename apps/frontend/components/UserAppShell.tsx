@@ -24,6 +24,7 @@ import {
   getGroupMessages,
   getLocalizedApiError,
   getPersonalWebSocketUrl,
+  getPresence,
   requireStoredAccessToken,
   getStoredAccessToken,
   getUsers,
@@ -37,6 +38,7 @@ import {
   type OfficeChatGroup,
   type OfficeChatGroupMember,
   type OfficeChatMessage,
+  type OfficeChatPresence,
   type OfficeChatUser,
   type PersonalNotificationEvent
 } from "../lib/api";
@@ -47,11 +49,16 @@ import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
 import { UserAvatar } from "./UserAvatar";
+import { PresenceStatus } from "./PresenceStatus";
 
 type UserAppShellProps = {
   dictionary: Dictionary;
   locale: Locale;
 };
+
+const presenceHeartbeatSeconds = Number(process.env.NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS ?? 25);
+const presenceHeartbeatIntervalMs =
+  (Number.isFinite(presenceHeartbeatSeconds) ? Math.max(10, presenceHeartbeatSeconds) : 25) * 1000;
 
 type SidebarSide = "left" | "right";
 type AppFontSize = "small" | "normal" | "large";
@@ -274,6 +281,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     createEmptyNotificationDebug()
   );
   const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
+  const [presenceByUserId, setPresenceByUserId] = useState<Record<string, OfficeChatPresence>>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationGuideOpen, setIsNotificationGuideOpen] = useState(false);
@@ -822,6 +830,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         setGroups(loadedGroups);
         setUsers(loadedUsers);
         setDirectConversations(loadedDirectConversations);
+        void getPresence(accessToken, loadedUsers.map((user) => user.id))
+          .then((presenceRows) => {
+            setPresenceByUserId(
+              Object.fromEntries(presenceRows.map((presence) => [presence.user_id, presence]))
+            );
+          })
+          .catch(() => undefined);
         setSidebarActivity(readSidebarActivity(loadedUser.id));
         setSelected(loadedGroups[0] ? { type: "group", groupId: loadedGroups[0].id } : { type: "empty" });
       } catch (caughtError) {
@@ -850,6 +865,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       .then(setSelectedMembers)
       .catch(() => setSelectedMembers([]));
   }, [locale, router, selected]);
+
+  useEffect(() => {
+    const token = getStoredAccessToken();
+    if (!token || selectedMembers.length === 0) return;
+    void getPresence(token, selectedMembers.map((member) => member.user_id))
+      .then((rows) => setPresenceByUserId((current) => ({
+        ...current,
+        ...Object.fromEntries(rows.map((presence) => [presence.user_id, presence]))
+      })))
+      .catch(() => undefined);
+  }, [selectedMembers]);
 
   useEffect(() => {
     if (selected.type === "group") {
@@ -989,11 +1015,23 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
     return connectResilientWebSocket({
       getUrl: () => getPersonalWebSocketUrl(accessToken),
+      heartbeatIntervalMs: presenceHeartbeatIntervalMs,
       onStatusChange: setPersonalSocketStatus,
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as PersonalNotificationEvent;
+          if (payload.type === "presence.updated") {
+            setPresenceByUserId((current) => ({
+              ...current,
+              [payload.user_id]: {
+                user_id: payload.user_id,
+                status: payload.status,
+                last_seen_at: payload.last_seen_at
+              }
+            }));
+            return;
+          }
           if (payload.type === "user.group.message.created") {
             handleGroupPersonalEvent(payload);
             return;
@@ -1457,7 +1495,15 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   {isGroup ? (
                     <span className="chat-avatar chat-avatar-group" aria-hidden="true">{getInitials(name)}</span>
                   ) : (
-                    <UserAvatar user={item.user} size={40} />
+                    <span className="presence-avatar-wrap">
+                      <UserAvatar user={item.user} size={40} />
+                      <PresenceStatus
+                        compact
+                        dictionary={dictionary}
+                        locale={locale}
+                        presence={presenceByUserId[item.user.id]}
+                      />
+                    </span>
                   )}
                   <span className="sidebar-item-content">
                     <span className="sidebar-item-top">
@@ -1607,6 +1653,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   discussionId={activeDiscussionId}
                   locale={locale}
                   onClose={() => setActiveDiscussionId(null)}
+                  presenceByUserId={presenceByUserId}
                 />
               ) : null}
             </div>
@@ -1622,9 +1669,12 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   <UserAvatar user={selectedDirectConversation.other_user} size={40} />
                   <div>
                     <h2 className="section-title">{selectedDirectConversation.other_user.display_name}</h2>
-                    <p className="admin-current">
-                      @{selectedDirectConversation.other_user.username} · {dictionary.appShell.onlineStatusPlaceholder}
-                    </p>
+                    <p className="admin-current">@{selectedDirectConversation.other_user.username}</p>
+                    <PresenceStatus
+                      dictionary={dictionary}
+                      locale={locale}
+                      presence={presenceByUserId[selectedDirectConversation.other_user.id]}
+                    />
                   </div>
                 </div>
               </div>

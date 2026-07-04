@@ -247,6 +247,22 @@
     "attachmentsCount": "📎 Files: {count}",
     "unread": "Unread"
   },
+  "presence": {
+    "online": "Online",
+    "offline": "Offline",
+    "unknown": "Status unavailable",
+    "justNow": "Last seen just now",
+    "minutesAgo": "Last seen {count} minutes ago",
+    "todayAt": "Last seen today at {time}",
+    "yesterdayAt": "Last seen yesterday at {time}",
+    "dateAt": "Last seen {date} at {time}"
+  },
+  "typing": {
+    "one": "{name} is typing...",
+    "two": "{first} and {second} are typing...",
+    "several": "Several people are typing...",
+    "direct": "Typing..."
+  },
   "appShell": {
     "title": "Chat",
     "loading": "Loading OfficeChat...",

@@ -16,6 +16,7 @@ from app.services.users import (
     reset_local_user_password,
     update_user,
 )
+from app.services.websocket_manager import user_websocket_manager
 
 router = APIRouter()
 
@@ -117,6 +118,8 @@ async def patch_user(
             )
         await session.commit()
         await session.refresh(updated)
+        if "is_active" in changes and not updated.is_active:
+            await user_websocket_manager.close_user_connections(updated.id)
         return updated
     except IntegrityError as exc:
         await session.rollback()

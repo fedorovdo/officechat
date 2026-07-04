@@ -22,7 +22,8 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
-import { connectResilientWebSocket } from "../lib/resilientWebSocket";
+import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
+import { useTyping } from "../lib/useTyping";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -32,6 +33,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
+import { TypingIndicator } from "./TypingIndicator";
 
 type DirectChatPanelProps = {
   conversation: OfficeChatDirectConversation;
@@ -49,6 +51,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const socketRef = useRef<ResilientWebSocketConnection | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
   const [messages, setMessages] = useState<OfficeChatDirectMessage[]>([]);
@@ -66,6 +69,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const [archivedMessages, setArchivedMessages] = useState<OfficeChatDirectMessage[]>([]);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
+    socketRef,
+    currentUser.id,
+    conversation.id
+  );
   const {
     appendFiles,
     attachments,
@@ -192,14 +200,16 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       }
     }
 
-    return connectResilientWebSocket({
+    const connection = connectResilientWebSocket({
       getUrl: () => getDirectWebSocketUrl(accessToken, conversation.id),
       onStatusChange: setLiveUpdateStatus,
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as DirectMessageEvent;
-          if (payload.type === "direct.message.reactions.updated") {
+          if (payload.type === "typing.updated") {
+            handleTypingEvent(payload);
+          } else if (payload.type === "direct.message.reactions.updated") {
             const reactions = reactionsForCurrentUser(payload.reactions, currentUser.id);
             setMessages((current) =>
               current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
@@ -214,7 +224,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
         }
       }
     });
-  }, [conversation.id, currentUser.id, dictionary.session.accessDenied, locale, refreshMessages, router]);
+    socketRef.current = connection;
+    return () => {
+      stopTyping();
+      if (socketRef.current === connection) socketRef.current = null;
+      connection();
+    };
+  }, [conversation.id, currentUser.id, dictionary.session.accessDenied, handleTypingEvent, locale, refreshMessages, router, stopTyping]);
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);
@@ -326,6 +342,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
         await sendDirectMessage(token, conversation.id, messageBody, abortController.signal, replyToMessage?.id);
       }
       setMessageBody("");
+      stopTyping();
       setEmojiPickerResetKey((current) => current + 1);
       clearAttachments();
       setReplyToMessage(null);
@@ -616,6 +633,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
             totalSize={totalSize}
           />
         ) : null}
+        <TypingIndicator dictionary={dictionary} direct users={typingUsers} />
         <div className="messenger-composer-row messenger-composer-row-direct">
           <input
             className="visually-hidden"
@@ -654,8 +672,10 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
             className="field-input composer-textarea"
             onChange={(event) => {
               setMessageBody(event.target.value);
+              notifyTyping(event.target.value);
               resizeComposer(event.currentTarget);
             }}
+            onBlur={stopTyping}
             onKeyDown={handleComposerKeyDown}
             onPaste={(event) => {
               if (handlePaste(event) && fileInputRef.current) fileInputRef.current.value = "";

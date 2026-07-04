@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict
 from uuid import UUID
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -32,7 +32,7 @@ class GroupWebSocketManager:
         for websocket in connections:
             try:
                 await websocket.send_json(event)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect):
                 self.disconnect(group_id, websocket)
 
 
@@ -68,7 +68,7 @@ class DirectWebSocketManager:
         for websocket in connections:
             try:
                 await websocket.send_json(event)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect):
                 self.disconnect(conversation_id, websocket)
 
 
@@ -118,7 +118,7 @@ class DiscussionWebSocketManager:
         for websocket in connections:
             try:
                 await websocket.send_json(event)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect):
                 self.disconnect(discussion_id, websocket)
 
 
@@ -144,13 +144,22 @@ class UserWebSocketManager:
             self._connections.pop(user_id, None)
         logger.info("WebSocket disconnected from user %s; active=%s", user_id, len(connections))
 
+    async def close_user_connections(self, user_id: UUID, code: int = 4401) -> None:
+        for websocket in list(self._connections.get(user_id, set())):
+            try:
+                await websocket.close(code=code)
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+            finally:
+                self.disconnect_user(user_id, websocket)
+
     async def broadcast_to_user(self, user_id: UUID, event: dict[str, object]) -> None:
         # TODO: Use Valkey pub/sub or another broker before running multiple backend instances.
         connections = list(self._connections.get(user_id, set()))
         for websocket in connections:
             try:
                 await websocket.send_json(event)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect):
                 self.disconnect_user(user_id, websocket)
 
 

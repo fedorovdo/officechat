@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.logging import configure_sensitive_log_redaction
 from app.core.middleware import RequestIdMiddleware, UnexpectedErrorMiddleware
 from app.services.bootstrap import bootstrap_superadmin
+from app.services.presence import start_presence_sweeper, stop_presence_service
 
 
 def create_app() -> FastAPI:
@@ -34,6 +35,11 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         await bootstrap_superadmin()
+        start_presence_sweeper()
+
+    @app.on_event("shutdown")
+    async def shutdown() -> None:
+        await stop_presence_service()
 
     @app.get("/")
     async def root() -> dict[str, str]:

@@ -19,6 +19,8 @@ WS /api/ws/discussions/{discussion_id}?token=...
 WS /api/ws/me?token=...
 ```
 
+`/api/ws/me` также принимает heartbeat и доставляет `presence.updated`. Комнатные каналы принимают `typing.start`/`typing.stop` и отправляют авторизованным участникам `typing.updated`. Черновики и их текст через WebSocket не передаются. Подробности TTL, grace-периода и privacy rules описаны в [PRESENCE_RU.md](PRESENCE_RU.md).
+
 Для локальной разработки клиент передает JWT bearer token в query-параметре `token`. Это удобно для MVP и отладки, но для production-сценариев нужно перейти на более строгую схему с secure cookies, короткими session-токенами или другим защищенным механизмом.
 
 ## Проверки доступа
@@ -177,7 +179,6 @@ Personal notification events:
 
 ## Ограничения v0.1
 
-- Нет typing indicators.
 - Нет read receipts.
 - Нет reactions.
 - Нет mention autocomplete и profile links.

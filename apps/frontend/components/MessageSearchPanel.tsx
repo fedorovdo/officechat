@@ -78,8 +78,12 @@ export function MessageSearchPanel({
   }
 
   useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus();
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      previousFocus?.focus();
+    };
   }, []);
 
   useEffect(() => {

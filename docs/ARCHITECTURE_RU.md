@@ -48,6 +48,8 @@ Backend использует FastAPI и конфигурацию из перем
 
 Frontend использует Next.js, React и TypeScript. Интерфейс сразу подготовлен к RU/EN через JSON-словари. Добавление новых языков должно происходить через расширение списка локалей и добавление нового словаря.
 
+Frontend unit/component test layer построен на Vitest, jsdom и React Testing Library; тесты и общие factories находятся в `apps/frontend/tests`. Browser API изолированы resettable-моками, а неожиданные fetch-запросы запрещены, поэтому этот слой не требует работающего backend или браузерного окна. Он проверяет поведенческие границы session, WebSocket reconnect, unread/read state, search, presence/typing и admin UI, но не заменяет визуальные и сквозные проверки. Полноценный Playwright E2E слой запланирован отдельно.
+
 ## Развитие
 
 Следующие архитектурные слои должны добавляться постепенно:

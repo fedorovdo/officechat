@@ -12,6 +12,24 @@ docker compose exec backend python -m pytest -q
 
 Короткая команда `docker compose exec backend pytest -q` также доступна, но форма через `python -m pytest` является основной.
 
+## Frontend-тесты
+
+Unit- и component-тесты frontend находятся в `apps/frontend/tests` и используют Vitest, jsdom и React Testing Library. Стандартный неинтерактивный запуск:
+
+```powershell
+docker compose exec frontend npm run test:run
+```
+
+Режим наблюдения для локальной разработки:
+
+```powershell
+docker compose exec frontend npm run test:watch
+```
+
+`tests/setup.ts` сбрасывает `localStorage`, `sessionStorage` и моки между тестами, а также предоставляет контролируемые реализации WebSocket, fetch, `matchMedia`, `ResizeObserver`, visibility и focus. Неожиданный сетевой запрос завершается ошибкой, поэтому тесты не зависят от backend или внешней сети.
+
+Текущий набор покрывает session lifecycle, reconnect WebSocket, unread/read markers, message search, presence/typing и основные admin UI flows. Это быстрые unit/component-тесты без настоящего браузера. Ручные browser smoke checks остаются обязательными для визуального и интеграционного поведения; Playwright E2E планируется отдельным этапом.
+
 Unread/read-state API можно проверить после входа через `GET /api/unread` и `POST /api/read-state`. Миграция `20260704_0017` не переписывает сообщения: она создаёт только high-water rows и считает существующую историю прочитанной. Для проверки скрытой вкладки и cross-tab synchronization используйте два профиля браузера; read actions намеренно не появляются в Audit Log.
 
 Message Search проверяется в `/ru/app` кнопкой рядом с поиском сайдбара или `Ctrl+K`. API: `GET /api/search/messages?q=<строка>` и `GET /api/search/context`. Миграция `20260704_0018` добавляет GIN-индексы без переписывания истории. Проверьте body, имя вложения, current-chat scope, sender/date filters и deep link. В backend access log должно быть `q=[REDACTED]`, а в Audit Log не должно быть события обычного поиска.

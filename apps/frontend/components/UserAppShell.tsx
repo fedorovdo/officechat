@@ -49,6 +49,7 @@ import {
 import type { Dictionary, Locale } from "../lib/i18n";
 import { connectResilientWebSocket } from "../lib/resilientWebSocket";
 import { formatUnreadCount, useUnreadStore } from "../lib/useUnreadStore";
+import { useMessageSearchShortcut } from "../lib/useMessageSearchShortcut";
 import { logoutSession, onAuthenticationExpired } from "../lib/session";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
@@ -312,6 +313,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [error, setError] = useState("");
   const unreadToken = currentUser ? getStoredAccessToken() : null;
   const unreadStore = useUnreadStore(unreadToken, currentUser?.id ?? null);
+  useMessageSearchShortcut(() => setIsMessageSearchOpen(true));
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
   const selectedDirectConversation =
@@ -889,17 +891,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       .then(setSelectedMembers)
       .catch(() => setSelectedMembers([]));
   }, [locale, router, selected]);
-
-  useEffect(() => {
-    function handleSearchShortcut(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
-        event.preventDefault();
-        setIsMessageSearchOpen(true);
-      }
-    }
-    window.addEventListener("keydown", handleSearchShortcut);
-    return () => window.removeEventListener("keydown", handleSearchShortcut);
-  }, []);
 
   useEffect(() => {
     if (!currentUser || deepLinkHandledRef.current) return;

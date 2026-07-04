@@ -201,10 +201,23 @@ docker compose logs -f frontend
 docker compose down
 ```
 
+## Frontend Tests
+
+Frontend unit and component tests use Vitest, jsdom, and React Testing Library. They live in `apps/frontend/tests` and run without a browser window or real network requests.
+
+```powershell
+docker compose exec frontend npm run test:run
+docker compose exec frontend npm run test:watch
+```
+
+The test environment supplies resettable browser API mocks for storage, visibility, WebSocket, fetch, media queries, and resize observation. Manual browser smoke checks remain separate; Playwright end-to-end coverage is planned for a later milestone.
+
 ## Verification
 
 ```powershell
 docker compose exec backend python -m pytest -q
+docker compose exec frontend npm run test:run
+docker compose exec frontend npm run build
 curl http://localhost:8100/
 curl http://localhost:8100/health
 curl http://localhost:8100/api/system/info

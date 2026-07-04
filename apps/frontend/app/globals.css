@@ -779,6 +779,79 @@ a {
   margin-top: 2px;
 }
 
+.sidebar-tab {
+  position: relative;
+}
+
+.sidebar-tab-badge,
+.sidebar-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sidebar-tab-badge {
+  margin-left: 5px;
+}
+
+.sidebar-unread-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.sidebar-unread-badge-mention {
+  background: #7c3aed;
+  margin-left: 4px;
+}
+
+.unread-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 8px 0;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.unread-separator::before,
+.unread-separator::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #bfdbfe;
+}
+
+.unread-separator span {
+  white-space: nowrap;
+}
+
+.direct-read-receipt {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: 11px;
+  text-align: right;
+}
+
+.sidebar-unread-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .admin-user-drawer-header {
   position: sticky;
   top: -26px;

@@ -19,6 +19,7 @@ from app.services.retention import (
     run_retention_cleanup,
     update_retention_settings,
 )
+from app.services.unread import broadcast_unread_refresh
 
 router = APIRouter()
 
@@ -67,7 +68,9 @@ async def post_run(
         )
     current = await get_retention_settings(session)
     try:
-        return await run_retention_cleanup(session, current, current_user, request)
+        result = await run_retention_cleanup(session, current, current_user, request)
+        await broadcast_unread_refresh()
+        return result
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RuntimeError as exc:

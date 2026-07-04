@@ -21,6 +21,8 @@ WS /api/ws/me?token=...
 
 `/api/ws/me` также принимает heartbeat и доставляет `presence.updated`. Комнатные каналы принимают `typing.start`/`typing.stop` и отправляют авторизованным участникам `typing.updated`. Черновики и их текст через WebSocket не передаются. Подробности TTL, grace-периода и privacy rules описаны в [PRESENCE_RU.md](PRESENCE_RU.md).
 
+Персональный канал доставляет `unread.updated` и `unread.refresh` для синхронизации вкладок и устройств. Direct room channel дополнительно доставляет participant-only `direct.read`. Отдельные unread WebSocket не создаются. Подробности описаны в [UNREAD_RU.md](UNREAD_RU.md).
+
 Для локальной разработки клиент передает JWT bearer token в query-параметре `token`. Это удобно для MVP и отладки, но для production-сценариев нужно перейти на более строгую схему с secure cookies, короткими session-токенами или другим защищенным механизмом.
 
 ## Проверки доступа

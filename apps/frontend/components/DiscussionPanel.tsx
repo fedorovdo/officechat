@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -24,11 +24,13 @@ import {
   type OfficeChatDiscussionMessage,
   type OfficeChatMessageReaction,
   type OfficeChatPresence,
+  type OfficeChatUnreadChat,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
+import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -40,6 +42,7 @@ import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 import { TypingIndicator } from "./TypingIndicator";
 import { PresenceStatus } from "./PresenceStatus";
+import { UnreadSeparator } from "./UnreadSeparator";
 
 type DiscussionPanelProps = {
   currentUser: OfficeChatUser;
@@ -48,6 +51,8 @@ type DiscussionPanelProps = {
   locale: Locale;
   onClose: () => void;
   presenceByUserId?: Record<string, OfficeChatPresence>;
+  onMarkRead?: (messageId: string) => void | Promise<void>;
+  unread?: OfficeChatUnreadChat;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -58,13 +63,17 @@ export function DiscussionPanel({
   discussionId,
   locale,
   onClose,
-  presenceByUserId = {}
+  presenceByUserId = {},
+  onMarkRead,
+  unread
 }: DiscussionPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const socketRef = useRef<ResilientWebSocketConnection | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const messagesListRef = useRef<HTMLDivElement | null>(null);
   const [discussion, setDiscussion] = useState<OfficeChatDiscussion | null>(null);
   const [messages, setMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
@@ -85,6 +94,7 @@ export function DiscussionPanel({
     currentUser.id,
     discussionId
   );
+  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread });
   const {
     appendFiles,
     attachments,
@@ -146,6 +156,13 @@ export function DiscussionPanel({
     setArchivedMessages([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [discussionId]);
+
+  useEffect(() => {
+    if (!unread?.first_unread_message_id || messages.length === 0) return;
+    requestAnimationFrame(() => {
+      messagesListRef.current?.querySelector("[data-unread-separator]")?.scrollIntoView({ block: "center" });
+    });
+  }, [messages, unread?.first_unread_message_id]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -416,7 +433,7 @@ export function DiscussionPanel({
   const canDeleteOthers = currentMembership?.role === "owner" || isAdminRole(currentUser.role);
 
   return (
-    <aside className="discussion-panel" aria-label={dictionary.discussions.ariaLabel} {...dropZoneProps}>
+    <aside className="discussion-panel" aria-label={dictionary.discussions.ariaLabel} ref={panelRef} {...dropZoneProps}>
       <ComposerDropOverlay dictionary={dictionary} visible={isFileDragging} />
       <div className="dashboard-header discussion-panel-header">
         <div>
@@ -509,12 +526,14 @@ export function DiscussionPanel({
 
       <section className="discussion-section discussion-messages-section">
         <h3 className="compact-title">{dictionary.discussions.messages}</h3>
-        <div className="discussion-messages-list">
+        <div className="discussion-messages-list" ref={messagesListRef}>
           {messages.map((message) => {
             const canEdit = message.sender_user_id === currentUser.id && !message.is_deleted;
             const canDelete = (message.sender_user_id === currentUser.id || canDeleteOthers) && !message.is_deleted;
             return (
-              <article className={message.is_deleted ? "discussion-message discussion-message-deleted" : "discussion-message"} key={message.id}>
+              <Fragment key={message.id}>
+                {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
+              <article className={message.is_deleted ? "discussion-message discussion-message-deleted" : "discussion-message"}>
                 <div className="message-meta">
                   <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                   <strong>{message.sender.display_name}</strong>
@@ -583,6 +602,7 @@ export function DiscussionPanel({
                   </div>
                 ) : null}
               </article>
+              </Fragment>
             );
           })}
         </div>

@@ -14,6 +14,7 @@ from app.api.routes.groups import router as groups_router
 from app.api.routes.presence import router as presence_router
 from app.api.routes.system import router as system_router
 from app.api.routes.users import router as users_router
+from app.api.routes.unread import router as unread_router
 from app.api.routes.ws import router as ws_router
 
 api_router = APIRouter()
@@ -22,6 +23,7 @@ api_router.include_router(db_router, tags=["infrastructure"])
 api_router.include_router(cache_router, tags=["infrastructure"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
+api_router.include_router(unread_router, tags=["unread"])
 api_router.include_router(bots_router, prefix="/bots", tags=["bots"])
 api_router.include_router(direct_router, prefix="/direct", tags=["direct"])
 api_router.include_router(discussions_router, prefix="/discussions", tags=["discussions"])

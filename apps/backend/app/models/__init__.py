@@ -7,11 +7,13 @@ from app.models.group import Group, GroupMember
 from app.models.mention import MessageMention
 from app.models.message import Message
 from app.models.reaction import DirectMessageReaction, DiscussionMessageReaction, GroupMessageReaction
+from app.models.read_state import ChatReadState
 from app.models.retention import RetentionAudit, RetentionSettings
 from app.models.user import User
 
 __all__ = [
     "Bot",
+    "ChatReadState",
     "AuditEvent",
     "DirectConversation",
     "DirectMessage",

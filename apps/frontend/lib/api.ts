@@ -49,6 +49,68 @@ export type TypingEvent = {
   is_typing: boolean;
 };
 
+export type ChatType = "group" | "direct" | "discussion";
+
+export type OfficeChatUnreadChat = {
+  chat_type: ChatType;
+  chat_id: string;
+  unread_count: number;
+  mention_count: number;
+  first_unread_message_id: string | null;
+  newest_unread_message_id: string | null;
+};
+
+export type OfficeChatUnreadSummary = {
+  total: number;
+  groups: number;
+  direct: number;
+  discussions: number;
+  chats: OfficeChatUnreadChat[];
+};
+
+export type OfficeChatReadState = {
+  chat_type: ChatType;
+  chat_id: string;
+  last_read_message_id: string | null;
+  first_unread_message_id?: string | null;
+  newest_unread_message_id?: string | null;
+  last_read_message_created_at: string | null;
+  last_read_at: string | null;
+  unread_count: number;
+  mention_count: number;
+  total_unread: number;
+};
+
+export type OfficeChatDirectReadReceipt = {
+  conversation_id: string;
+  reader_user_id: string;
+  last_read_message_id: string | null;
+  last_read_message_created_at: string | null;
+  read_at: string | null;
+};
+
+export type UnreadEvent = {
+  type: "unread.updated";
+  chat_type: ChatType;
+  chat_id: string;
+  unread_count: number;
+  mention_count: number;
+  total_unread: number | null;
+  last_read_message_id: string | null;
+  first_unread_message_id?: string | null;
+  newest_unread_message_id?: string | null;
+  removed?: boolean;
+};
+
+export type DirectReadEvent = {
+  type: "direct.read";
+  conversation_id: string;
+  reader_user_id: string;
+  last_read_message_id: string | null;
+  last_read_message_created_at: string | null;
+  read_at: string | null;
+};
+
 export type CreateAdminUserPayload = {
   username: string;
   display_name: string;
@@ -301,7 +363,8 @@ export type DirectMessageEvent =
       message_id: string;
       reactions: OfficeChatMessageReaction[];
     }
-  | TypingEvent;
+  | TypingEvent
+  | DirectReadEvent;
 
 export type DiscussionEvent =
   | {
@@ -353,7 +416,9 @@ export type PersonalNotificationEvent =
       user_id: string;
       status: "online" | "offline";
       last_seen_at: string | null;
-    };
+    }
+  | UnreadEvent
+  | { type: "unread.refresh" };
 
 export type CreateGroupPayload = {
   name: string;
@@ -721,6 +786,21 @@ export function getStorageStats(token: string) {
 
 export function getUsers(token: string) {
   return apiFetch<OfficeChatDirectoryUser[]>("/api/users", token);
+}
+
+export function getUnreadSummary(token: string) {
+  return apiFetch<OfficeChatUnreadSummary>("/api/unread", token);
+}
+
+export function markChatRead(token: string, chatType: ChatType, chatId: string, messageId: string) {
+  return apiFetch<OfficeChatReadState>("/api/read-state", token, {
+    method: "POST",
+    body: JSON.stringify({ chat_type: chatType, chat_id: chatId, message_id: messageId })
+  });
+}
+
+export function getDirectReadReceipt(token: string, conversationId: string) {
+  return apiFetch<OfficeChatDirectReadReceipt>(`/api/read-state/direct/${conversationId}/receipt`, token);
 }
 
 export function getPresence(token: string, userIds: string[]) {

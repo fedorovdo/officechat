@@ -12,6 +12,8 @@ docker compose exec backend python -m pytest -q
 
 Короткая команда `docker compose exec backend pytest -q` также доступна, но форма через `python -m pytest` является основной.
 
+Unread/read-state API можно проверить после входа через `GET /api/unread` и `POST /api/read-state`. Миграция `20260704_0017` не переписывает сообщения: она создаёт только high-water rows и считает существующую историю прочитанной. Для проверки скрытой вкладки и cross-tab synchronization используйте два профиля браузера; read actions намеренно не появляются в Audit Log.
+
 ## Audit Log
 
 Admin UI: `http://localhost:3100/ru/admin/audit`. Для проверки создайте пользователя, измените роль/статус, выполните password reset и bot token rotation, затем убедитесь, что секретные значения отсутствуют в details и CSV. Каждый response содержит `X-Request-ID`.

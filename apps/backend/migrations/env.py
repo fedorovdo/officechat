@@ -9,6 +9,7 @@ from app.db.base import Base
 from app.models import (
     AuditEvent,
     Bot,
+    ChatReadState,
     DirectMessageAttachment,
     Discussion,
     DiscussionMember,

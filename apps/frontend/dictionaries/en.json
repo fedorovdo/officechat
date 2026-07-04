@@ -263,6 +263,15 @@
     "several": "Several people are typing...",
     "direct": "Typing..."
   },
+  "unread": {
+    "separator": "Unread messages",
+    "sent": "Sent",
+    "read": "Read",
+    "counterLabel": "{count} unread messages",
+    "mentionLabel": "{count} mentions",
+    "loading": "Loading unread messages",
+    "error": "Unread counters are temporarily unavailable"
+  },
   "appShell": {
     "title": "Chat",
     "loading": "Loading OfficeChat...",

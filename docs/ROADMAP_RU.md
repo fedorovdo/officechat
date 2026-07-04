@@ -54,14 +54,14 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Presence через Valkey, multi-tab heartbeat и persistent last seen реализованы в v0.1.
 - Typing indicators для групп, direct messages и discussions реализованы в v0.1.
 - Доставка и статусы сообщений.
-- Backend read receipts и server-side unread counters.
+- Server-side unread counters, multi-tab read-state sync и direct read receipts реализованы в v0.1.
 - Базовые уведомления в интерфейсе.
 - Service worker и server push notifications для уведомлений без открытой вкладки.
 - Custom reactions, стикеры и GIF.
 - Расширение discussions: отдельный sidebar список, direct-message discussions и более развитое представление цепочек.
 - Autocomplete и profile links для mentions, поддержка mentions в direct messages.
 - Away, do not disturb, пользовательский статус и настройки приватности presence.
-- Read receipts для групп и direct messages.
+- Group/discussion read receipts и список прочитавших.
 
 ## Branding and About
 

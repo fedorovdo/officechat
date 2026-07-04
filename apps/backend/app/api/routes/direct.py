@@ -38,6 +38,7 @@ from app.services.attachments import resolve_attachment_path
 from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
 from app.services.reactions import add_direct_message_reaction, remove_direct_message_reaction
 from app.services.websocket_manager import direct_websocket_manager
+from app.services.unread import broadcast_unread_for_chat
 
 router = APIRouter()
 
@@ -158,7 +159,7 @@ async def post_message(
     conversation = await load_conversation_or_404(session, conversation_id)
     try:
         message = await create_direct_message(session, conversation, current_user, payload)
-        await broadcast_direct_message_created(conversation, message)
+        await broadcast_direct_message_created(session, conversation, message)
         return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -184,7 +185,7 @@ async def post_message_with_attachments(
         message = await create_direct_message_with_attachments(
             session, conversation, current_user, body, files or [], reply_to_message_id
         )
-        await broadcast_direct_message_created(conversation, message)
+        await broadcast_direct_message_created(session, conversation, message)
         return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -210,7 +211,7 @@ async def post_message_with_attachment(
         message = await create_direct_message_with_attachment(
             session, conversation, current_user, body, file, reply_to_message_id
         )
-        await broadcast_direct_message_created(conversation, message)
+        await broadcast_direct_message_created(session, conversation, message)
         return serialize_message(message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -309,6 +310,10 @@ async def delete_message(
             conversation_id,
             direct_message_event_payload("direct.message.deleted", conversation_id, deleted_message),
         )
+        recipient_ids = [
+            user.id for user in (conversation.user_one, conversation.user_two) if user.is_active
+        ]
+        await broadcast_unread_for_chat(session, "direct", conversation_id, recipient_ids)
         return serialize_message(deleted_message, current_user)
     except PermissionError as exc:
         raise_for_permission_error(exc)

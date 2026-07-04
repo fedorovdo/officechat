@@ -35,6 +35,7 @@ from app.services.discussions import (
     get_discussion_message,
     list_discussion_messages,
     list_archived_discussion_messages,
+    list_active_discussion_member_user_ids,
     remove_discussion_member,
     update_discussion_message,
 )
@@ -46,6 +47,7 @@ from app.services.personal_notifications import (
 )
 from app.services.reactions import add_discussion_message_reaction, remove_discussion_message_reaction
 from app.services.websocket_manager import discussion_websocket_manager
+from app.services.unread import broadcast_unread_for_chat, broadcast_unread_removed
 
 router = APIRouter()
 
@@ -200,6 +202,7 @@ async def delete_member(
 
     try:
         member_username = member.user.username
+        member_user_id = member.user_id
         member_role = member.role
         await remove_discussion_member(session, discussion, member, current_user, commit=False)
         await record_audit_event(
@@ -209,6 +212,7 @@ async def delete_member(
             details={"member_username": member_username, "role": member_role}, request=request,
         )
         await session.commit()
+        await broadcast_unread_removed(member_user_id, "discussion", discussion.id)
         await discussion_websocket_manager.broadcast_to_discussion(
             discussion.id,
             {
@@ -401,6 +405,12 @@ async def delete_message(
         await discussion_websocket_manager.broadcast_to_discussion(
             discussion.id,
             discussion_message_event_payload("discussion.message.deleted", discussion.id, deleted_message),
+        )
+        await broadcast_unread_for_chat(
+            session,
+            "discussion",
+            discussion.id,
+            await list_active_discussion_member_user_ids(session, discussion.id),
         )
         return serialize_message(deleted_message, current_user)
     except PermissionError as exc:

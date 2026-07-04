@@ -50,7 +50,12 @@ from app.services.messages import (
     list_archived_group_messages,
     update_group_message,
 )
-from app.services.personal_notifications import broadcast_group_message_created, group_message_event_payload
+from app.services.personal_notifications import (
+    broadcast_group_message_created,
+    group_message_event_payload,
+    list_active_group_member_user_ids,
+)
+from app.services.unread import broadcast_unread_for_chat, broadcast_unread_refresh, broadcast_unread_removed
 from app.services.reactions import add_group_message_reaction, remove_group_message_reaction
 from app.services.websocket_manager import group_websocket_manager
 
@@ -153,6 +158,8 @@ async def patch_group(
     )
     await session.commit()
     await session.refresh(updated)
+    if "is_active" in changes:
+        await broadcast_unread_refresh()
     return updated
 
 
@@ -255,6 +262,7 @@ async def delete_member(
 
     try:
         member_username = member.user.username
+        member_user_id = member.user_id
         member_role = member.role
         await remove_group_member(session, member, commit=False)
         await record_audit_event(
@@ -264,6 +272,7 @@ async def delete_member(
             request=request,
         )
         await session.commit()
+        await broadcast_unread_removed(member_user_id, "group", group_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -458,6 +467,12 @@ async def delete_message(
         await group_websocket_manager.broadcast_to_group(
             group_id,
             group_message_event_payload("message.deleted", group_id, deleted_message),
+        )
+        await broadcast_unread_for_chat(
+            session,
+            "group",
+            group_id,
+            await list_active_group_member_user_ids(session, group_id),
         )
         return serialize_message(deleted_message, current_user)
     except PermissionError as exc:

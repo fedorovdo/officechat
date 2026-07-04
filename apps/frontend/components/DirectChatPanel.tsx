@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -9,6 +9,7 @@ import {
   downloadDirectAttachment,
   editDirectMessage,
   getArchivedDirectMessages,
+  getDirectReadReceipt,
   getDirectMessages,
   getDirectWebSocketUrl,
   getStoredAccessToken,
@@ -18,12 +19,15 @@ import {
   type DirectMessageEvent,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
+  type OfficeChatDirectReadReceipt,
   type OfficeChatMessageReaction,
+  type OfficeChatUnreadChat,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
+import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -34,17 +38,20 @@ import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachmen
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 import { TypingIndicator } from "./TypingIndicator";
+import { UnreadSeparator } from "./UnreadSeparator";
 
 type DirectChatPanelProps = {
   conversation: OfficeChatDirectConversation;
   currentUser: OfficeChatUser;
   dictionary: Dictionary;
   locale: Locale;
+  onMarkRead?: (messageId: string) => void | Promise<void>;
+  unread?: OfficeChatUnreadChat;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
-export function DirectChatPanel({ conversation, currentUser, dictionary, locale }: DirectChatPanelProps) {
+export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread }: DirectChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
@@ -52,6 +59,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<ResilientWebSocketConnection | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
   const [messages, setMessages] = useState<OfficeChatDirectMessage[]>([]);
@@ -69,11 +77,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   const [archivedMessages, setArchivedMessages] = useState<OfficeChatDirectMessage[]>([]);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const [readReceipt, setReadReceipt] = useState<OfficeChatDirectReadReceipt | null>(null);
   const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
     socketRef,
     currentUser.id,
     conversation.id
   );
+  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread });
   const {
     appendFiles,
     attachments,
@@ -111,6 +121,19 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       }),
     [locale]
   );
+  const newestOwnMessage = useMemo(
+    () => [...messages].reverse().find((message) => message.sender_user_id === currentUser.id),
+    [currentUser.id, messages]
+  );
+
+  function isMessageRead(message: OfficeChatDirectMessage) {
+    if (!readReceipt?.last_read_message_id || !readReceipt.last_read_message_created_at) return false;
+    const markerTime = Date.parse(readReceipt.last_read_message_created_at);
+    const messageTime = Date.parse(message.created_at);
+    return markerTime > messageTime || (
+      markerTime === messageTime && readReceipt.last_read_message_id.localeCompare(message.id) >= 0
+    );
+  }
 
   function isNearMessagesBottom() {
     const messagesList = messagesListRef.current;
@@ -156,6 +179,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
     setReplyToMessage(null);
     setArchiveOpen(false);
     setArchivedMessages([]);
+    setReadReceipt(null);
   }, [conversation.id]);
 
   useEffect(() => {
@@ -165,6 +189,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       return;
     }
     void refreshMessages(token).catch(() => setError(dictionary.directMessages.loadError));
+    void getDirectReadReceipt(token, conversation.id).then(setReadReceipt).catch(() => setReadReceipt(null));
   }, [dictionary.directMessages.loadError, conversation.id, locale, refreshMessages, router]);
 
   useEffect(() => {
@@ -174,7 +199,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
 
     if (!hasInitialMessageScrollRef.current) {
       hasInitialMessageScrollRef.current = true;
-      requestAnimationFrame(() => scrollToLatestMessage("auto"));
+      requestAnimationFrame(() => {
+        const separator = messagesListRef.current?.querySelector("[data-unread-separator]");
+        if (separator) separator.scrollIntoView({ block: "center" });
+        else scrollToLatestMessage("auto");
+      });
       return;
     }
 
@@ -182,7 +211,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
       shouldScrollToBottomRef.current = false;
       requestAnimationFrame(() => scrollToLatestMessage());
     }
-  }, [messages]);
+  }, [messages, unread?.first_unread_message_id]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -209,6 +238,16 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
           const payload = JSON.parse(event.data as string) as DirectMessageEvent;
           if (payload.type === "typing.updated") {
             handleTypingEvent(payload);
+          } else if (payload.type === "direct.read") {
+            if (payload.reader_user_id !== currentUser.id) {
+              setReadReceipt({
+                conversation_id: payload.conversation_id,
+                reader_user_id: payload.reader_user_id,
+                last_read_message_id: payload.last_read_message_id,
+                last_read_message_created_at: payload.last_read_message_created_at,
+                read_at: payload.read_at
+              });
+            }
           } else if (payload.type === "direct.message.reactions.updated") {
             const reactions = reactionsForCurrentUser(payload.reactions, currentUser.id);
             setMessages((current) =>
@@ -464,7 +503,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
   }
 
   return (
-    <section className="messages-panel" aria-label={dictionary.directMessages.ariaLabel} {...dropZoneProps}>
+    <section className="messages-panel" aria-label={dictionary.directMessages.ariaLabel} ref={panelRef} {...dropZoneProps}>
       <ComposerDropOverlay dictionary={dictionary} visible={isFileDragging} />
       <div className="dashboard-header messages-toolbar">
         <div>
@@ -507,7 +546,9 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
             .filter(Boolean)
             .join(" ");
           return (
-            <article className={messageItemClasses} key={message.id}>
+            <Fragment key={message.id}>
+              {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
+            <article className={messageItemClasses}>
               <div className="message-meta">
                 <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                 <span className="message-author">
@@ -597,7 +638,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale 
                   ) : null}
                 </div>
               ) : null}
+              {message.id === newestOwnMessage?.id ? (
+                <p className="direct-read-receipt">
+                  {isMessageRead(message) ? dictionary.unread.read : dictionary.unread.sent}
+                </p>
+              ) : null}
             </article>
+            </Fragment>
           );
         })}
         <div ref={messagesEndRef} />

@@ -134,6 +134,9 @@ class UserWebSocketManager:
         self._connections[user_id].add(websocket)
         logger.info("WebSocket connected to user %s; active=%s", user_id, len(self._connections[user_id]))
 
+    def connected_user_ids(self) -> list[UUID]:
+        return list(self._connections)
+
     def disconnect_user(self, user_id: UUID, websocket: WebSocket) -> None:
         connections = self._connections.get(user_id)
         if connections is None:

@@ -44,6 +44,7 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { connectResilientWebSocket } from "../lib/resilientWebSocket";
+import { formatUnreadCount, useUnreadStore } from "../lib/useUnreadStore";
 import { logoutSession, onAuthenticationExpired } from "../lib/session";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
@@ -300,6 +301,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("all");
   const [sidebarPreferencesLoaded, setSidebarPreferencesLoaded] = useState(false);
   const [error, setError] = useState("");
+  const unreadToken = currentUser ? getStoredAccessToken() : null;
+  const unreadStore = useUnreadStore(unreadToken, currentUser?.id ?? null);
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
   const selectedDirectConversation =
@@ -1016,11 +1019,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     return connectResilientWebSocket({
       getUrl: () => getPersonalWebSocketUrl(accessToken),
       heartbeatIntervalMs: presenceHeartbeatIntervalMs,
-      onStatusChange: setPersonalSocketStatus,
+      onStatusChange: (status) => {
+        setPersonalSocketStatus(status);
+        if (status === "connected") void unreadStore.reload();
+      },
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
         try {
           const payload = JSON.parse(event.data as string) as PersonalNotificationEvent;
+          if (payload.type === "unread.updated") {
+            unreadStore.applyUnreadEvent(payload);
+            return;
+          }
+          if (payload.type === "unread.refresh") {
+            void unreadStore.reload();
+            return;
+          }
           if (payload.type === "presence.updated") {
             setPresenceByUserId((current) => ({
               ...current,
@@ -1055,7 +1069,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     dictionary.messages.deletedMessage,
     dictionary.messages.mentionedYou,
     updateDirectUserActivity,
-    updateGroupActivity
+    updateGroupActivity,
+    unreadStore.applyUnreadEvent,
+    unreadStore.reload
   ]);
 
   useEffect(() => {
@@ -1439,8 +1455,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               value={sidebarSearch}
             />
             <div className="sidebar-tabs" role="tablist" aria-label={dictionary.appShell.chatTabs}>
-              {(["all", "groups", "direct"] as SidebarTab[]).map((tab) => (
-                <button
+              {(["all", "groups", "direct"] as SidebarTab[]).map((tab) => {
+                const unreadCount = tab === "all"
+                  ? unreadStore.summary.total
+                  : tab === "groups"
+                    ? unreadStore.summary.groups
+                    : unreadStore.summary.direct;
+                return <button
                   aria-selected={sidebarTab === tab}
                   className={sidebarTab === tab ? "sidebar-tab sidebar-tab-active" : "sidebar-tab"}
                   key={tab}
@@ -1448,10 +1469,25 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   role="tab"
                   type="button"
                 >
-                  {dictionary.appShell.tabs[tab]}
-                </button>
-              ))}
+                  <span>{dictionary.appShell.tabs[tab]}</span>
+                  {unreadCount > 0 ? (
+                    <span
+                      aria-label={dictionary.unread.counterLabel.replace("{count}", String(unreadCount))}
+                      className="sidebar-tab-badge"
+                      title={dictionary.unread.counterLabel.replace("{count}", String(unreadCount))}
+                    >
+                      {formatUnreadCount(unreadCount)}
+                    </span>
+                  ) : null}
+                </button>;
+              })}
             </div>
+            {unreadStore.isLoading ? (
+              <span className="visually-hidden" role="status">{dictionary.unread.loading}</span>
+            ) : null}
+            {unreadStore.error ? (
+              <p className="sidebar-unread-error" title={unreadStore.error}>{dictionary.unread.error}</p>
+            ) : null}
           </div>
 
           <div className="user-app-nav-list">
@@ -1468,11 +1504,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               const isSelected = isGroup
                 ? selected.type === "group" && selected.groupId === item.group.id
                 : selected.type === "direct" && selectedDirectConversation?.other_user.id === item.user.id;
+              const directConversation = isGroup
+                ? null
+                : directConversations.find((conversation) => conversation.other_user.id === item.user.id);
+              const serverUnread = unreadStore.getChat(
+                isGroup ? "group" : "direct",
+                isGroup ? item.group.id : directConversation?.id ?? ""
+              );
               const itemClassName = [
                 "user-app-nav-item",
                 isSelected ? "user-app-nav-item-active" : "",
-                activity?.unread ? "user-app-nav-item-unread" : "",
-                activity?.mentioned ? "user-app-nav-item-mentioned" : ""
+                serverUnread?.unread_count ? "user-app-nav-item-unread" : "",
+                serverUnread?.mention_count ? "user-app-nav-item-mentioned" : ""
               ].filter(Boolean).join(" ");
               return (
                 <button
@@ -1513,12 +1556,19 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     <span className="sidebar-item-preview">{activity?.preview || dictionary.sidebarActivity.noRecentMessages}</span>
                     <span className="sidebar-item-meta">{secondary}</span>
                   </span>
-                  {activity?.unread ? (
+                  {serverUnread?.unread_count ? (
                     <span
-                      aria-label={dictionary.sidebarActivity.unread}
-                      className={activity.mentioned ? "sidebar-unread-dot sidebar-unread-dot-mention" : "sidebar-unread-dot"}
-                      title={activity.mentioned ? dictionary.messages.mentions : dictionary.sidebarActivity.newMessages}
-                    />
+                      aria-label={dictionary.unread.counterLabel.replace("{count}", String(serverUnread.unread_count))}
+                      className="sidebar-unread-badge"
+                      title={dictionary.unread.counterLabel.replace("{count}", String(serverUnread.unread_count))}
+                    >{formatUnreadCount(serverUnread.unread_count)}</span>
+                  ) : null}
+                  {serverUnread?.mention_count ? (
+                    <span
+                      aria-label={dictionary.unread.mentionLabel.replace("{count}", String(serverUnread.mention_count))}
+                      className="sidebar-unread-badge sidebar-unread-badge-mention"
+                      title={dictionary.unread.mentionLabel.replace("{count}", String(serverUnread.mention_count))}
+                    >@{formatUnreadCount(serverUnread.mention_count)}</span>
                   ) : null}
                 </button>
               );
@@ -1644,6 +1694,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   groupId={selectedGroup.id}
                   locale={locale}
                   onDiscuss={(message) => void handleOpenDiscussion(message)}
+                  onMarkRead={(messageId) => unreadStore.markRead("group", selectedGroup.id, messageId)}
+                  unread={unreadStore.getChat("group", selectedGroup.id)}
                 />
               </div>
               {activeDiscussionId ? (
@@ -1654,6 +1706,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   locale={locale}
                   onClose={() => setActiveDiscussionId(null)}
                   presenceByUserId={presenceByUserId}
+                  onMarkRead={(messageId) => unreadStore.markRead("discussion", activeDiscussionId, messageId)}
+                  unread={unreadStore.getChat("discussion", activeDiscussionId)}
                 />
               ) : null}
             </div>
@@ -1683,6 +1737,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 currentUser={currentUser}
                 dictionary={dictionary}
                 locale={locale}
+                onMarkRead={(messageId) => unreadStore.markRead("direct", selectedDirectConversation.id, messageId)}
+                unread={unreadStore.getChat("direct", selectedDirectConversation.id)}
               />
             </div>
           ) : null}

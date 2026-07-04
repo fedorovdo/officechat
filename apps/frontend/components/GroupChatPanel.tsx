@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -18,11 +18,13 @@ import {
   type GroupMessageEvent,
   type OfficeChatMessage,
   type OfficeChatMessageReaction,
+  type OfficeChatUnreadChat,
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
+import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -33,6 +35,7 @@ import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachmen
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
 import { UserAvatar } from "./UserAvatar";
 import { TypingIndicator } from "./TypingIndicator";
+import { UnreadSeparator } from "./UnreadSeparator";
 
 type GroupChatPanelProps = {
   canModerateMessages: boolean;
@@ -41,6 +44,8 @@ type GroupChatPanelProps = {
   groupId: string;
   locale: Locale;
   onDiscuss?: (message: OfficeChatMessage) => void;
+  onMarkRead?: (messageId: string) => void | Promise<void>;
+  unread?: OfficeChatUnreadChat;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -51,7 +56,9 @@ export function GroupChatPanel({
   dictionary,
   groupId,
   locale,
-  onDiscuss
+  onDiscuss,
+  onMarkRead,
+  unread
 }: GroupChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -60,6 +67,7 @@ export function GroupChatPanel({
   const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<ResilientWebSocketConnection | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
   const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
@@ -82,6 +90,7 @@ export function GroupChatPanel({
     currentUser.id,
     groupId
   );
+  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread });
   const {
     appendFiles,
     attachments,
@@ -179,7 +188,11 @@ export function GroupChatPanel({
 
     if (!hasInitialMessageScrollRef.current) {
       hasInitialMessageScrollRef.current = true;
-      requestAnimationFrame(() => scrollToLatestMessage("auto"));
+      requestAnimationFrame(() => {
+        const separator = messagesListRef.current?.querySelector("[data-unread-separator]");
+        if (separator) separator.scrollIntoView({ block: "center" });
+        else scrollToLatestMessage("auto");
+      });
       return;
     }
 
@@ -187,7 +200,7 @@ export function GroupChatPanel({
       shouldScrollToBottomRef.current = false;
       requestAnimationFrame(() => scrollToLatestMessage());
     }
-  }, [messages]);
+  }, [messages, unread?.first_unread_message_id]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -471,7 +484,7 @@ export function GroupChatPanel({
   }
 
   return (
-    <section className="messages-panel" aria-label={dictionary.messages.ariaLabel} {...dropZoneProps}>
+    <section className="messages-panel" aria-label={dictionary.messages.ariaLabel} ref={panelRef} {...dropZoneProps}>
       <ComposerDropOverlay dictionary={dictionary} visible={isFileDragging} />
       <div className="dashboard-header messages-toolbar">
         <div>
@@ -516,7 +529,9 @@ export function GroupChatPanel({
             .filter(Boolean)
             .join(" ");
           return (
-            <article className={messageItemClasses} key={message.id}>
+            <Fragment key={message.id}>
+              {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
+            <article className={messageItemClasses}>
               <div className="message-meta">
                 <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                 <span className="message-author">
@@ -616,6 +631,7 @@ export function GroupChatPanel({
                 </div>
               ) : null}
             </article>
+            </Fragment>
           );
         })}
         <div ref={messagesEndRef} />

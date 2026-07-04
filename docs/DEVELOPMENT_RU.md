@@ -1,5 +1,17 @@
 # Разработка OfficeChat
 
+## Backend-тесты
+
+Локальный backend-сервис Docker Compose собирается из стадии `development`, которая устанавливает зависимости из `apps/backend/requirements-dev.txt` и включает каталог `apps/backend/tests`. Runtime-стадия образа остаётся без pytest.
+
+Стандартный запуск полного набора backend-тестов:
+
+```powershell
+docker compose exec backend python -m pytest -q
+```
+
+Короткая команда `docker compose exec backend pytest -q` также доступна, но форма через `python -m pytest` является основной.
+
 ## Audit Log
 
 Admin UI: `http://localhost:3100/ru/admin/audit`. Для проверки создайте пользователя, измените роль/статус, выполните password reset и bot token rotation, затем убедитесь, что секретные значения отсутствуют в details и CSV. Каждый response содержит `X-Request-ID`.

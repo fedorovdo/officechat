@@ -21,6 +21,7 @@ def directory_user(**overrides):
         "role": "user",
         "is_active": True,
         "avatar_url": None,
+        "last_seen_at": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)

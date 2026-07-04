@@ -31,6 +31,7 @@ services:
   backend:
     build:
       context: ./apps/backend
+      target: development
     container_name: officechat-backend
     restart: unless-stopped
     environment:
@@ -74,6 +75,7 @@ services:
     volumes:
       - uploads:/data/uploads
       - ./apps/backend/app:/app/app
+      - ./apps/backend/tests:/app/tests:ro
     depends_on:
       postgres:
         condition: service_healthy

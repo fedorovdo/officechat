@@ -200,6 +200,7 @@ docker compose down
 ## Verification
 
 ```powershell
+docker compose exec backend python -m pytest -q
 curl http://localhost:8100/
 curl http://localhost:8100/health
 curl http://localhost:8100/api/system/info

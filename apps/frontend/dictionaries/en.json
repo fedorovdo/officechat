@@ -461,6 +461,41 @@
       "constructorError": "Notification constructor threw an error"
     }
   },
+  "messageSearch": {
+    "title": "Search messages",
+    "inputLabel": "Search in messages",
+    "placeholder": "Search message text, people or filenames",
+    "scope": "Search scope",
+    "allChats": "All chats",
+    "currentChat": "Current chat",
+    "currentUnavailable": "Select a chat to search within it",
+    "sender": "Sender",
+    "anySender": "Any sender",
+    "dateFrom": "From",
+    "dateTo": "To",
+    "withAttachments": "With attachments only",
+    "loading": "Searching messages",
+    "loadError": "Could not search messages.",
+    "jumpError": "Could not open this message.",
+    "resultCount": "{count} search results",
+    "results": "Message search results",
+    "empty": "No messages found",
+    "minimumQuery": "Enter at least 2 characters",
+    "loadMore": "Load more",
+    "loadOlder": "Load older messages",
+    "loadNewer": "Load newer messages",
+    "jump": "Jump to message",
+    "attachments": "Attachments",
+    "edited": "Edited",
+    "newMessages": "New messages",
+    "jumpLatest": "Jump to latest",
+    "searchButton": "Search messages",
+    "chatTypes": {
+      "group": "Group",
+      "direct": "Direct",
+      "discussion": "Discussion"
+    }
+  },
   "adminUsers": {
     "ariaLabel": "Admin user management",
     "title": "User management",

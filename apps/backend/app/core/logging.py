@@ -3,7 +3,7 @@ import re
 from collections.abc import Mapping
 
 SENSITIVE_QUERY_PARAMETER = re.compile(
-    r"([?&](?:token|access_token|authorization|ticket)=)[^&\s\"']+",
+    r"([?&](?:token|access_token|authorization|ticket|q)=)[^&\s\"']+",
     flags=re.IGNORECASE,
 )
 BOT_WEBHOOK_TOKEN = re.compile(r"(/api/bots/incoming/)[^/?&\s\"']+", flags=re.IGNORECASE)

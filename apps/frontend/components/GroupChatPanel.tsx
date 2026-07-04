@@ -17,6 +17,7 @@ import {
   sendGroupMessageWithAttachments,
   type GroupMessageEvent,
   type OfficeChatMessage,
+  type OfficeChatMessageContext,
   type OfficeChatMessageReaction,
   type OfficeChatUnreadChat,
   type OfficeChatUser
@@ -46,6 +47,9 @@ type GroupChatPanelProps = {
   onDiscuss?: (message: OfficeChatMessage) => void;
   onMarkRead?: (messageId: string) => void | Promise<void>;
   unread?: OfficeChatUnreadChat;
+  messageContext?: OfficeChatMessageContext | null;
+  onContextClosed?: () => void;
+  onContextExpand?: (before: number, after: number) => void | Promise<void>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -58,7 +62,10 @@ export function GroupChatPanel({
   locale,
   onDiscuss,
   onMarkRead,
-  unread
+  unread,
+  messageContext,
+  onContextClosed,
+  onContextExpand
 }: GroupChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -70,6 +77,7 @@ export function GroupChatPanel({
   const panelRef = useRef<HTMLElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
+  const historicalTargetRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
@@ -79,6 +87,8 @@ export function GroupChatPanel({
   const [isSending, setIsSending] = useState(false);
   const [liveUpdateStatus, setLiveUpdateStatus] = useState<LiveUpdateStatus>("disconnected");
   const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
+  const [historicalTargetId, setHistoricalTargetId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -90,7 +100,12 @@ export function GroupChatPanel({
     currentUser.id,
     groupId
   );
-  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread });
+  useVisibleReadMarker({
+    messages,
+    onMarkRead,
+    panelRef,
+    unread: historicalTargetId ? undefined : unread
+  });
   const {
     appendFiles,
     attachments,
@@ -145,6 +160,9 @@ export function GroupChatPanel({
       messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
     }
     setShowNewMessagesButton(false);
+    historicalTargetRef.current = null;
+    setHistoricalTargetId(null);
+    setHighlightedMessageId(null);
   }
 
   function resizeComposer(textarea: HTMLTextAreaElement) {
@@ -178,8 +196,27 @@ export function GroupChatPanel({
       router.replace(`/${locale}/login`);
       return;
     }
-    void refreshMessages(token).catch(() => setError(dictionary.messages.loadError));
-  }, [dictionary.messages.loadError, groupId, locale, refreshMessages, router]);
+    if (!messageContext || messageContext.chat_id !== groupId) {
+      void refreshMessages(token).catch(() => setError(dictionary.messages.loadError));
+    }
+  }, [dictionary.messages.loadError, groupId, locale, messageContext?.target_message_id, refreshMessages, router]);
+
+  useEffect(() => {
+    if (!messageContext || messageContext.chat_type !== "group" || messageContext.chat_id !== groupId) return;
+    historicalTargetRef.current = messageContext.target_message_id;
+    setHistoricalTargetId(messageContext.target_message_id);
+    setHighlightedMessageId(messageContext.target_message_id);
+    setMessages(messageContext.messages as OfficeChatMessage[]);
+    setShowNewMessagesButton(messageContext.has_more_after);
+    hasInitialMessageScrollRef.current = true;
+    requestAnimationFrame(() => {
+      messagesListRef.current
+        ?.querySelector(`[data-message-id="${messageContext.target_message_id}"]`)
+        ?.scrollIntoView({ block: "center" });
+    });
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [groupId, messageContext]);
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -234,11 +271,11 @@ export function GroupChatPanel({
             );
           } else if (payload.type.startsWith("message.")) {
             markIncomingMessage();
-            void refreshMessages(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken);
           }
         } catch {
           markIncomingMessage();
-          void refreshMessages(accessToken);
+          if (!historicalTargetRef.current) void refreshMessages(accessToken);
         }
       }
     });
@@ -249,6 +286,17 @@ export function GroupChatPanel({
       connection();
     };
   }, [currentUser.id, dictionary.session.accessDenied, groupId, handleTypingEvent, locale, refreshMessages, router, stopTyping]);
+
+  async function returnToLatest() {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    historicalTargetRef.current = null;
+    setHistoricalTargetId(null);
+    setHighlightedMessageId(null);
+    shouldScrollToBottomRef.current = true;
+    await refreshMessages(token);
+    onContextClosed?.();
+  }
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);
@@ -516,6 +564,12 @@ export function GroupChatPanel({
       ) : null}
 
       <div className="messages-list" ref={messagesListRef}>
+        {messageContext?.has_more_before ? (
+          <button className="context-load-button" onClick={() => {
+            const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);
+            void onContextExpand?.(Math.max(20, targetIndex) + 20, messageContext.messages.length - targetIndex - 1);
+          }} type="button">{dictionary.messageSearch.loadOlder}</button>
+        ) : null}
         {messages.map((message) => {
           const canEdit = currentUser.id === message.sender_user_id && !message.is_deleted;
           const canDelete = (canEdit || canModerateMessages) && !message.is_deleted;
@@ -524,14 +578,15 @@ export function GroupChatPanel({
           const messageItemClasses = [
             "message-item",
             isOwnMessage ? "message-item-own" : "",
-            message.is_deleted ? "message-item-deleted" : ""
+            message.is_deleted ? "message-item-deleted" : "",
+            message.id === highlightedMessageId ? "message-search-target" : ""
           ]
             .filter(Boolean)
             .join(" ");
           return (
             <Fragment key={message.id}>
               {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
-            <article className={messageItemClasses}>
+            <article className={messageItemClasses} data-message-id={message.id}>
               <div className="message-meta">
                 <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                 <span className="message-author">
@@ -634,12 +689,22 @@ export function GroupChatPanel({
             </Fragment>
           );
         })}
+        {messageContext?.has_more_after ? (
+          <button className="context-load-button" onClick={() => {
+            const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);
+            void onContextExpand?.(targetIndex, messageContext.messages.length - targetIndex - 1 + 20);
+          }} type="button">{dictionary.messageSearch.loadNewer}</button>
+        ) : null}
         <div ref={messagesEndRef} />
       </div>
 
-      {showNewMessagesButton ? (
-        <button className="new-messages-button" onClick={() => scrollToLatestMessage()} type="button">
-          {dictionary.messages.newMessages}
+      {showNewMessagesButton || historicalTargetId ? (
+        <button
+          className="new-messages-button"
+          onClick={() => historicalTargetId ? void returnToLatest() : scrollToLatestMessage()}
+          type="button"
+        >
+          {historicalTargetId ? dictionary.messageSearch.jumpLatest : dictionary.messages.newMessages}
         </button>
       ) : null}
 

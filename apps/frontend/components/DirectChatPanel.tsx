@@ -20,6 +20,7 @@ import {
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
   type OfficeChatDirectReadReceipt,
+  type OfficeChatMessageContext,
   type OfficeChatMessageReaction,
   type OfficeChatUnreadChat,
   type OfficeChatUser
@@ -47,11 +48,14 @@ type DirectChatPanelProps = {
   locale: Locale;
   onMarkRead?: (messageId: string) => void | Promise<void>;
   unread?: OfficeChatUnreadChat;
+  messageContext?: OfficeChatMessageContext | null;
+  onContextClosed?: () => void;
+  onContextExpand?: (before: number, after: number) => void | Promise<void>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
-export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread }: DirectChatPanelProps) {
+export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread, messageContext, onContextClosed, onContextExpand }: DirectChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
@@ -62,6 +66,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   const panelRef = useRef<HTMLElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
   const hasInitialMessageScrollRef = useRef(false);
+  const historicalTargetRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<OfficeChatDirectMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
@@ -71,6 +76,8 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   const [isSending, setIsSending] = useState(false);
   const [liveUpdateStatus, setLiveUpdateStatus] = useState<LiveUpdateStatus>("disconnected");
   const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
+  const [historicalTargetId, setHistoricalTargetId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -83,7 +90,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     currentUser.id,
     conversation.id
   );
-  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread });
+  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread: historicalTargetId ? undefined : unread });
   const {
     appendFiles,
     attachments,
@@ -170,7 +177,10 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   useEffect(() => {
     hasInitialMessageScrollRef.current = false;
     shouldScrollToBottomRef.current = false;
+    historicalTargetRef.current = null;
     setShowNewMessagesButton(false);
+    setHistoricalTargetId(null);
+    setHighlightedMessageId(null);
     setEditingMessageId(null);
     setEditingMessageBody("");
     setMessageBody("");
@@ -188,9 +198,28 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       router.replace(`/${locale}/login`);
       return;
     }
-    void refreshMessages(token).catch(() => setError(dictionary.directMessages.loadError));
+    if (!messageContext || messageContext.chat_id !== conversation.id) {
+      void refreshMessages(token).catch(() => setError(dictionary.directMessages.loadError));
+    }
     void getDirectReadReceipt(token, conversation.id).then(setReadReceipt).catch(() => setReadReceipt(null));
-  }, [dictionary.directMessages.loadError, conversation.id, locale, refreshMessages, router]);
+  }, [dictionary.directMessages.loadError, conversation.id, locale, messageContext?.target_message_id, refreshMessages, router]);
+
+  useEffect(() => {
+    if (!messageContext || messageContext.chat_type !== "direct" || messageContext.chat_id !== conversation.id) return;
+    historicalTargetRef.current = messageContext.target_message_id;
+    setHistoricalTargetId(messageContext.target_message_id);
+    setHighlightedMessageId(messageContext.target_message_id);
+    setMessages(messageContext.messages as OfficeChatDirectMessage[]);
+    setShowNewMessagesButton(messageContext.has_more_after);
+    hasInitialMessageScrollRef.current = true;
+    requestAnimationFrame(() => {
+      messagesListRef.current
+        ?.querySelector(`[data-message-id="${messageContext.target_message_id}"]`)
+        ?.scrollIntoView({ block: "center" });
+    });
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [conversation.id, messageContext]);
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -255,11 +284,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
             );
           } else if (payload.type.startsWith("direct.message.")) {
             markIncomingMessage();
-            void refreshMessages(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken);
           }
         } catch {
           markIncomingMessage();
-          void refreshMessages(accessToken);
+          if (!historicalTargetRef.current) void refreshMessages(accessToken);
         }
       }
     });
@@ -270,6 +299,17 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       connection();
     };
   }, [conversation.id, currentUser.id, dictionary.session.accessDenied, handleTypingEvent, locale, refreshMessages, router, stopTyping]);
+
+  async function returnToLatest() {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    historicalTargetRef.current = null;
+    setHistoricalTargetId(null);
+    setHighlightedMessageId(null);
+    shouldScrollToBottomRef.current = true;
+    await refreshMessages(token);
+    onContextClosed?.();
+  }
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);
@@ -535,20 +575,27 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       ) : null}
 
       <div className="messages-list" ref={messagesListRef}>
+        {messageContext?.has_more_before ? (
+          <button className="context-load-button" onClick={() => {
+            const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);
+            void onContextExpand?.(Math.max(20, targetIndex) + 20, messageContext.messages.length - targetIndex - 1);
+          }} type="button">{dictionary.messageSearch.loadOlder}</button>
+        ) : null}
         {messages.map((message) => {
           const canEdit = currentUser.id === message.sender_user_id && !message.is_deleted;
           const isOwnMessage = currentUser.id === message.sender_user_id;
           const messageItemClasses = [
             "message-item",
             isOwnMessage ? "message-item-own" : "",
-            message.is_deleted ? "message-item-deleted" : ""
+            message.is_deleted ? "message-item-deleted" : "",
+            message.id === highlightedMessageId ? "message-search-target" : ""
           ]
             .filter(Boolean)
             .join(" ");
           return (
             <Fragment key={message.id}>
               {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
-            <article className={messageItemClasses}>
+            <article className={messageItemClasses} data-message-id={message.id}>
               <div className="message-meta">
                 <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                 <span className="message-author">
@@ -647,12 +694,22 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
             </Fragment>
           );
         })}
+        {messageContext?.has_more_after ? (
+          <button className="context-load-button" onClick={() => {
+            const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);
+            void onContextExpand?.(targetIndex, messageContext.messages.length - targetIndex - 1 + 20);
+          }} type="button">{dictionary.messageSearch.loadNewer}</button>
+        ) : null}
         <div ref={messagesEndRef} />
       </div>
 
-      {showNewMessagesButton ? (
-        <button className="new-messages-button" onClick={() => scrollToLatestMessage()} type="button">
-          {dictionary.messages.newMessages}
+      {showNewMessagesButton || historicalTargetId ? (
+        <button
+          className="new-messages-button"
+          onClick={() => historicalTargetId ? void returnToLatest() : scrollToLatestMessage()}
+          type="button"
+        >
+          {historicalTargetId ? dictionary.messageSearch.jumpLatest : dictionary.messages.newMessages}
         </button>
       ) : null}
 

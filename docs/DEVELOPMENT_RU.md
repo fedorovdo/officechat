@@ -14,6 +14,8 @@ docker compose exec backend python -m pytest -q
 
 Unread/read-state API можно проверить после входа через `GET /api/unread` и `POST /api/read-state`. Миграция `20260704_0017` не переписывает сообщения: она создаёт только high-water rows и считает существующую историю прочитанной. Для проверки скрытой вкладки и cross-tab synchronization используйте два профиля браузера; read actions намеренно не появляются в Audit Log.
 
+Message Search проверяется в `/ru/app` кнопкой рядом с поиском сайдбара или `Ctrl+K`. API: `GET /api/search/messages?q=<строка>` и `GET /api/search/context`. Миграция `20260704_0018` добавляет GIN-индексы без переписывания истории. Проверьте body, имя вложения, current-chat scope, sender/date filters и deep link. В backend access log должно быть `q=[REDACTED]`, а в Audit Log не должно быть события обычного поиска.
+
 ## Audit Log
 
 Admin UI: `http://localhost:3100/ru/admin/audit`. Для проверки создайте пользователя, измените роль/статус, выполните password reset и bot token rotation, затем убедитесь, что секретные значения отсутствуют в details и CSV. Каждый response содержит `X-Request-ID`.

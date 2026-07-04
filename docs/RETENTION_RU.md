@@ -56,3 +56,6 @@ Backend отклоняет `/run`, если retention выключен, отсу
 - Lock рассчитан на single-backend Docker deployment; multi-instance требует Valkey distributed lock.
 - Нет permanent message deletion.
 - Нет antivirus scanning, S3/MinIO и resumable uploads.
+## Взаимодействие с поиском
+
+Архивированные сообщения исключаются из Message Search и context endpoint. Удаление физического файла вложения не индексирует и не раскрывает `storage_path`; сохранённое безопасное `original_filename` остаётся метаданными сообщения и может находиться поиском в соответствии с текущей retention-политикой. GIN-индексы используют только body и `original_filename`, поэтому cleanup не оставляет в поиске внутренних путей хранения.

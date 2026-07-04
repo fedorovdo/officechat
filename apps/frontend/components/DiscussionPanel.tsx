@@ -22,6 +22,7 @@ import {
   type DiscussionEvent,
   type OfficeChatDiscussion,
   type OfficeChatDiscussionMessage,
+  type OfficeChatMessageContext,
   type OfficeChatMessageReaction,
   type OfficeChatPresence,
   type OfficeChatUnreadChat,
@@ -53,6 +54,9 @@ type DiscussionPanelProps = {
   presenceByUserId?: Record<string, OfficeChatPresence>;
   onMarkRead?: (messageId: string) => void | Promise<void>;
   unread?: OfficeChatUnreadChat;
+  messageContext?: OfficeChatMessageContext | null;
+  onContextClosed?: () => void;
+  onContextExpand?: (before: number, after: number) => void | Promise<void>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -65,7 +69,10 @@ export function DiscussionPanel({
   onClose,
   presenceByUserId = {},
   onMarkRead,
-  unread
+  unread,
+  messageContext,
+  onContextClosed,
+  onContextExpand
 }: DiscussionPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -74,6 +81,7 @@ export function DiscussionPanel({
   const socketRef = useRef<ResilientWebSocketConnection | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const messagesListRef = useRef<HTMLDivElement | null>(null);
+  const historicalTargetRef = useRef<string | null>(null);
   const [discussion, setDiscussion] = useState<OfficeChatDiscussion | null>(null);
   const [messages, setMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [messageBody, setMessageBody] = useState("");
@@ -89,12 +97,15 @@ export function DiscussionPanel({
   const [archivedMessages, setArchivedMessages] = useState<OfficeChatDiscussionMessage[]>([]);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const [historicalTargetId, setHistoricalTargetId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
   const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
     socketRef,
     currentUser.id,
     discussionId
   );
-  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread });
+  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread: historicalTargetId ? undefined : unread });
   const {
     appendFiles,
     attachments,
@@ -151,6 +162,10 @@ export function DiscussionPanel({
 
   useEffect(() => {
     setMessageBody("");
+    historicalTargetRef.current = null;
+    setHistoricalTargetId(null);
+    setHighlightedMessageId(null);
+    setShowNewMessagesButton(false);
     clearAttachments();
     setArchiveOpen(false);
     setArchivedMessages([]);
@@ -170,10 +185,30 @@ export function DiscussionPanel({
       router.replace(`/${locale}/login`);
       return;
     }
-    void refreshDiscussion(token).catch((caughtError) => {
-      setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.loadError);
+    if (!messageContext || messageContext.chat_id !== discussionId) {
+      void refreshDiscussion(token).catch((caughtError) => {
+        setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.loadError);
+      });
+    } else {
+      void getDiscussion(token, discussionId).then(setDiscussion).catch(() => undefined);
+    }
+  }, [dictionary.discussions.loadError, discussionId, locale, messageContext?.target_message_id, refreshDiscussion, router]);
+
+  useEffect(() => {
+    if (!messageContext || messageContext.chat_type !== "discussion" || messageContext.chat_id !== discussionId) return;
+    historicalTargetRef.current = messageContext.target_message_id;
+    setHistoricalTargetId(messageContext.target_message_id);
+    setHighlightedMessageId(messageContext.target_message_id);
+    setMessages(messageContext.messages as OfficeChatDiscussionMessage[]);
+    setShowNewMessagesButton(messageContext.has_more_after);
+    requestAnimationFrame(() => {
+      messagesListRef.current
+        ?.querySelector(`[data-message-id="${messageContext.target_message_id}"]`)
+        ?.scrollIntoView({ block: "center" });
     });
-  }, [dictionary.discussions.loadError, discussionId, locale, refreshDiscussion, router]);
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [discussionId, messageContext]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -197,10 +232,12 @@ export function DiscussionPanel({
               current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
             );
           } else if (payload.type.startsWith("discussion.")) {
-            void refreshDiscussion(accessToken);
+            if (historicalTargetRef.current) setShowNewMessagesButton(true);
+            else void refreshDiscussion(accessToken);
           }
         } catch {
-          void refreshDiscussion(accessToken);
+          if (historicalTargetRef.current) setShowNewMessagesButton(true);
+          else void refreshDiscussion(accessToken);
         }
       }
     });
@@ -211,6 +248,21 @@ export function DiscussionPanel({
       connection();
     };
   }, [currentUser.id, dictionary.session.accessDenied, discussionId, handleTypingEvent, locale, refreshDiscussion, router, stopTyping]);
+
+  async function returnToLatest() {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    historicalTargetRef.current = null;
+    setHistoricalTargetId(null);
+    setHighlightedMessageId(null);
+    setShowNewMessagesButton(false);
+    await refreshDiscussion(token);
+    requestAnimationFrame(() => {
+      const list = messagesListRef.current;
+      if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+    });
+    onContextClosed?.();
+  }
 
   function applyReactionUpdate(messageId: string, reactions: OfficeChatMessageReaction[]) {
     const normalized = reactionsForCurrentUser(reactions, currentUser.id);
@@ -525,15 +577,31 @@ export function DiscussionPanel({
       ) : null}
 
       <section className="discussion-section discussion-messages-section">
-        <h3 className="compact-title">{dictionary.discussions.messages}</h3>
+        <div className="discussion-messages-heading">
+          <h3 className="compact-title">{dictionary.discussions.messages}</h3>
+          {showNewMessagesButton || historicalTargetId ? (
+            <button className="table-action" onClick={() => void returnToLatest()} type="button">
+              {dictionary.messageSearch.jumpLatest}
+            </button>
+          ) : null}
+        </div>
         <div className="discussion-messages-list" ref={messagesListRef}>
+          {messageContext?.has_more_before ? (
+            <button className="context-load-button" onClick={() => {
+              const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);
+              void onContextExpand?.(Math.max(20, targetIndex) + 20, messageContext.messages.length - targetIndex - 1);
+            }} type="button">{dictionary.messageSearch.loadOlder}</button>
+          ) : null}
           {messages.map((message) => {
             const canEdit = message.sender_user_id === currentUser.id && !message.is_deleted;
             const canDelete = (message.sender_user_id === currentUser.id || canDeleteOthers) && !message.is_deleted;
             return (
               <Fragment key={message.id}>
                 {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
-              <article className={message.is_deleted ? "discussion-message discussion-message-deleted" : "discussion-message"}>
+              <article
+                className={`${message.is_deleted ? "discussion-message discussion-message-deleted" : "discussion-message"}${message.id === highlightedMessageId ? " message-search-target" : ""}`}
+                data-message-id={message.id}
+              >
                 <div className="message-meta">
                   <UserAvatar className="message-sender-avatar" size={28} user={message.sender} />
                   <strong>{message.sender.display_name}</strong>
@@ -605,6 +673,12 @@ export function DiscussionPanel({
               </Fragment>
             );
           })}
+          {messageContext?.has_more_after ? (
+            <button className="context-load-button" onClick={() => {
+              const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);
+              void onContextExpand?.(targetIndex, messageContext.messages.length - targetIndex - 1 + 20);
+            }} type="button">{dictionary.messageSearch.loadNewer}</button>
+          ) : null}
         </div>
       </section>
 

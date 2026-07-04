@@ -461,6 +461,41 @@
       "constructorError": "Notification constructor вернул ошибку"
     }
   },
+  "messageSearch": {
+    "title": "Поиск сообщений",
+    "inputLabel": "Искать в сообщениях",
+    "placeholder": "Текст сообщения, пользователь или имя файла",
+    "scope": "Область поиска",
+    "allChats": "Во всех чатах",
+    "currentChat": "В текущем чате",
+    "currentUnavailable": "Сначала выберите чат",
+    "sender": "Отправитель",
+    "anySender": "Любой отправитель",
+    "dateFrom": "С",
+    "dateTo": "По",
+    "withAttachments": "Только с файлами",
+    "loading": "Поиск сообщений",
+    "loadError": "Не удалось выполнить поиск сообщений.",
+    "jumpError": "Не удалось открыть сообщение.",
+    "resultCount": "Результатов поиска: {count}",
+    "results": "Результаты поиска сообщений",
+    "empty": "Ничего не найдено",
+    "minimumQuery": "Введите не менее 2 символов",
+    "loadMore": "Загрузить ещё",
+    "loadOlder": "Загрузить более ранние сообщения",
+    "loadNewer": "Загрузить более новые сообщения",
+    "jump": "Перейти к сообщению",
+    "attachments": "Вложения",
+    "edited": "Изменено",
+    "newMessages": "Новые сообщения",
+    "jumpLatest": "Перейти к последним",
+    "searchButton": "Поиск сообщений",
+    "chatTypes": {
+      "group": "Группа",
+      "direct": "Личный чат",
+      "discussion": "Обсуждение"
+    }
+  },
   "adminUsers": {
     "ariaLabel": "Управление пользователями",
     "title": "Управление пользователями",

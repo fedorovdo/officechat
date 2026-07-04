@@ -63,6 +63,11 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Away, do not disturb, пользовательский статус и настройки приватности presence.
 - Group/discussion read receipts и список прочитавших.
 
+## Message Search
+
+- PostgreSQL Message Search v0.1 реализован: mixed-language `simple` indexes, глобальный/current-chat поиск, фильтры, cursor pagination, context и deep links.
+- Следующие этапы: advanced syntax и exact phrases, saved searches и search history, optional OpenSearch, OCR/document-content search и административный eDiscovery с отдельными разрешениями.
+
 ## Branding and About
 
 - Логотип и favicon.

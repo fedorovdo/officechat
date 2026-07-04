@@ -80,6 +80,8 @@ Presence, persistent last seen, and typing indicators are available in v0.1. `/a
 
 Unread counters and direct-message read receipts use one PostgreSQL high-water row per user/chat. Existing history is backfilled as read by migration `20260704_0017`; selected visible chats mark through their newest loaded message after a short debounce, while hidden tabs retain unread state. `/api/ws/me` synchronizes `unread.updated` across tabs/devices, and direct room sockets deliver participant-only `direct.read`. See [docs/UNREAD_RU.md](docs/UNREAD_RU.md).
 
+Message Search v0.1 uses PostgreSQL `simple` full-text GIN indexes for mixed RU/EN message bodies and attachment filenames. The user app provides global/current-chat search, sender/date/attachment filters, cursor pagination, keyboard access, context loading, temporary target highlighting, and authorized deep links. Deleted and archived content is excluded; admin roles do not bypass private direct/discussion membership. Raw `q` values are redacted from access logs. See [docs/MESSAGE_SEARCH_RU.md](docs/MESSAGE_SEARCH_RU.md).
+
 Current development uses one frontend on port `3100`. User routes live under `/ru/app`, while admin routes remain under `/ru/admin/*`. Future production deployment can split user/admin surfaces with nginx hostnames or separate frontend entrypoints.
 
 User app settings are stored in browser `localStorage` for now. Future versions should persist language, sidebar side, font size, accent color, and profile preferences in backend user preferences.

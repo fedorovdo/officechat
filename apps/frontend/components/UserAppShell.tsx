@@ -19,10 +19,12 @@ import {
   deleteMyAvatar,
   getCurrentUser,
   getDirectConversations,
+  getDiscussion,
   getGroups,
   getGroupMembers,
   getGroupMessages,
   getLocalizedApiError,
+  getMessageContext,
   getPersonalWebSocketUrl,
   getPresence,
   requireStoredAccessToken,
@@ -38,6 +40,8 @@ import {
   type OfficeChatGroup,
   type OfficeChatGroupMember,
   type OfficeChatMessage,
+  type OfficeChatMessageContext,
+  type OfficeChatMessageSearchResult,
   type OfficeChatPresence,
   type OfficeChatUser,
   type PersonalNotificationEvent
@@ -49,6 +53,7 @@ import { logoutSession, onAuthenticationExpired } from "../lib/session";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
+import { MessageSearchPanel } from "./MessageSearchPanel";
 import { UserAvatar } from "./UserAvatar";
 import { PresenceStatus } from "./PresenceStatus";
 
@@ -256,6 +261,8 @@ function truncateNotificationPreview(preview: string) {
 export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const router = useRouter();
   const notifiedMessageIdsRef = useRef<string[]>([]);
+  const messageSearchTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const deepLinkHandledRef = useRef(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const browserNotificationsEnabledRef = useRef(false);
   const notificationPermissionRef = useRef<BrowserNotificationPermission>("default");
@@ -286,6 +293,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationGuideOpen, setIsNotificationGuideOpen] = useState(false);
+  const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
+  const [messageContext, setMessageContext] = useState<OfficeChatMessageContext | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
   const [activeDiscussionId, setActiveDiscussionId] = useState<string | null>(null);
@@ -309,6 +318,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     selected.type === "direct"
       ? directConversations.find((conversation) => conversation.id === selected.conversationId)
       : null;
+  const currentSearchChat = activeDiscussionId
+    ? { chatType: "discussion" as const, chatId: activeDiscussionId, title: dictionary.discussions.title }
+    : selectedGroup
+      ? { chatType: "group" as const, chatId: selectedGroup.id, title: selectedGroup.name }
+      : selectedDirectConversation
+        ? {
+            chatType: "direct" as const,
+            chatId: selectedDirectConversation.id,
+            title: selectedDirectConversation.other_user.display_name
+          }
+        : null;
   const directMessageUsers = useMemo(
     () =>
       currentUser
@@ -735,6 +755,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     setError("");
     try {
       const discussion = await createDiscussion(token, message.group_id, message.id);
+      clearMessageContext();
       setActiveDiscussionId(discussion.id);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.openError);
@@ -868,6 +889,38 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       .then(setSelectedMembers)
       .catch(() => setSelectedMembers([]));
   }, [locale, router, selected]);
+
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        setIsMessageSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => window.removeEventListener("keydown", handleSearchShortcut);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser || deepLinkHandledRef.current) return;
+    const parameters = new URLSearchParams(window.location.search);
+    const chatType = parameters.get("chatType");
+    const chatId = parameters.get("chatId");
+    const messageId = parameters.get("messageId");
+    if (!chatType && !chatId && !messageId) {
+      deepLinkHandledRef.current = true;
+      return;
+    }
+    deepLinkHandledRef.current = true;
+    if ((chatType !== "group" && chatType !== "direct" && chatType !== "discussion") || !chatId || !messageId) {
+      setError(dictionary.messageSearch.jumpError);
+      router.replace(`/${locale}/app`);
+      return;
+    }
+    void openMessageContext(chatType, chatId, messageId).catch(() => {
+      setError(dictionary.messageSearch.jumpError);
+    });
+  }, [currentUser?.id]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -1404,12 +1457,88 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       });
       setSelected({ type: "direct", conversationId: conversation.id });
       setActiveDiscussionId(null);
+      clearMessageContext();
     } catch (caughtError) {
       setError(caughtError instanceof Error && caughtError.name !== "AbortError" ? caughtError.message : dictionary.appShell.loadError);
     } finally {
       clearTimeout(timeout);
       setPendingDirectUsername(null);
     }
+  }
+
+  function closeMessageSearch() {
+    setIsMessageSearchOpen(false);
+    requestAnimationFrame(() => messageSearchTriggerRef.current?.focus());
+  }
+
+  function clearMessageContext() {
+    setMessageContext(null);
+    if (typeof window !== "undefined" && window.location.search) {
+      router.replace(`/${locale}/app`, { scroll: false });
+    }
+  }
+
+  async function openMessageContext(
+    chatType: "group" | "direct" | "discussion",
+    chatId: string,
+    messageId: string,
+    sourceGroupId?: string | null
+  ) {
+    const token = getStoredAccessToken();
+    if (!token) throw new Error(dictionary.messageSearch.jumpError);
+    const context = await getMessageContext(token, chatType, chatId, messageId);
+    if (chatType === "group") {
+      if (!groups.some((group) => group.id === chatId)) throw new Error(dictionary.messageSearch.jumpError);
+      setSelected({ type: "group", groupId: chatId });
+      setActiveDiscussionId(null);
+    } else if (chatType === "direct") {
+      let conversations = directConversations;
+      if (!conversations.some((conversation) => conversation.id === chatId)) {
+        conversations = await getDirectConversations(token);
+        setDirectConversations(conversations);
+      }
+      if (!conversations.some((conversation) => conversation.id === chatId)) {
+        throw new Error(dictionary.messageSearch.jumpError);
+      }
+      setSelected({ type: "direct", conversationId: chatId });
+      setActiveDiscussionId(null);
+    } else {
+      const groupId = sourceGroupId ?? (await getDiscussion(token, chatId)).source_group_id;
+      if (!groups.some((group) => group.id === groupId)) throw new Error(dictionary.messageSearch.jumpError);
+      setSelected({ type: "group", groupId });
+      setActiveDiscussionId(chatId);
+    }
+    setMessageContext(context);
+    setIsMessageSearchOpen(false);
+    router.replace(
+      `/${locale}/app?chatType=${chatType}&chatId=${encodeURIComponent(chatId)}&messageId=${encodeURIComponent(messageId)}`,
+      { scroll: false }
+    );
+  }
+
+  async function handleSearchJump(result: OfficeChatMessageSearchResult) {
+    await openMessageContext(
+      result.chat_type,
+      result.chat_id,
+      result.message_id,
+      result.source_group_id
+    );
+  }
+
+  async function expandMessageContext(before: number, after: number) {
+    if (!messageContext) return;
+    const token = getStoredAccessToken();
+    if (!token) throw new Error(dictionary.messageSearch.jumpError);
+    setMessageContext(
+      await getMessageContext(
+        token,
+        messageContext.chat_type,
+        messageContext.chat_id,
+        messageContext.target_message_id,
+        Math.min(100, before),
+        Math.min(100, after)
+      )
+    );
   }
 
   function getInitials(value: string) {
@@ -1420,6 +1549,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   function closeChatOnSmallScreen() {
     setSelected({ type: "empty" });
     setActiveDiscussionId(null);
+    clearMessageContext();
   }
 
   return (
@@ -1446,14 +1576,26 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           </div>
 
           <div className="messenger-sidebar-tools">
-            <input
-              aria-label={dictionary.appShell.sidebarSearch}
-              className="field-input user-app-sidebar-search"
-              onChange={(event) => setSidebarSearch(event.target.value)}
-              placeholder={dictionary.appShell.sidebarSearch}
-              type="search"
-              value={sidebarSearch}
-            />
+            <div className="sidebar-search-row">
+              <input
+                aria-label={dictionary.appShell.sidebarSearch}
+                className="field-input user-app-sidebar-search"
+                onChange={(event) => setSidebarSearch(event.target.value)}
+                placeholder={dictionary.appShell.sidebarSearch}
+                type="search"
+                value={sidebarSearch}
+              />
+              <button
+                aria-label={dictionary.messageSearch.searchButton}
+                className="sidebar-icon-button message-search-trigger"
+                onClick={() => setIsMessageSearchOpen(true)}
+                ref={messageSearchTriggerRef}
+                title={`${dictionary.messageSearch.searchButton} (Ctrl+K)`}
+                type="button"
+              >
+                ⌕
+              </button>
+            </div>
             <div className="sidebar-tabs" role="tablist" aria-label={dictionary.appShell.chatTabs}>
               {(["all", "groups", "direct"] as SidebarTab[]).map((tab) => {
                 const unreadCount = tab === "all"
@@ -1527,6 +1669,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     if (isGroup) {
                       setSelected({ type: "group", groupId: item.group.id });
                       setActiveDiscussionId(null);
+                      clearMessageContext();
                       markGroupRead(item.group.id);
                     } else {
                       void handleOpenDirectUser(item.user);
@@ -1696,6 +1839,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   onDiscuss={(message) => void handleOpenDiscussion(message)}
                   onMarkRead={(messageId) => unreadStore.markRead("group", selectedGroup.id, messageId)}
                   unread={unreadStore.getChat("group", selectedGroup.id)}
+                  messageContext={messageContext?.chat_type === "group" && messageContext.chat_id === selectedGroup.id ? messageContext : null}
+                  onContextClosed={clearMessageContext}
+                  onContextExpand={expandMessageContext}
                 />
               </div>
               {activeDiscussionId ? (
@@ -1704,10 +1850,16 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   dictionary={dictionary}
                   discussionId={activeDiscussionId}
                   locale={locale}
-                  onClose={() => setActiveDiscussionId(null)}
+                  onClose={() => {
+                    setActiveDiscussionId(null);
+                    clearMessageContext();
+                  }}
                   presenceByUserId={presenceByUserId}
                   onMarkRead={(messageId) => unreadStore.markRead("discussion", activeDiscussionId, messageId)}
                   unread={unreadStore.getChat("discussion", activeDiscussionId)}
+                  messageContext={messageContext?.chat_type === "discussion" && messageContext.chat_id === activeDiscussionId ? messageContext : null}
+                  onContextClosed={clearMessageContext}
+                  onContextExpand={expandMessageContext}
                 />
               ) : null}
             </div>
@@ -1739,11 +1891,25 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 locale={locale}
                 onMarkRead={(messageId) => unreadStore.markRead("direct", selectedDirectConversation.id, messageId)}
                 unread={unreadStore.getChat("direct", selectedDirectConversation.id)}
+                messageContext={messageContext?.chat_type === "direct" && messageContext.chat_id === selectedDirectConversation.id ? messageContext : null}
+                onContextClosed={clearMessageContext}
+                onContextExpand={expandMessageContext}
               />
             </div>
           ) : null}
         </section>
       </div>
+
+      {isMessageSearchOpen ? (
+        <MessageSearchPanel
+          currentChat={currentSearchChat}
+          dictionary={dictionary}
+          locale={locale}
+          onClose={closeMessageSearch}
+          onJump={handleSearchJump}
+          users={users}
+        />
+      ) : null}
 
       {isProfileOpen && currentUser ? (
         <div className="settings-backdrop" role="presentation">

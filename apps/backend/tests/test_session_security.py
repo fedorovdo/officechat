@@ -83,6 +83,15 @@ class SensitiveLogTests(unittest.TestCase):
         sanitized = redact_sensitive_query_parameters("POST /api/bots/incoming/complete-bot-token")
         self.assertEqual(sanitized, "POST /api/bots/incoming/[REDACTED]")
 
+    def test_private_search_query_is_redacted(self):
+        sanitized = redact_sensitive_query_parameters(
+            "GET /api/search/messages?q=private%20project&limit=30"
+        )
+        self.assertEqual(
+            sanitized,
+            "GET /api/search/messages?q=[REDACTED]&limit=30",
+        )
+
     def test_logging_filter_sanitizes_formatted_arguments(self):
         record = logging.LogRecord(
             "uvicorn.access",

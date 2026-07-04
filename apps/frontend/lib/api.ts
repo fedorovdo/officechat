@@ -51,6 +51,55 @@ export type TypingEvent = {
 
 export type ChatType = "group" | "direct" | "discussion";
 
+export type OfficeChatMessageSearchSender = {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+};
+
+export type OfficeChatMessageSearchResult = {
+  chat_type: ChatType;
+  chat_id: string;
+  chat_title: string;
+  source_group_id: string | null;
+  message_id: string;
+  sender: OfficeChatMessageSearchSender;
+  created_at: string;
+  excerpt: string;
+  attachment_count: number;
+  matched_attachment_names: string[];
+  is_edited: boolean;
+  reply_to_message_id: string | null;
+};
+
+export type OfficeChatMessageSearchPage = {
+  items: OfficeChatMessageSearchResult[];
+  next_cursor: string | null;
+  total_estimate: number | null;
+};
+
+export type OfficeChatMessageContext = {
+  chat_type: ChatType;
+  chat_id: string;
+  target_message_id: string;
+  messages: Array<OfficeChatMessage | OfficeChatDirectMessage | OfficeChatDiscussionMessage>;
+  has_more_before: boolean;
+  has_more_after: boolean;
+};
+
+export type MessageSearchFilters = {
+  q: string;
+  chat_type?: ChatType;
+  chat_id?: string;
+  sender_id?: string;
+  date_from?: string;
+  date_to?: string;
+  has_attachment?: boolean;
+  limit?: number;
+  cursor?: string;
+};
+
 export type OfficeChatUnreadChat = {
   chat_type: ChatType;
   chat_id: string;
@@ -801,6 +850,37 @@ export function markChatRead(token: string, chatType: ChatType, chatId: string, 
 
 export function getDirectReadReceipt(token: string, conversationId: string) {
   return apiFetch<OfficeChatDirectReadReceipt>(`/api/read-state/direct/${conversationId}/receipt`, token);
+}
+
+export function searchMessages(token: string, filters: MessageSearchFilters, signal?: AbortSignal) {
+  const query = new URLSearchParams({ q: filters.q, limit: String(filters.limit ?? 30) });
+  if (filters.chat_type) query.set("chat_type", filters.chat_type);
+  if (filters.chat_id) query.set("chat_id", filters.chat_id);
+  if (filters.sender_id) query.set("sender_id", filters.sender_id);
+  if (filters.date_from) query.set("date_from", filters.date_from);
+  if (filters.date_to) query.set("date_to", filters.date_to);
+  if (filters.has_attachment) query.set("has_attachment", "true");
+  if (filters.cursor) query.set("cursor", filters.cursor);
+  return apiFetch<OfficeChatMessageSearchPage>(`/api/search/messages?${query}`, token, { signal });
+}
+
+export function getMessageContext(
+  token: string,
+  chatType: ChatType,
+  chatId: string,
+  messageId: string,
+  before = 20,
+  after = 20,
+  signal?: AbortSignal
+) {
+  const query = new URLSearchParams({
+    chat_type: chatType,
+    chat_id: chatId,
+    message_id: messageId,
+    before: String(before),
+    after: String(after)
+  });
+  return apiFetch<OfficeChatMessageContext>(`/api/search/context?${query}`, token, { signal });
 }
 
 export function getPresence(token: string, userIds: string[]) {

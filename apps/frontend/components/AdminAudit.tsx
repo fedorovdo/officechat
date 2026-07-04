@@ -115,8 +115,13 @@ export function AdminAudit({ dictionary, locale }: AdminAuditProps) {
         </form>
 
         <div className="admin-table-wrap audit-table-wrap">
-          <table className="admin-table"><thead><tr><th>{dictionary.audit.time}</th><th>{dictionary.audit.status}</th><th>{dictionary.audit.action}</th><th>{dictionary.audit.actor}</th><th>{dictionary.audit.target}</th><th>{dictionary.audit.sourceIp}</th><th /></tr></thead>
-          <tbody>{events.map((event) => <tr key={event.id}><td>{formatter.format(new Date(event.created_at))}</td><td><span className={`audit-status audit-status-${event.status}`}>{event.status}</span></td><td><strong>{event.event_type}</strong><small>{event.category}</small></td><td>{event.actor_username ?? dictionary.audit.system}</td><td>{event.target_label ?? event.target_id ?? "-"}</td><td>{event.source_ip ?? "-"}</td><td><button className="secondary-link" onClick={() => void openDetails(event.id)} type="button">{dictionary.audit.details}</button></td></tr>)}</tbody></table>
+          <table className="admin-table audit-table"><thead><tr><th className="audit-col-time">{dictionary.audit.time}</th><th className="audit-col-status">{dictionary.audit.status}</th><th className="audit-col-action">{dictionary.audit.action}</th><th className="audit-col-actor">{dictionary.audit.actor}</th><th className="audit-col-target">{dictionary.audit.target}</th><th className="audit-col-ip">{dictionary.audit.sourceIp}</th><th className="audit-col-details" /></tr></thead>
+          <tbody>{events.map((event) => {
+            const actorLabel = event.actor_username ?? dictionary.audit.system;
+            const targetLabel = event.target_label ?? event.target_id ?? "-";
+            const sourceIp = event.source_ip ?? "-";
+            return <tr key={event.id}><td className="audit-col-time"><span title={event.created_at}>{formatter.format(new Date(event.created_at))}</span></td><td className="audit-col-status"><span className={`audit-status audit-status-${event.status}`}>{event.status}</span></td><td className="audit-col-action"><strong className="audit-cell-ellipsis" title={event.event_type}>{event.event_type}</strong><small className="audit-cell-ellipsis" title={event.category}>{event.category}</small></td><td className="audit-col-actor"><span className="audit-cell-ellipsis" title={actorLabel}>{actorLabel}</span></td><td className="audit-col-target"><span className="audit-cell-ellipsis" title={targetLabel}>{targetLabel}</span></td><td className="audit-col-ip"><span className="audit-cell-ellipsis" title={sourceIp}>{sourceIp}</span></td><td className="audit-col-details"><button className="secondary-link audit-details-button" onClick={() => void openDetails(event.id)} type="button">{dictionary.audit.details}</button></td></tr>;
+          })}</tbody></table>
           {!loading && events.length === 0 ? <p className="sidebar-empty-state">{dictionary.audit.empty}</p> : null}
           {loading ? <p className="muted">{dictionary.audit.loading}</p> : null}
         </div>

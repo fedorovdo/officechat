@@ -465,10 +465,16 @@
     "disableSuccess": "User disabled.",
     "enableSuccess": "User enabled.",
     "filterLabel": "Filter",
+    "searchLabel": "Search users",
+    "searchPlaceholder": "Username, display name or email",
+    "close": "Close",
+    "cancel": "Cancel",
+    "noResults": "No users found",
     "filters": {
       "all": "All",
       "active": "Active",
-      "disabled": "Disabled"
+      "disabled": "Disabled",
+      "bots": "Bots"
     },
     "yes": "Yes",
     "no": "No",

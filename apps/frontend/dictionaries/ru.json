@@ -465,10 +465,16 @@
     "disableSuccess": "Пользователь отключен.",
     "enableSuccess": "Пользователь включен.",
     "filterLabel": "Фильтр",
+    "searchLabel": "Поиск пользователей",
+    "searchPlaceholder": "Имя пользователя, отображаемое имя или email",
+    "close": "Закрыть",
+    "cancel": "Отмена",
+    "noResults": "Пользователи не найдены",
     "filters": {
       "all": "Все",
       "active": "Активные",
-      "disabled": "Отключённые"
+      "disabled": "Отключённые",
+      "bots": "Боты"
     },
     "yes": "Да",
     "no": "Нет",

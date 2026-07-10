@@ -9,7 +9,9 @@ from app.db.session import get_db_session
 from app.models.user import User
 from app.services.security import decode_access_token
 from app.services.audit import record_audit_event_best_effort, should_record_security_event, token_fingerprint
+from app.services.permissions import require_permission
 from app.services.users import get_user_by_id
+from app.core.permissions import CAN_BROADCAST, CAN_PIN_MESSAGES
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 AdminRoles = {"superadmin", "admin"}
@@ -69,4 +71,20 @@ async def require_admin_user(
                 details={"method": request.method}, error_code="admin_role_required", request=request,
             )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return current_user
+
+
+async def require_can_broadcast(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    await require_permission(session, current_user, CAN_BROADCAST)
+    return current_user
+
+
+async def require_can_pin_messages(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    await require_permission(session, current_user, CAN_PIN_MESSAGES)
     return current_user

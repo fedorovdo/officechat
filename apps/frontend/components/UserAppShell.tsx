@@ -1090,6 +1090,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             }));
             return;
           }
+          if (payload.type === "permissions.updated") {
+            setCurrentUser((user) => (user ? { ...user, permissions: payload.permissions } : user));
+            return;
+          }
           if (payload.type === "user.group.message.created") {
             handleGroupPersonalEvent(payload);
             return;

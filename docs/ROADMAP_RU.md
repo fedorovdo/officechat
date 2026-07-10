@@ -1,5 +1,12 @@
 # Roadmap OfficeChat
 
+## Granular Permissions v0.1
+
+- Добавлена основа специальных прав поверх ролей: `can_broadcast` и `can_pin_messages`.
+- `superadmin` имеет права неявно; обычные `admin`, `moderator`, group owners и пользователи не получают их автоматически.
+- Управление правами доступно только `superadmin` в Admin Users drawer; изменения пишутся в Audit Log и доставляются через `/api/ws/me` как `permissions.updated`.
+- Будущие Broadcast endpoints должны использовать `require_permission(CAN_BROADCAST)`, а pin/unpin endpoints - `require_permission(CAN_PIN_MESSAGES)`.
+
 ## Audit Log v0.1
 
 - Добавлены централизованные admin/security events, фильтры, детали и CSV export.

@@ -6,6 +6,7 @@ from app.models.discussion import Discussion, DiscussionMember, DiscussionMessag
 from app.models.group import Group, GroupMember
 from app.models.mention import MessageMention
 from app.models.message import Message
+from app.models.permission import Permission, UserPermission
 from app.models.reaction import DirectMessageReaction, DiscussionMessageReaction, GroupMessageReaction
 from app.models.read_state import ChatReadState
 from app.models.retention import RetentionAudit, RetentionSettings
@@ -30,7 +31,9 @@ __all__ = [
     "Message",
     "MessageAttachment",
     "MessageMention",
+    "Permission",
     "RetentionAudit",
     "RetentionSettings",
     "User",
+    "UserPermission",
 ]

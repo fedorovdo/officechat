@@ -565,6 +565,28 @@
       "moderator": "moderator",
       "user": "user",
       "bot": "bot"
+    },
+    "permissions": {
+      "title": "Special permissions",
+      "warning": "Grant these permissions only to trusted employees.",
+      "highImpact": "High-impact permission",
+      "loading": "Loading permissions...",
+      "inherited": "Granted by superadmin role",
+      "botNotSupported": "Bot accounts cannot receive these permissions in this version.",
+      "updateSuccess": "Permission updated.",
+      "updateError": "Could not update permissions.",
+      "granted": "Granted",
+      "notGranted": "Not granted",
+      "items": {
+        "can_broadcast": {
+          "label": "Mass announcements",
+          "description": "Can send announcements to all users or selected audiences."
+        },
+        "can_pin_messages": {
+          "label": "Pin messages",
+          "description": "Can pin and unpin messages in accessible chats."
+        }
+      }
     }
   },
   "adminBots": {

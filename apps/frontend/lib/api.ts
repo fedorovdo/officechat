@@ -9,6 +9,7 @@ import {
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
 export type GroupRole = "owner" | "moderator" | "member";
 export type DiscussionMemberRole = "owner" | "member";
+export type PermissionKey = "can_broadcast" | "can_pin_messages";
 
 export type OfficeChatUser = {
   id: string;
@@ -20,6 +21,7 @@ export type OfficeChatUser = {
   is_system: boolean;
   auth_provider: string;
   avatar_url: string | null;
+  permissions: PermissionKey[];
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
@@ -461,6 +463,10 @@ export type PersonalNotificationEvent =
       message: OfficeChatDiscussionMessage;
     }
   | {
+      type: "permissions.updated";
+      permissions: PermissionKey[];
+    }
+  | {
       type: "presence.updated";
       user_id: string;
       status: "online" | "offline";
@@ -581,6 +587,22 @@ export type AuditQuery = {
   target_type?: string;
   target_id?: string;
   search?: string;
+};
+
+export type OfficeChatPermission = {
+  key: PermissionKey;
+  category: string;
+  description_ru: string;
+  description_en: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OfficeChatUserPermissionState = {
+  explicit_permissions: PermissionKey[];
+  effective_permissions: PermissionKey[];
+  inherited_from_superadmin: boolean;
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
@@ -777,6 +799,21 @@ export function getAdminUsers(token: string) {
   return apiFetch<OfficeChatUser[]>("/api/admin/users", token);
 }
 
+export function getAdminPermissions(token: string) {
+  return apiFetch<OfficeChatPermission[]>("/api/admin/permissions", token);
+}
+
+export function getAdminUserPermissions(token: string, userId: string) {
+  return apiFetch<OfficeChatUserPermissionState>(`/api/admin/users/${userId}/permissions`, token);
+}
+
+export function updateAdminUserPermissions(token: string, userId: string, permissions: PermissionKey[]) {
+  return apiFetch<OfficeChatUserPermissionState>(`/api/admin/users/${userId}/permissions`, token, {
+    method: "PUT",
+    body: JSON.stringify({ permissions })
+  });
+}
+
 export function getRetentionSettings(token: string) {
   return apiFetch<RetentionSettings>("/api/admin/retention/settings", token);
 }
@@ -938,6 +975,10 @@ export function rotateAdminBotToken(token: string, botId: string) {
 
 export function isAdminRole(role: string) {
   return role === "superadmin" || role === "admin";
+}
+
+export function hasPermission(user: Pick<OfficeChatUser, "permissions"> | null | undefined, permission: PermissionKey) {
+  return Boolean(user?.permissions.includes(permission));
 }
 
 export function getGroups(token: string, includeInactive = false) {

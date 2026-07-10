@@ -1,11 +1,13 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
   createAdminUser,
+  getAdminPermissions,
+  getAdminUserPermissions,
   getAdminUsers,
   getCurrentUser,
   getLocalizedApiError,
@@ -14,8 +16,12 @@ import {
   requireStoredAccessToken,
   resetAdminUserPassword,
   updateAdminUser,
+  updateAdminUserPermissions,
   type CreateAdminUserPayload,
+  type OfficeChatPermission,
+  type OfficeChatUserPermissionState,
   type OfficeChatUser,
+  type PermissionKey,
   type UpdateAdminUserPayload,
   type UserRole
 } from "../lib/api";
@@ -27,6 +33,7 @@ type AdminUsersProps = {
 };
 
 const roles: UserRole[] = ["superadmin", "admin", "group_owner", "moderator", "user", "bot"];
+const specialPermissionKeys: PermissionKey[] = ["can_broadcast", "can_pin_messages"];
 type UserStatusFilter = "all" | "active" | "disabled" | "bots";
 
 const initialCreateForm: CreateAdminUserPayload = {
@@ -50,6 +57,10 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [users, setUsers] = useState<OfficeChatUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<OfficeChatUser | null>(null);
+  const [permissionCatalog, setPermissionCatalog] = useState<OfficeChatPermission[]>([]);
+  const [selectedPermissionState, setSelectedPermissionState] = useState<OfficeChatUserPermissionState | null>(null);
+  const [selectedPermissionDraft, setSelectedPermissionDraft] = useState<PermissionKey[]>([]);
+  const [createPermissionDraft, setCreatePermissionDraft] = useState<PermissionKey[]>([]);
   const [createForm, setCreateForm] = useState<CreateAdminUserPayload>(initialCreateForm);
   const [editForm, setEditForm] = useState<UpdateAdminUserPayload>(initialEditForm);
   const [newPassword, setNewPassword] = useState("");
@@ -60,6 +71,7 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -156,7 +168,11 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
           return;
         }
 
-        await reloadUsers(accessToken);
+        const loadTasks: Promise<unknown>[] = [reloadUsers(accessToken)];
+        if (user.role === "superadmin") {
+          loadTasks.push(getAdminPermissions(accessToken).then(setPermissionCatalog));
+        }
+        await Promise.all(loadTasks);
       } catch (caughtError) {
         setError(getLocalizedApiError(caughtError, dictionary.session));
       } finally {
@@ -170,6 +186,8 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
   function selectUser(user: OfficeChatUser) {
     setIsCreateOpen(false);
     setSelectedUser(user);
+    setSelectedPermissionState(null);
+    setSelectedPermissionDraft([]);
     setEditForm({
       display_name: user.display_name,
       email: user.email ?? "",
@@ -179,6 +197,18 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
     setNewPassword("");
     setError("");
     setSuccess("");
+    if (currentUser?.role === "superadmin") {
+      const token = getStoredAccessToken();
+      if (!token) return;
+      setIsLoadingPermissions(true);
+      void getAdminUserPermissions(token, user.id)
+        .then((state) => {
+          setSelectedPermissionState(state);
+          setSelectedPermissionDraft(state.explicit_permissions);
+        })
+        .catch(() => setError(dictionary.adminUsers.permissions.updateError))
+        .finally(() => setIsLoadingPermissions(false));
+    }
   }
 
   function handleRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, user: OfficeChatUser) {
@@ -201,13 +231,22 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
 
     setIsCreating(true);
     try {
-      await createAdminUser(token, {
+      const createdUser = await createAdminUser(token, {
         ...createForm,
         email: createForm.email?.trim() ? createForm.email.trim() : null,
         username: createForm.username.trim(),
         display_name: createForm.display_name.trim()
       });
+      if (
+        currentUser?.role === "superadmin" &&
+        createForm.role !== "superadmin" &&
+        createForm.role !== "bot" &&
+        createPermissionDraft.length > 0
+      ) {
+        await updateAdminUserPermissions(token, createdUser.id, createPermissionDraft);
+      }
       setCreateForm(initialCreateForm);
+      setCreatePermissionDraft([]);
       await reloadUsers(token);
       setIsCreateOpen(false);
       setSuccess(dictionary.adminUsers.createSuccess);
@@ -237,6 +276,15 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
         email: editForm.email?.trim() ? editForm.email.trim() : null,
         display_name: editForm.display_name.trim()
       });
+      if (currentUser?.role === "superadmin" && editForm.role !== "superadmin" && editForm.role !== "bot") {
+        const previous = [...(selectedPermissionState?.explicit_permissions ?? [])].sort().join(",");
+        const next = [...selectedPermissionDraft].sort().join(",");
+        if (previous !== next) {
+          const permissionState = await updateAdminUserPermissions(token, selectedUser.id, selectedPermissionDraft);
+          setSelectedPermissionState(permissionState);
+          setSelectedPermissionDraft(permissionState.explicit_permissions);
+        }
+      }
       setSelectedUser(updatedUser);
       await reloadUsers(token);
       setSuccess(dictionary.adminUsers.updateSuccess);
@@ -349,6 +397,83 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
     return true;
   }
 
+  function permissionDescription(permission: OfficeChatPermission, language: Locale) {
+    return language === "ru" ? permission.description_ru : permission.description_en;
+  }
+
+  function togglePermission(
+    permission: PermissionKey,
+    checked: boolean,
+    setter: (value: SetStateAction<PermissionKey[]>) => void
+  ) {
+    setter((current) => {
+      if (checked) return Array.from(new Set([...current, permission]));
+      return current.filter((item) => item !== permission);
+    });
+  }
+
+  function renderPermissionControls(options: {
+    role: UserRole;
+    authProvider: string;
+    draft: PermissionKey[];
+    state?: OfficeChatUserPermissionState | null;
+    onChange: (permission: PermissionKey, checked: boolean) => void;
+  }) {
+    if (currentUser?.role !== "superadmin") {
+      return null;
+    }
+
+    const inherited = options.role === "superadmin" || Boolean(options.state?.inherited_from_superadmin);
+    const isBot = options.role === "bot" || options.authProvider === "bot";
+    const availableCatalog = permissionCatalog.length > 0
+      ? permissionCatalog
+      : specialPermissionKeys.map((key) => ({
+          key,
+          category: "security",
+          description_ru: dictionary.adminUsers.permissions.items[key].description,
+          description_en: dictionary.adminUsers.permissions.items[key].description,
+          is_active: true,
+          created_at: "",
+          updated_at: ""
+        }));
+
+    return (
+      <section className="special-permissions-section" aria-labelledby="special-permissions-title">
+        <div>
+          <h3 className="compact-title" id="special-permissions-title">
+            {dictionary.adminUsers.permissions.title}
+          </h3>
+          <p className="permission-warning">{dictionary.adminUsers.permissions.warning}</p>
+        </div>
+        {isLoadingPermissions ? <p className="muted">{dictionary.adminUsers.permissions.loading}</p> : null}
+        {inherited ? <p className="form-success">{dictionary.adminUsers.permissions.inherited}</p> : null}
+        {isBot ? <p className="muted">{dictionary.adminUsers.permissions.botNotSupported}</p> : null}
+        <div className="special-permissions-list">
+          {availableCatalog.map((permission) => {
+            const checked = inherited || options.draft.includes(permission.key);
+            return (
+              <label className="permission-toggle" key={permission.key}>
+                <input
+                  checked={checked}
+                  disabled={inherited || isBot}
+                  onChange={(event) => options.onChange(permission.key, event.target.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>{dictionary.adminUsers.permissions.items[permission.key].label}</strong>
+                  {permission.key === "can_broadcast" ? (
+                    <em>{dictionary.adminUsers.permissions.highImpact}</em>
+                  ) : null}
+                  <small>{permissionDescription(permission, locale)}</small>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <main className="admin-page admin-users-page">
       <section className="admin-shell admin-users-shell" aria-label={dictionary.adminUsers.ariaLabel}>
@@ -402,6 +527,7 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
                   setSelectedUser(null);
                   setError("");
                   setSuccess("");
+                  setCreatePermissionDraft([]);
                   setIsCreateOpen(true);
                 }}
                 type="button"
@@ -508,6 +634,12 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
               <label className="field"><span className="field-label">{dictionary.adminUsers.fields.password}</span><input autoComplete="new-password" className="field-input" minLength={8} onChange={(event) => updateCreateForm("password", event.target.value)} required type="password" value={createForm.password} /></label>
               <label className="field"><span className="field-label">{dictionary.adminUsers.fields.role}</span><select className="field-input" onChange={(event) => updateCreateForm("role", event.target.value as UserRole)} value={createForm.role}>{roles.map((role) => <option key={role} value={role}>{dictionary.adminUsers.roles[role]}</option>)}</select></label>
               <label className="checkbox-field"><input checked={createForm.is_active} onChange={(event) => updateCreateForm("is_active", event.target.checked)} type="checkbox" /><span>{dictionary.adminUsers.fields.active}</span></label>
+              {renderPermissionControls({
+                role: createForm.role,
+                authProvider: "local",
+                draft: createPermissionDraft,
+                onChange: (permission, checked) => togglePermission(permission, checked, setCreatePermissionDraft)
+              })}
               {error ? <p className="form-error">{error}</p> : null}
               <div className="admin-user-drawer-actions"><button className="primary-button" disabled={isCreating} type="submit">{isCreating ? dictionary.adminUsers.creating : dictionary.adminUsers.createSubmit}</button><button className="secondary-link" onClick={() => setIsCreateOpen(false)} type="button">{dictionary.adminUsers.cancel}</button></div>
             </form>
@@ -525,6 +657,13 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
               <label className="field"><span className="field-label">{dictionary.adminUsers.fields.email}</span><input className="field-input" onChange={(event) => updateEditForm("email", event.target.value)} type="email" value={editForm.email ?? ""} /></label>
               <label className="field"><span className="field-label">{dictionary.adminUsers.fields.role}</span><select className="field-input" onChange={(event) => updateEditForm("role", event.target.value as UserRole)} value={editForm.role}>{roles.map((role) => <option key={role} value={role}>{dictionary.adminUsers.roles[role]}</option>)}</select></label>
               <label className="checkbox-field"><input checked={editForm.is_active} onChange={(event) => updateEditForm("is_active", event.target.checked)} type="checkbox" /><span>{dictionary.adminUsers.fields.active}</span></label>
+              {renderPermissionControls({
+                role: editForm.role,
+                authProvider: selectedUser.auth_provider,
+                draft: selectedPermissionDraft,
+                state: selectedPermissionState,
+                onChange: (permission, checked) => togglePermission(permission, checked, setSelectedPermissionDraft)
+              })}
               <div className="admin-user-drawer-actions"><button className="primary-button" disabled={isSaving} type="submit">{isSaving ? dictionary.adminUsers.saving : dictionary.adminUsers.saveSubmit}</button><button className="secondary-link" onClick={() => setSelectedUser(null)} type="button">{dictionary.adminUsers.cancel}</button></div>
             </form>
             <form className="admin-form reset-form" onSubmit={handleResetPassword}>

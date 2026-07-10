@@ -1,5 +1,9 @@
 # Журнал аудита OfficeChat
 
+## События специальных прав
+
+Granular Permissions v0.1 пишет `permission.granted` и `permission.revoked` в категорию `security`. Actor - `superadmin`, target - пользователь, которому назначили или отозвали право. В `details` сохраняется только безопасный ключ `permission`, например `can_broadcast`; JWT, пароли, токены и session data не сохраняются.
+
 Audit Log v0.1 хранит важные административные и security-события в неизменяемой таблице `audit_events`. Запись содержит снимок имени и роли инициатора, тип события, статус, целевой объект, прямой IP клиента, user agent, request ID и очищенные детали.
 
 ## Что записывается

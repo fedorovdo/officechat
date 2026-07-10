@@ -1,5 +1,9 @@
 # Auth Foundation OfficeChat
 
+## Специальные права
+
+OfficeChat поддерживает granular permissions поверх ролей. В v0.1 доступны `can_broadcast` и `can_pin_messages`, но сами рассылки и закрепление сообщений ещё не реализованы. Эти права не выдаются автоматически ролям `admin`, `moderator`, `group_owner` или `user`; `superadmin` имеет все активные права неявно. Управлять явными grants может только `superadmin` через `/api/admin/users/{user_id}/permissions` и Admin Users drawer. `GET /api/auth/me` возвращает эффективные `permissions` для UI, но JWT не является источником истины.
+
 ## События аутентификации
 
 Журнал аудита записывает `auth.login.succeeded`, `auth.login.failed`, `auth.logout`, `auth.session.expired` и `security.invalid_token`. Пароль и JWT не сохраняются; для rate-limited диагностики недействительного JWT используется только первые 12 hex-символов SHA-256 fingerprint.

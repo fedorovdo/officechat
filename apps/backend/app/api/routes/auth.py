@@ -9,10 +9,17 @@ from app.schemas.auth import LoginRequest, LogoutResponse, TokenResponse
 from app.schemas.user import UserProfileUpdate, UserPublic
 from app.services.avatars import AvatarValidationError, remove_user_avatar, update_user_avatar
 from app.services.audit import record_audit_event, record_audit_event_best_effort
+from app.services.permissions import get_effective_permission_keys
 from app.services.security import create_access_token
 from app.services.users import authenticate_user, update_user_profile
 
 router = APIRouter()
+
+
+async def user_public_with_permissions(session: AsyncSession, user: User) -> UserPublic:
+    return UserPublic.model_validate(user).model_copy(
+        update={"permissions": await get_effective_permission_keys(session, user)}
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -37,12 +44,15 @@ async def login(payload: LoginRequest, request: Request, session: Annotated[Asyn
     await session.commit()
     await session.refresh(user)
     token = create_access_token(user.id, user.username, user.role)
-    return TokenResponse(access_token=token, user=UserPublic.model_validate(user))
+    return TokenResponse(access_token=token, user=await user_public_with_permissions(session, user))
 
 
 @router.get("/me", response_model=UserPublic)
-async def me(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-    return current_user
+async def me(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserPublic:
+    return await user_public_with_permissions(session, current_user)
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -51,7 +61,7 @@ async def patch_me(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
+) -> UserPublic:
     old_name = current_user.display_name
     updated = await update_user_profile(session, current_user, payload, commit=False)
     await record_audit_event(
@@ -61,7 +71,7 @@ async def patch_me(
     )
     await session.commit()
     await session.refresh(updated)
-    return updated
+    return await user_public_with_permissions(session, updated)
 
 
 @router.post("/me/avatar", response_model=UserPublic)
@@ -70,7 +80,7 @@ async def upload_my_avatar(
     file: Annotated[UploadFile, File()],
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
+) -> UserPublic:
     replaced_existing = current_user.avatar_path is not None
     try:
         updated = await update_user_avatar(session, current_user, file)
@@ -81,7 +91,7 @@ async def upload_my_avatar(
             request=request,
         )
         await session.commit()
-        return updated
+        return await user_public_with_permissions(session, updated)
     except AvatarValidationError as exc:
         await record_audit_event_best_effort(
             event_type="security.upload_rejected", category="security", action="upload_avatar", status="failure",
@@ -99,7 +109,7 @@ async def delete_my_avatar(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
+) -> UserPublic:
     updated = await remove_user_avatar(session, current_user)
     await record_audit_event(
         session, event_type="user.avatar_removed", category="profile", action="remove_avatar", status="success",
@@ -107,7 +117,7 @@ async def delete_my_avatar(
         details={"removed_existing": True}, request=request,
     )
     await session.commit()
-    return updated
+    return await user_public_with_permissions(session, updated)
 
 
 @router.post("/logout", response_model=LogoutResponse)

@@ -17,6 +17,7 @@ export function userFactory(overrides: Partial<OfficeChatUser> = {}): OfficeChat
     is_system: false,
     auth_provider: "local",
     avatar_url: null,
+    permissions: [],
     created_at: "2026-07-04T10:00:00Z",
     updated_at: "2026-07-04T10:00:00Z",
     last_login_at: "2026-07-04T10:00:00Z",

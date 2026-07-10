@@ -1,5 +1,9 @@
 # Разработка OfficeChat
 
+## Гранулярные права
+
+`superadmin` видит в `/ru/admin/users` раздел специальных прав. Можно назначать `can_broadcast` и `can_pin_messages` доверенным пользователям; обычный `admin` эти controls не видит. Проверка API: `GET /api/admin/permissions`, `GET /api/admin/users/{user_id}/permissions`, `PUT /api/admin/users/{user_id}/permissions`. Изменения должны появляться в Audit Log как `permission.granted` или `permission.revoked`, а affected user получает `permissions.updated` через `/api/ws/me`.
+
 ## Backend-тесты
 
 Локальный backend-сервис Docker Compose собирается из стадии `development`, которая устанавливает зависимости из `apps/backend/requirements-dev.txt` и включает каталог `apps/backend/tests`. Runtime-стадия образа остаётся без pytest.

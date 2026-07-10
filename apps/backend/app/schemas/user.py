@@ -19,6 +19,7 @@ class UserPublic(BaseModel):
     is_system: bool
     auth_provider: str
     avatar_url: str | None
+    permissions: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     last_login_at: datetime | None

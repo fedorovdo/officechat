@@ -10,6 +10,10 @@ WebSocket access logs redact `token`, `access_token`, `authorization`, and `tick
 
 Administrators can review and export sanitized security and administrative events at `http://localhost:3100/ru/admin/audit`. The log records authentication, user/group/bot management, profile changes, discussions and retention operations without passwords, tokens, message bodies, attachment contents or filesystem paths. See [docs/AUDIT_LOG_RU.md](docs/AUDIT_LOG_RU.md).
 
+## Granular Permissions
+
+OfficeChat has a granular permission foundation in addition to roles. Initial sensitive permissions are `can_broadcast` and `can_pin_messages`; they are not automatically granted to `admin`, `moderator`, group owners, or ordinary users. `superadmin` has all active permissions implicitly and is the only role that can assign or revoke explicit grants in `/ru/admin/users`. Permission changes are audited as `permission.granted` / `permission.revoked` and sent to the affected open session through `/api/ws/me` as `permissions.updated`. See [docs/PERMISSIONS_RU.md](docs/PERMISSIONS_RU.md).
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.

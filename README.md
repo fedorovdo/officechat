@@ -16,6 +16,8 @@ OfficeChat has a granular permission foundation in addition to roles. Initial se
 
 Pinned Messages v0.1 lets trusted human users with `can_pin_messages` pin, unpin, and annotate important messages in group, direct, and discussion chats. Admin role alone does not grant this action, and direct/discussion privacy is still enforced. Pinned-message actions are audited and synchronized through the selected chat WebSocket channel. See [docs/PINNED_MESSAGES_RU.md](docs/PINNED_MESSAGES_RU.md).
 
+Broadcast Announcements v0.1 adds a separate corporate announcement inbox and sender flow for trusted users with effective `can_broadcast`. Broadcasts are stored as one announcement plus recipient rows, use preview/confirmation tokens and Valkey rate limiting before send, and deliver `announcement.created/read/retracted` through `/api/ws/me`. Announcement unread counters are separate from chat unread counters. See [docs/BROADCASTS_RU.md](docs/BROADCASTS_RU.md).
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
@@ -199,6 +201,12 @@ Important auth environment variables:
 - `PRESENCE_OFFLINE_GRACE_SECONDS` - reconnect grace before offline, default `15`.
 - `TYPING_TTL_SECONDS` - stale typing state TTL, default `5`.
 - `PINNED_MESSAGES_MAX_PER_CHAT` - maximum pinned messages per chat, default `20`.
+- `BROADCAST_TITLE_MAX_LENGTH` - maximum announcement title length, default `160`.
+- `BROADCAST_BODY_MAX_LENGTH` - maximum announcement body length, default `10000`.
+- `BROADCAST_MAX_RECIPIENTS` - maximum resolved recipients per broadcast, default `10000`.
+- `BROADCAST_MAX_PER_HOUR` - per-sender broadcast rate limit, default `10`.
+- `BROADCAST_PREVIEW_TTL_SECONDS` - preview confirmation lifetime, default `300`.
+- `BROADCAST_RETENTION_DAYS` - planned broadcast retention window, default `365`.
 
 ## Useful Docker Compose Commands
 

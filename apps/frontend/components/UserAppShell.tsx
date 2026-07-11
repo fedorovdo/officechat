@@ -17,6 +17,7 @@ import {
   createDirectConversation,
   createDiscussion,
   deleteMyAvatar,
+  getAnnouncementUnread,
   getCurrentUser,
   getDirectConversations,
   getDiscussion,
@@ -55,6 +56,8 @@ import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
 import { MessageSearchPanel } from "./MessageSearchPanel";
+import { AnnouncementsPanel } from "./AnnouncementsPanel";
+import { AnnouncementUnreadBadge } from "./AnnouncementUnreadBadge";
 import { UserAvatar } from "./UserAvatar";
 import { PresenceStatus } from "./PresenceStatus";
 
@@ -74,6 +77,7 @@ type SidebarTab = "all" | "groups" | "direct";
 type AppSelection =
   | { type: "group"; groupId: string }
   | { type: "direct"; conversationId: string }
+  | { type: "announcements" }
   | { type: "empty" };
 
 type AppSettings = {
@@ -290,6 +294,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     createEmptyNotificationDebug()
   );
   const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
+  const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0);
+  const [announcementReloadKey, setAnnouncementReloadKey] = useState(0);
   const [presenceByUserId, setPresenceByUserId] = useState<Record<string, OfficeChatPresence>>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -537,6 +543,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
     if (selection.type === "direct") {
       return `direct:${selection.conversationId}`;
+    }
+    if (selection.type === "announcements") {
+      return "announcements";
     }
     return "empty";
   }
@@ -846,16 +855,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
     async function loadApp() {
       try {
-        const [loadedUser, loadedGroups, loadedUsers, loadedDirectConversations] = await Promise.all([
+        const [loadedUser, loadedGroups, loadedUsers, loadedDirectConversations, loadedAnnouncementUnread] = await Promise.all([
           getCurrentUser(accessToken),
           getGroups(accessToken),
           getUsers(accessToken),
-          getDirectConversations(accessToken)
+          getDirectConversations(accessToken),
+          getAnnouncementUnread(accessToken).catch(() => ({ unread_count: 0 }))
         ]);
         setCurrentUser(loadedUser);
         setGroups(loadedGroups);
         setUsers(loadedUsers);
         setDirectConversations(loadedDirectConversations);
+        setAnnouncementUnreadCount(loadedAnnouncementUnread.unread_count);
         void getPresence(accessToken, loadedUsers.map((user) => user.id))
           .then((presenceRows) => {
             setPresenceByUserId(
@@ -1060,6 +1071,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       });
     }
 
+    function handleAnnouncementCreated(payload: Extract<PersonalNotificationEvent, { type: "announcement.created" }>) {
+      setAnnouncementUnreadCount(payload.unread_count);
+      setAnnouncementReloadKey((value) => value + 1);
+      attemptBrowserNotification({
+        eventType: payload.type,
+        messageId: payload.announcement.id,
+        senderUserId: payload.announcement.sender_user_id ?? "-",
+        body: `${payload.announcement.sender_display_name}: ${payload.announcement.title}`,
+        selectedChatId: getSelectionDebugId(selectedRef.current),
+        onClick: () => {
+          setSelected({ type: "announcements" });
+          setActiveDiscussionId(null);
+        }
+      });
+    }
+
     return connectResilientWebSocket({
       getUrl: () => getPersonalWebSocketUrl(accessToken),
       heartbeatIntervalMs: presenceHeartbeatIntervalMs,
@@ -1092,6 +1119,15 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           }
           if (payload.type === "permissions.updated") {
             setCurrentUser((user) => (user ? { ...user, permissions: payload.permissions } : user));
+            return;
+          }
+          if (payload.type === "announcement.created") {
+            handleAnnouncementCreated(payload);
+            return;
+          }
+          if (payload.type === "announcement.read" || payload.type === "announcement.retracted") {
+            setAnnouncementUnreadCount(payload.unread_count);
+            setAnnouncementReloadKey((value) => value + 1);
             return;
           }
           if (payload.type === "user.group.message.created") {
@@ -1628,6 +1664,31 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           </div>
 
           <div className="user-app-nav-list">
+            <button
+              aria-label={dictionary.announcements.title}
+              className={[
+                "user-app-nav-item",
+                "user-app-nav-item-announcements",
+                selected.type === "announcements" ? "user-app-nav-item-active" : "",
+                announcementUnreadCount > 0 ? "user-app-nav-item-unread" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => {
+                setSelected({ type: "announcements" });
+                setActiveDiscussionId(null);
+                clearMessageContext();
+              }}
+              title={isSidebarCollapsed ? dictionary.announcements.title : undefined}
+              type="button"
+            >
+              <span className="chat-avatar chat-avatar-group" aria-hidden="true">!</span>
+              <span className="sidebar-item-content">
+                <span className="sidebar-item-top">
+                  <strong>{dictionary.announcements.title}</strong>
+                </span>
+                <span className="sidebar-item-preview">{dictionary.announcements.sidebarPreview}</span>
+              </span>
+              <AnnouncementUnreadBadge count={announcementUnreadCount} locale={locale} />
+            </button>
             {!isLoading && normalizedSidebarSearch && !hasSidebarSearchResults ? (
               <p className="sidebar-empty-state">{dictionary.appShell.nothingFound}</p>
             ) : null}
@@ -1803,6 +1864,18 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               <h2>{dictionary.appShell.emptyTitle}</h2>
               <p>{dictionary.appShell.emptyDescription}</p>
             </div>
+          ) : null}
+
+          {!isLoading && selected.type === "announcements" && currentUser ? (
+            <AnnouncementsPanel
+              currentUser={currentUser}
+              dictionary={dictionary}
+              groups={groups}
+              locale={locale}
+              reloadKey={announcementReloadKey}
+              users={users}
+              onUnreadChange={setAnnouncementUnreadCount}
+            />
           ) : null}
 
           {selectedGroup && currentUser ? (

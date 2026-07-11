@@ -521,6 +521,64 @@
       "discussion": "Discussion"
     }
   },
+  "announcements": {
+    "title": "Announcements",
+    "eyebrow": "Broadcasts",
+    "sidebarPreview": "Company announcements",
+    "inbox": "Inbox",
+    "compose": "New broadcast",
+    "history": "Sent broadcasts",
+    "emptyInbox": "No announcements",
+    "emptyHistory": "No sent broadcasts",
+    "loadError": "Could not load announcements.",
+    "dismiss": "Dismiss",
+    "dismissError": "Could not dismiss announcement.",
+    "from": "From {name}",
+    "retracted": "Announcement retracted",
+    "preview": "Preview recipients",
+    "previewSuccess": "Preview ready: {count} recipients.",
+    "previewError": "Could not preview recipients.",
+    "previewExpires": "Preview expires: {time}",
+    "draftSaveError": "Could not save the draft.",
+    "send": "Send broadcast",
+    "sending": "Sending",
+    "sendSuccess": "Broadcast sent.",
+    "sendError": "Could not send the announcement.",
+    "mayAlreadySent": "The announcement may already have been sent. Refresh the list before trying again.",
+    "internalServerError": "Internal server error.",
+    "retract": "Retract",
+    "retractSuccess": "Broadcast retracted.",
+    "retractError": "Could not retract the announcement.",
+    "recipients": "{count} recipients",
+    "readStats": "{read} of {total} read",
+    "confirmWord": "BROADCAST",
+    "confirmUrgent": "Type {word} to confirm an urgent all-user broadcast",
+    "confirmRequired": "Type {word} to confirm.",
+    "fields": {
+      "title": "Title",
+      "body": "Message",
+      "priority": "Priority",
+      "audience": "Audience"
+    },
+    "priorities": {
+      "normal": "Normal",
+      "important": "Important",
+      "urgent": "Urgent"
+    },
+    "audienceTypes": {
+      "all_active_users": "All active users",
+      "selected_groups": "Selected groups",
+      "selected_users": "Selected users"
+    },
+    "statuses": {
+      "draft": "Draft",
+      "sending": "Sending",
+      "sent": "Sent",
+      "failed": "Failed",
+      "partially_failed": "Partially failed",
+      "retracted": "Retracted"
+    }
+  },
   "adminUsers": {
     "ariaLabel": "Admin user management",
     "title": "User management",

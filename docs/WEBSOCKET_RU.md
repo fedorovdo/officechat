@@ -182,6 +182,33 @@ Personal notification events:
 }
 ```
 
+Broadcast announcement events use the same personal channel and are separate from chat unread events:
+
+```json
+{
+  "type": "announcement.created",
+  "announcement": {
+    "id": "...",
+    "title": "...",
+    "priority": "important",
+    "sent_at": "...",
+    "sender_user_id": "...",
+    "sender_display_name": "..."
+  },
+  "unread_count": 1
+}
+```
+
+```json
+{
+  "type": "announcement.read",
+  "announcement_id": "...",
+  "unread_count": 0
+}
+```
+
+`announcement.retracted` uses the same compact shape as `announcement.read`.
+
 Канал `WS /api/ws/me` подключается один раз для текущего пользователя и получает события по группам и личным разговорам, которые относятся к этому пользователю. Frontend browser notifications используют именно этот канал, чтобы уведомления не зависели от выбранного чата.
 
 Сообщения discussion также отправляются через персональный канал участникам обсуждения. Это позволяет показать browser notification, даже если боковая панель discussion закрыта.

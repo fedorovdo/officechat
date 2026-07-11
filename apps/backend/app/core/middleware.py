@@ -29,10 +29,17 @@ class UnexpectedErrorMiddleware:
         except Exception:
             if scope["type"] != "http":
                 raise
+            request_id = scope.get("state", {}).get("request_id")
             logger.exception(
-                "Unhandled API error for %s %s",
+                "Unhandled API error for %s %s request_id=%s",
                 scope.get("method", "UNKNOWN"),
                 scope.get("path", ""),
+                request_id,
             )
-            response = JSONResponse(status_code=500, content={"detail": "Internal server error"})
+            content = {"detail": "Internal server error"}
+            if request_id:
+                content["request_id"] = request_id
+            response = JSONResponse(status_code=500, content=content)
+            if request_id:
+                response.headers["X-Request-ID"] = request_id
             await response(scope, receive, send)

@@ -521,6 +521,64 @@
       "discussion": "Обсуждение"
     }
   },
+  "announcements": {
+    "title": "Объявления",
+    "eyebrow": "Рассылки",
+    "sidebarPreview": "Корпоративные объявления",
+    "inbox": "Входящие",
+    "compose": "Новая рассылка",
+    "history": "Отправленные рассылки",
+    "emptyInbox": "Объявлений нет",
+    "emptyHistory": "Отправленных рассылок нет",
+    "loadError": "Не удалось загрузить объявления.",
+    "dismiss": "Скрыть",
+    "dismissError": "Не удалось скрыть объявление.",
+    "from": "От {name}",
+    "retracted": "Объявление отозвано",
+    "preview": "Проверить получателей",
+    "previewSuccess": "Проверка готова: {count} получателей.",
+    "previewError": "Не удалось проверить получателей.",
+    "previewExpires": "Проверка действует до: {time}",
+    "draftSaveError": "Не удалось сохранить черновик.",
+    "send": "Отправить рассылку",
+    "sending": "Отправка",
+    "sendSuccess": "Рассылка отправлена.",
+    "sendError": "Не удалось отправить рассылку.",
+    "mayAlreadySent": "Рассылка могла быть выполнена. Обновите список перед повторной отправкой.",
+    "internalServerError": "Внутренняя ошибка сервера.",
+    "retract": "Отозвать",
+    "retractSuccess": "Рассылка отозвана.",
+    "retractError": "Не удалось отозвать объявление.",
+    "recipients": "{count} получателей",
+    "readStats": "Прочитали {read} из {total}",
+    "confirmWord": "РАЗОСЛАТЬ",
+    "confirmUrgent": "Введите {word}, чтобы подтвердить срочную рассылку всем пользователям",
+    "confirmRequired": "Введите {word} для подтверждения.",
+    "fields": {
+      "title": "Заголовок",
+      "body": "Сообщение",
+      "priority": "Приоритет",
+      "audience": "Аудитория"
+    },
+    "priorities": {
+      "normal": "Обычный",
+      "important": "Важный",
+      "urgent": "Срочный"
+    },
+    "audienceTypes": {
+      "all_active_users": "Все активные пользователи",
+      "selected_groups": "Выбранные группы",
+      "selected_users": "Выбранные пользователи"
+    },
+    "statuses": {
+      "draft": "Черновик",
+      "sending": "Отправляется",
+      "sent": "Отправлена",
+      "failed": "Ошибка",
+      "partially_failed": "Частичная ошибка",
+      "retracted": "Отозвана"
+    }
+  },
   "adminUsers": {
     "ariaLabel": "Управление пользователями",
     "title": "Управление пользователями",

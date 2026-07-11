@@ -55,6 +55,7 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Drag-and-Drop Attachments v0.1: multi-file drop overlay в group/direct/discussion chats, включая text/config files.
 - Multiple Attachments v0.1: до 10 файлов, общий лимит, атомарное сохранение и image gallery/lightbox.
 - Pinned Messages v0.1: закрепление сообщений в group/direct/discussion чатах, pinned strip в `/ru/app`, jump-to-message, заметки, audit events и лимит `PINNED_MESSAGES_MAX_PER_CHAT`.
+- Broadcast Announcements v0.1: отдельная сущность корпоративных объявлений, preview аудитории, confirmation token, Valkey rate limiting, отдельный unread counter и события `announcement.created/read/retracted` через `/api/ws/me`.
 
 ## Этап 2: Realtime
 

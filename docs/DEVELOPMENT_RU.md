@@ -274,3 +274,22 @@ Frontend находится в `apps/frontend`.
 ```powershell
 docker compose down
 ```
+
+## Broadcast Announcements
+
+Корпоративные объявления доступны в user app `/ru/app` через отдельный пункт `Объявления`. Получатели видят только адресованные им объявления, а пользователи с эффективным правом `can_broadcast` видят форму отправки, preview аудитории и историю своих рассылок.
+
+Проверка API:
+
+```text
+POST /api/broadcasts/preview
+POST /api/broadcasts
+POST /api/broadcasts/{broadcast_id}/send
+POST /api/broadcasts/{broadcast_id}/retract
+GET  /api/announcements
+GET  /api/announcements/unread
+```
+
+Рассылки используют отдельный unread counter и события `announcement.created`, `announcement.read`, `announcement.retracted` через `WS /api/ws/me`. В Audit Log не пишутся title/body, usernames получателей, confirmation token и idempotency key.
+
+Переменные окружения для разработки: `BROADCAST_TITLE_MAX_LENGTH`, `BROADCAST_BODY_MAX_LENGTH`, `BROADCAST_MAX_RECIPIENTS`, `BROADCAST_MAX_PER_HOUR`, `BROADCAST_PREVIEW_TTL_SECONDS`, `BROADCAST_RETENTION_DAYS`.

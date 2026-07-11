@@ -1,6 +1,7 @@
 from app.models.attachment import DirectMessageAttachment, DiscussionMessageAttachment, MessageAttachment
 from app.models.audit import AuditEvent
 from app.models.bot import Bot
+from app.models.broadcast import BroadcastAnnouncement, BroadcastRecipient
 from app.models.direct import DirectConversation, DirectMessage
 from app.models.discussion import Discussion, DiscussionMember, DiscussionMessage
 from app.models.group import Group, GroupMember
@@ -15,6 +16,8 @@ from app.models.user import User
 
 __all__ = [
     "Bot",
+    "BroadcastAnnouncement",
+    "BroadcastRecipient",
     "ChatReadState",
     "AuditEvent",
     "DirectConversation",

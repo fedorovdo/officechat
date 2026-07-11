@@ -10,6 +10,9 @@ export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "u
 export type GroupRole = "owner" | "moderator" | "member";
 export type DiscussionMemberRole = "owner" | "member";
 export type PermissionKey = "can_broadcast" | "can_pin_messages";
+export type BroadcastPriority = "normal" | "important" | "urgent";
+export type BroadcastAudienceType = "all_active_users" | "selected_groups" | "selected_users";
+export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partially_failed" | "retracted";
 
 export type OfficeChatUser = {
   id: string;
@@ -553,6 +556,16 @@ export type PersonalNotificationEvent =
       permissions: PermissionKey[];
     }
   | {
+      type: "announcement.created";
+      announcement: OfficeChatAnnouncementEvent;
+      unread_count: number;
+    }
+  | {
+      type: "announcement.read" | "announcement.retracted";
+      announcement_id: string;
+      unread_count: number;
+    }
+  | {
       type: "presence.updated";
       user_id: string;
       status: "online" | "offline";
@@ -560,6 +573,103 @@ export type PersonalNotificationEvent =
     }
   | UnreadEvent
   | { type: "unread.refresh" };
+
+export type BroadcastAudiencePayload = {
+  audience_type: BroadcastAudienceType;
+  group_ids?: string[];
+  user_ids?: string[];
+};
+
+export type BroadcastCreatePayload = BroadcastAudiencePayload & {
+  title: string;
+  body: string;
+  priority: BroadcastPriority;
+  expires_at?: string | null;
+};
+
+export type BroadcastUpdatePayload = Partial<BroadcastCreatePayload>;
+
+export type BroadcastPreview = {
+  recipient_count: number;
+  group_count: number;
+  excluded_disabled: number;
+  excluded_bots: number;
+  duplicates_removed: number;
+  audience_hash: string;
+  confirmation_token: string;
+  expires_at: string;
+};
+
+export type BroadcastAnnouncement = {
+  id: string;
+  created_by_user_id: string | null;
+  created_by_username: string;
+  created_by_display_name: string;
+  title: string;
+  body: string;
+  priority: BroadcastPriority;
+  status: BroadcastStatus;
+  audience_type: BroadcastAudienceType;
+  audience_definition: Record<string, unknown> | null;
+  recipient_count: number;
+  notified_count: number;
+  read_count: number;
+  failed_count: number;
+  sent_at: string | null;
+  expires_at: string | null;
+  retracted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BroadcastPage = {
+  items: BroadcastAnnouncement[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type BroadcastStats = {
+  recipients: number;
+  notified: number;
+  offline: number;
+  read: number;
+  unread: number;
+  failed: number;
+  read_percentage: number;
+};
+
+export type OfficeChatAnnouncement = {
+  id: string;
+  title: string;
+  body: string | null;
+  priority: BroadcastPriority;
+  status: BroadcastStatus;
+  sender: string;
+  sent_at: string | null;
+  expires_at: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  dismissed_at: string | null;
+  preview: string;
+};
+
+export type OfficeChatAnnouncementEvent = {
+  id: string;
+  title: string;
+  priority: BroadcastPriority;
+  sent_at: string | null;
+  sender_user_id: string | null;
+  sender_display_name: string;
+  is_read: boolean;
+};
+
+export type AnnouncementPage = {
+  items: OfficeChatAnnouncement[];
+  total: number;
+  page: number;
+  limit: number;
+};
 
 export type CreateGroupPayload = {
   name: string;
@@ -958,6 +1068,70 @@ export function getStorageStats(token: string) {
 
 export function getUsers(token: string) {
   return apiFetch<OfficeChatDirectoryUser[]>("/api/users", token);
+}
+
+export function getAnnouncements(token: string, page = 1, limit = 20) {
+  return apiFetch<AnnouncementPage>(`/api/announcements?page=${page}&limit=${limit}`, token);
+}
+
+export function getAnnouncement(token: string, announcementId: string) {
+  return apiFetch<OfficeChatAnnouncement>(`/api/announcements/${announcementId}`, token);
+}
+
+export function markAnnouncementRead(token: string, announcementId: string) {
+  return apiFetch<OfficeChatAnnouncement>(`/api/announcements/${announcementId}/read`, token, { method: "POST" });
+}
+
+export function dismissAnnouncement(token: string, announcementId: string) {
+  return apiFetch<OfficeChatAnnouncement>(`/api/announcements/${announcementId}/dismiss`, token, { method: "POST" });
+}
+
+export function getAnnouncementUnread(token: string) {
+  return apiFetch<{ unread_count: number }>("/api/announcements/unread", token);
+}
+
+export function createBroadcast(token: string, payload: BroadcastCreatePayload) {
+  return apiFetch<BroadcastAnnouncement>("/api/broadcasts", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateBroadcast(token: string, broadcastId: string, payload: BroadcastUpdatePayload) {
+  return apiFetch<BroadcastAnnouncement>(`/api/broadcasts/${broadcastId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function previewBroadcastRecipients(token: string, payload: BroadcastAudiencePayload) {
+  return apiFetch<BroadcastPreview>("/api/broadcasts/preview", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function sendBroadcast(
+  token: string,
+  broadcastId: string,
+  payload: { confirmation_token: string; expected_recipient_count: number; idempotency_key?: string | null }
+) {
+  return apiFetch<BroadcastAnnouncement>(`/api/broadcasts/${broadcastId}/send`, token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function retractBroadcast(token: string, broadcastId: string) {
+  return apiFetch<BroadcastAnnouncement>(`/api/broadcasts/${broadcastId}/retract`, token, { method: "POST" });
+}
+
+export function getSentBroadcasts(token: string, page = 1, limit = 20) {
+  return apiFetch<BroadcastPage>(`/api/broadcasts/sent?page=${page}&limit=${limit}`, token);
+}
+
+export function getBroadcastStats(token: string, broadcastId: string) {
+  return apiFetch<BroadcastStats>(`/api/broadcasts/${broadcastId}/stats`, token);
 }
 
 export function getUnreadSummary(token: string) {

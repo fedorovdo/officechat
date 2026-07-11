@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     audit_max_export_rows: int = 10000
     message_max_length: int = 4000
     pinned_messages_max_per_chat: int = Field(default=20, ge=1, le=100)
+    broadcast_title_max_length: int = Field(default=160, ge=1, le=300)
+    broadcast_body_max_length: int = Field(default=10000, ge=1, le=50000)
+    broadcast_max_recipients: int = Field(default=10000, ge=1, le=100000)
+    broadcast_max_per_hour: int = Field(default=10, ge=1, le=1000)
+    broadcast_preview_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    broadcast_retention_days: int = Field(default=365, ge=1, le=3650)
     attachment_max_upload_size_mb: int = Field(
         default=25,
         validation_alias=AliasChoices("ATTACHMENT_MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_SIZE_MB"),

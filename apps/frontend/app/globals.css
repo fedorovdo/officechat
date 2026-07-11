@@ -2753,6 +2753,7 @@ a {
 }
 
 .user-app-nav-item {
+  position: relative;
   min-width: 0;
   min-height: 62px;
   padding: 8px;
@@ -2762,6 +2763,20 @@ a {
   border: 0;
   border-radius: 6px;
   color: var(--sidebar-text);
+}
+
+.user-app-nav-item-announcements {
+  padding-right: 48px;
+}
+
+.announcement-unread-badge {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  max-width: 36px;
+  justify-self: auto;
 }
 
 .user-app-nav-item:hover {
@@ -2887,6 +2902,21 @@ a {
   justify-content: center;
 }
 
+.user-app-sidebar-collapsed .user-app-nav-item-announcements {
+  padding: 6px;
+  overflow: visible;
+}
+
+.user-app-sidebar-collapsed .announcement-unread-badge {
+  top: 7px;
+  right: 7px;
+  transform: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
 .user-app-sidebar-collapsed .sidebar-account-actions {
   display: grid;
 }
@@ -2946,6 +2976,154 @@ a {
   border-bottom: 1px solid var(--divider);
   background: rgb(255 255 255 / 94%);
   backdrop-filter: blur(10px);
+}
+
+.announcements-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.announcements-grid {
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 14px;
+  overflow: auto;
+}
+
+.announcements-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.announcements-card h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.announcements-compose,
+.announcements-history {
+  align-self: start;
+}
+
+.announcement-list {
+  display: grid;
+  gap: 8px;
+}
+
+.announcement-list-item,
+.announcement-history-item {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+}
+
+.announcement-list-item {
+  padding: 10px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.announcement-list-item:hover {
+  border-color: var(--accent);
+}
+
+.announcement-unread strong {
+  font-weight: 800;
+}
+
+.announcement-list-item strong,
+.announcement-history-item strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.announcement-list-item small,
+.announcement-history-item small,
+.announcement-preview small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.announcement-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+
+.announcement-detail pre {
+  max-height: 42vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+.announcement-picks {
+  max-height: 160px;
+  margin: 10px 0;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  overflow: auto;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.announcement-preview {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, #ffffff);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, #ffffff);
+}
+
+.announcement-history-item {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+}
+
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #334155;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.priority-important {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.priority-urgent {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .chat-header-identity .section-title {
@@ -3605,6 +3783,10 @@ select:focus-visible,
 }
 
 @media (max-width: 1180px) {
+  .announcements-grid {
+    grid-template-columns: 1fr;
+  }
+
   .user-app-chat-layout-discussion,
   .user-app-shell-sidebar-right .user-app-chat-layout-discussion {
     grid-template-columns: minmax(0, 1fr);

@@ -22,6 +22,7 @@ from app.services.message_search import (
     make_excerpt,
     search_messages,
 )
+from app.services.pins import annotate_message_context_with_pins
 
 router = APIRouter()
 ChatType = Literal["group", "direct", "discussion"]
@@ -118,6 +119,7 @@ async def message_context(
         "direct": DirectMessagePublic,
         "discussion": DiscussionMessagePublic,
     }[chat_type]
+    await annotate_message_context_with_pins(session, chat_type, chat_id, context.messages)
     return MessageContextPublic(
         chat_type=chat_type,
         chat_id=chat_id,

@@ -1837,6 +1837,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   messageContext={messageContext?.chat_type === "group" && messageContext.chat_id === selectedGroup.id ? messageContext : null}
                   onContextClosed={clearMessageContext}
                   onContextExpand={expandMessageContext}
+                  onJumpToMessage={(messageId) => openMessageContext("group", selectedGroup.id, messageId)}
                 />
               </div>
               {activeDiscussionId ? (
@@ -1855,6 +1856,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   messageContext={messageContext?.chat_type === "discussion" && messageContext.chat_id === activeDiscussionId ? messageContext : null}
                   onContextClosed={clearMessageContext}
                   onContextExpand={expandMessageContext}
+                  onJumpToMessage={(messageId) => openMessageContext("discussion", activeDiscussionId, messageId, selectedGroup.id)}
                 />
               ) : null}
             </div>
@@ -1889,6 +1891,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 messageContext={messageContext?.chat_type === "direct" && messageContext.chat_id === selectedDirectConversation.id ? messageContext : null}
                 onContextClosed={clearMessageContext}
                 onContextExpand={expandMessageContext}
+                onJumpToMessage={(messageId) => openMessageContext("direct", selectedDirectConversation.id, messageId)}
               />
             </div>
           ) : null}

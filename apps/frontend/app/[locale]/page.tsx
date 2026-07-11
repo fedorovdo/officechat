@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
-import { Landing } from "../../components/Landing";
-import { getDictionary, isLocale } from "../../lib/i18n";
+import { LocaleLandingRedirect } from "../../components/LocaleLandingRedirect";
+import { isLocale } from "../../lib/i18n";
 
 export default async function LocalePage({
   params
@@ -14,7 +14,5 @@ export default async function LocalePage({
     notFound();
   }
 
-  const dictionary = getDictionary(locale);
-
-  return <Landing dictionary={dictionary} locale={locale} />;
+  return <LocaleLandingRedirect locale={locale} />;
 }

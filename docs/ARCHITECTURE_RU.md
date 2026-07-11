@@ -4,6 +4,8 @@
 
 Помимо ролей OfficeChat использует таблицы `permissions` и `user_permissions`. Роли задают широкий доступ, а специальные права закрывают чувствительные будущие функции: `can_broadcast` и `can_pin_messages`. `superadmin` получает все активные права неявно, остальные пользователи - только через явные grants. JWT не хранит авторитетные права; backend проверяет их через `app/services/permissions.py`. После изменения grants affected user получает `permissions.updated` через `/api/ws/me`. Подробности: `docs/PERMISSIONS_RU.md`.
 
+Pinned Messages v0.1 использует отдельную таблицу `pinned_messages` с polymorphic ссылкой на group/direct/discussion message через `chat_type`, `chat_id` и `message_id`. Backend проверяет обычный доступ к чату и эффективное `can_pin_messages`; роль admin не является отдельным обходом приватности direct/discussion. Удаление и retention-архивация сообщений снимают связанные pins, а selected room WebSocket доставляет `message.pinned`, `message.pin_updated` и `message.unpinned`.
+
 ## Audit subsystem
 
 Централизованный `AuditEvent` хранится в PostgreSQL отдельно от chat messages и legacy `retention_audit`. Route/service boundary добавляет успешные admin events в ту же транзакцию, что и изменение данных. Неуспешные authentication/security events используют короткую отдельную session и rate-limited best-effort запись. Request ID middleware связывает HTTP response, server logs и audit event.

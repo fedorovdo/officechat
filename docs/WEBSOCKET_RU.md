@@ -129,6 +129,21 @@ Discussion events:
 
 `discussion.message.created` также включает массив attachment metadata. Персональные group/direct/discussion events переиспользуют тот же payload; для attachment-only сообщения preview показывает filename либо количество файлов.
 
+Pinned message events отправляются в выбранный комнатный канал group, direct или discussion:
+
+```json
+{
+  "type": "message.pinned",
+  "chat_type": "group",
+  "chat_id": "...",
+  "message_id": "...",
+  "pin_id": "...",
+  "pin": {}
+}
+```
+
+Также используются `message.pin_updated` и `message.unpinned`. REST остаётся источником истины: frontend после события обновляет список сообщений и `GET /api/pins`. Персональный `/api/ws/me` в v0.1 не рассылает отдельные pin events.
+
 Personal notification events:
 
 ```json

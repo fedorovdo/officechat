@@ -16,7 +16,7 @@ GET /api/direct/conversations/{conversation_id}/messages/archive
 GET /api/discussions/{discussion_id}/messages/archive
 ```
 
-Архивные сообщения нельзя редактировать, удалять, использовать как новую reply target или изменять их reactions. Архивация не создаёт WebSocket event. Права доступа совпадают с обычной историей; admin не получает доступ к чужим direct conversations.
+Архивные сообщения нельзя редактировать, удалять, использовать как новую reply target, закреплять или изменять их reactions. При архивации сообщения связанные записи `pinned_messages` удаляются, чтобы pinned strip не ссылался на скрытую историю. Архивация не создаёт WebSocket event. Права доступа совпадают с обычной историей; admin не получает доступ к чужим direct conversations.
 
 Archive endpoints возвращают newest-first страницы, `limit` ограничен `100`, cursor `before` принимает message UUID.
 

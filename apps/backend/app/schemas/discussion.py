@@ -109,6 +109,9 @@ class DiscussionMessagePublic(BaseModel):
     is_deleted: bool
     is_archived: bool
     archived_at: datetime | None
+    is_pinned: bool = False
+    pin_id: UUID | None = None
+    pinned_at: datetime | None = None
     edited_at: datetime | None
     created_at: datetime
     updated_at: datetime

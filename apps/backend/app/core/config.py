@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     audit_retention_days: int = 365
     audit_max_export_rows: int = 10000
     message_max_length: int = 4000
+    pinned_messages_max_per_chat: int = Field(default=20, ge=1, le=100)
     attachment_max_upload_size_mb: int = Field(
         default=25,
         validation_alias=AliasChoices("ATTACHMENT_MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_SIZE_MB"),

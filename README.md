@@ -14,6 +14,8 @@ Administrators can review and export sanitized security and administrative event
 
 OfficeChat has a granular permission foundation in addition to roles. Initial sensitive permissions are `can_broadcast` and `can_pin_messages`; they are not automatically granted to `admin`, `moderator`, group owners, or ordinary users. `superadmin` has all active permissions implicitly and is the only role that can assign or revoke explicit grants in `/ru/admin/users`. Permission changes are audited as `permission.granted` / `permission.revoked` and sent to the affected open session through `/api/ws/me` as `permissions.updated`. See [docs/PERMISSIONS_RU.md](docs/PERMISSIONS_RU.md).
 
+Pinned Messages v0.1 lets trusted human users with `can_pin_messages` pin, unpin, and annotate important messages in group, direct, and discussion chats. Admin role alone does not grant this action, and direct/discussion privacy is still enforced. Pinned-message actions are audited and synchronized through the selected chat WebSocket channel. See [docs/PINNED_MESSAGES_RU.md](docs/PINNED_MESSAGES_RU.md).
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
@@ -85,6 +87,8 @@ Presence, persistent last seen, and typing indicators are available in v0.1. `/a
 Unread counters and direct-message read receipts use one PostgreSQL high-water row per user/chat. Existing history is backfilled as read by migration `20260704_0017`; selected visible chats mark through their newest loaded message after a short debounce, while hidden tabs retain unread state. `/api/ws/me` synchronizes `unread.updated` across tabs/devices, and direct room sockets deliver participant-only `direct.read`. See [docs/UNREAD_RU.md](docs/UNREAD_RU.md).
 
 Message Search v0.1 uses PostgreSQL `simple` full-text GIN indexes for mixed RU/EN message bodies and attachment filenames. The user app provides global/current-chat search, sender/date/attachment filters, cursor pagination, keyboard access, context loading, temporary target highlighting, and authorized deep links. Deleted and archived content is excluded; admin roles do not bypass private direct/discussion membership. Raw `q` values are redacted from access logs. See [docs/MESSAGE_SEARCH_RU.md](docs/MESSAGE_SEARCH_RU.md).
+
+Pinned messages appear as a compact strip in group, direct, and discussion chats in `/ru/app`. Each message payload includes `is_pinned`, `pin_id`, and `pinned_at`, and the pinned strip can jump to the original message through the existing message-context loader. Deleted or archived messages are automatically removed from pins.
 
 Current development uses one frontend on port `3100`. User routes live under `/ru/app`, while admin routes remain under `/ru/admin/*`. Future production deployment can split user/admin surfaces with nginx hostnames or separate frontend entrypoints.
 
@@ -194,6 +198,7 @@ Important auth environment variables:
 - `PRESENCE_HEARTBEAT_SECONDS` - personal socket heartbeat interval, default `25`.
 - `PRESENCE_OFFLINE_GRACE_SECONDS` - reconnect grace before offline, default `15`.
 - `TYPING_TTL_SECONDS` - stale typing state TTL, default `5`.
+- `PINNED_MESSAGES_MAX_PER_CHAT` - maximum pinned messages per chat, default `20`.
 
 ## Useful Docker Compose Commands
 

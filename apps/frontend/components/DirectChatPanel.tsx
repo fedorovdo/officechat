@@ -12,15 +12,21 @@ import {
   getDirectReadReceipt,
   getDirectMessages,
   getDirectWebSocketUrl,
+  getPinnedMessages,
   getStoredAccessToken,
+  hasPermission,
+  pinMessage,
   removeDirectMessageReaction,
   sendDirectMessage,
   sendDirectMessageWithAttachments,
+  unpinMessage,
+  updatePinnedMessage,
   type DirectMessageEvent,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
   type OfficeChatDirectReadReceipt,
   type OfficeChatMessageContext,
+  type OfficeChatPinnedMessage,
   type OfficeChatMessageReaction,
   type OfficeChatUnreadChat,
   type OfficeChatUser
@@ -37,6 +43,8 @@ import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
+import { MessageActionsMenu } from "./MessageActionsMenu";
+import { PinnedMessages } from "./PinnedMessages";
 import { UserAvatar } from "./UserAvatar";
 import { TypingIndicator } from "./TypingIndicator";
 import { UnreadSeparator } from "./UnreadSeparator";
@@ -51,11 +59,12 @@ type DirectChatPanelProps = {
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
   onContextExpand?: (before: number, after: number) => void | Promise<void>;
+  onJumpToMessage?: (messageId: string) => void | Promise<void>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
-export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread, messageContext, onContextClosed, onContextExpand }: DirectChatPanelProps) {
+export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread, messageContext, onContextClosed, onContextExpand, onJumpToMessage }: DirectChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
@@ -85,6 +94,10 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [readReceipt, setReadReceipt] = useState<OfficeChatDirectReadReceipt | null>(null);
+  const [pins, setPins] = useState<OfficeChatPinnedMessage[]>([]);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [pinDraftMessage, setPinDraftMessage] = useState<OfficeChatDirectMessage | null>(null);
+  const [pinNote, setPinNote] = useState("");
   const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
     socketRef,
     currentUser.id,
@@ -132,6 +145,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     () => [...messages].reverse().find((message) => message.sender_user_id === currentUser.id),
     [currentUser.id, messages]
   );
+  const canPinMessages = hasPermission(currentUser, "can_pin_messages");
 
   function isMessageRead(message: OfficeChatDirectMessage) {
     if (!readReceipt?.last_read_message_id || !readReceipt.last_read_message_created_at) return false;
@@ -174,6 +188,37 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     [conversation.id]
   );
 
+  const refreshPins = useCallback(
+    async (token: string) => {
+      setPins(await getPinnedMessages(token, "direct", conversation.id));
+    },
+    [conversation.id]
+  );
+
+  function applyPinnedMessage(pin: OfficeChatPinnedMessage) {
+    setPins((current) => [pin, ...current.filter((item) => item.id !== pin.id)]);
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === pin.message_id
+          ? { ...message, is_pinned: true, pin_id: pin.id, pinned_at: pin.pinned_at }
+          : message
+      )
+    );
+  }
+
+  function applyUnpinnedMessage(pinId: string, messageId: string) {
+    setPins((current) => current.filter((pin) => pin.id !== pinId));
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId ? { ...message, is_pinned: false, pin_id: null, pinned_at: null } : message
+      )
+    );
+  }
+
+  function getMessagePinId(message: OfficeChatDirectMessage) {
+    return message.pin_id ?? pins.find((pin) => pin.message_id === message.id)?.id ?? null;
+  }
+
   useEffect(() => {
     hasInitialMessageScrollRef.current = false;
     shouldScrollToBottomRef.current = false;
@@ -190,6 +235,10 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     setArchiveOpen(false);
     setArchivedMessages([]);
     setReadReceipt(null);
+    setPins([]);
+    setPinsOpen(false);
+    setPinDraftMessage(null);
+    setPinNote("");
   }, [conversation.id]);
 
   useEffect(() => {
@@ -199,10 +248,10 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       return;
     }
     if (!messageContext || messageContext.chat_id !== conversation.id) {
-      void refreshMessages(token).catch(() => setError(dictionary.directMessages.loadError));
+      void Promise.all([refreshMessages(token), refreshPins(token)]).catch(() => setError(dictionary.directMessages.loadError));
     }
     void getDirectReadReceipt(token, conversation.id).then(setReadReceipt).catch(() => setReadReceipt(null));
-  }, [dictionary.directMessages.loadError, conversation.id, locale, messageContext?.target_message_id, refreshMessages, router]);
+  }, [dictionary.directMessages.loadError, conversation.id, locale, messageContext?.target_message_id, refreshMessages, refreshPins, router]);
 
   useEffect(() => {
     if (!messageContext || messageContext.chat_type !== "direct" || messageContext.chat_id !== conversation.id) return;
@@ -282,8 +331,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
             setMessages((current) =>
               current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
             );
+          } else if (payload.type === "message.pinned" || payload.type === "message.pin_updated") {
+            applyPinnedMessage(payload.pin);
+          } else if (payload.type === "message.unpinned") {
+            applyUnpinnedMessage(payload.pin_id, payload.message_id);
           } else if (payload.type.startsWith("direct.message.")) {
             markIncomingMessage();
+            if (payload.type === "direct.message.deleted") void refreshPins(accessToken);
             if (!historicalTargetRef.current) void refreshMessages(accessToken);
           }
         } catch {
@@ -353,7 +407,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     setError("");
     try {
       shouldScrollToBottomRef.current = true;
-      await refreshMessages(token);
+      await Promise.all([refreshMessages(token), refreshPins(token)]);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.directMessages.loadError);
     }
@@ -478,7 +532,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     setSuccess("");
     try {
       await deleteDirectMessage(token, conversation.id, messageId);
-      setMessages(await getDirectMessages(token, conversation.id));
+      await Promise.all([refreshMessages(token), refreshPins(token)]);
       setSuccess(dictionary.directMessages.deleteSuccess);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.directMessages.deleteError);
@@ -505,6 +559,68 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.downloadError);
     }
+  }
+
+  async function handlePinMessage() {
+    const token = getStoredAccessToken();
+    if (!token || !pinDraftMessage) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const pin = await pinMessage(token, "direct", conversation.id, pinDraftMessage.id, pinNote);
+      setPinDraftMessage(null);
+      setPinNote("");
+      applyPinnedMessage(pin);
+      setSuccess(dictionary.pins.pinSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.pinError);
+    }
+  }
+
+  async function handleUnpinMessage(pinId: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const pinnedMessage = pins.find((pin) => pin.id === pinId);
+      await unpinMessage(token, pinId);
+      if (pinnedMessage) {
+        applyUnpinnedMessage(pinId, pinnedMessage.message_id);
+      } else {
+        await refreshPins(token);
+      }
+      setSuccess(dictionary.pins.unpinSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.unpinError);
+    }
+  }
+
+  async function handleUpdatePinNote(pinId: string, note: string) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setError("");
+    try {
+      const pin = await updatePinnedMessage(token, pinId, note);
+      applyPinnedMessage(pin);
+      setSuccess(dictionary.pins.noteSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.noteError);
+    }
+  }
+
+  function handleJumpToPinnedMessage(messageId: string) {
+    if (onJumpToMessage) {
+      void onJumpToMessage(messageId);
+      return;
+    }
+    messagesListRef.current?.querySelector(`[data-message-id="${messageId}"]`)?.scrollIntoView({ block: "center" });
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -574,6 +690,40 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
         />
       ) : null}
 
+      <PinnedMessages
+        canPin={canPinMessages}
+        dictionary={dictionary}
+        isOpen={pinsOpen}
+        locale={locale}
+        onClose={() => setPinsOpen(false)}
+        onJump={handleJumpToPinnedMessage}
+        onOpen={() => setPinsOpen(true)}
+        onUnpin={(pinId) => void handleUnpinMessage(pinId)}
+        onUpdateNote={(pinId, note) => void handleUpdatePinNote(pinId, note)}
+        pins={pins}
+      />
+
+      {pinDraftMessage ? (
+        <form className="pin-draft-panel" onSubmit={(event) => {
+          event.preventDefault();
+          void handlePinMessage();
+        }}>
+          <div>
+            <strong>{dictionary.pins.pinMessage}</strong>
+            <p>{getSelectedReplyPreviewText(pinDraftMessage)}</p>
+            <p className="note">{dictionary.pins.attachmentWarning}</p>
+          </div>
+          <input className="field-input" maxLength={300} onChange={(event) => setPinNote(event.target.value)} placeholder={dictionary.pins.notePlaceholder} value={pinNote} />
+          <div className="actions">
+            <button className="primary-button" type="submit">{dictionary.pins.pin}</button>
+            <button className="table-action" onClick={() => {
+              setPinDraftMessage(null);
+              setPinNote("");
+            }} type="button">{dictionary.pins.cancel}</button>
+          </div>
+        </form>
+      ) : null}
+
       <div className="messages-list" ref={messagesListRef}>
         {messageContext?.has_more_before ? (
           <button className="context-load-button" onClick={() => {
@@ -584,6 +734,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
         {messages.map((message) => {
           const canEdit = currentUser.id === message.sender_user_id && !message.is_deleted;
           const isOwnMessage = currentUser.id === message.sender_user_id;
+          const canPinThisMessage = canPinMessages && !message.is_deleted && !message.is_archived;
           const messageItemClasses = [
             "message-item",
             isOwnMessage ? "message-item-own" : "",
@@ -605,6 +756,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
                 <span className="message-username">@{message.sender.username}</span>
                 <span className="message-time">{dateFormatter.format(new Date(message.created_at))}</span>
                 {message.edited_at ? <span>{dictionary.messages.edited}</span> : null}
+                {message.is_pinned ? <span className="pin-badge">{dictionary.pins.pinned}</span> : null}
               </div>
               {editingMessageId === message.id ? (
                 <form className="message-edit-form" onSubmit={handleEditMessage}>
@@ -659,30 +811,25 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
               />
               {!message.is_deleted ? (
                 <div className="message-actions">
-                  <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">
-                    {dictionary.messages.reply}
-                  </button>
-                  {canEdit ? (
-                    <button
-                      className="table-action"
-                      onClick={() => {
-                        setEditingMessageId(message.id);
-                        setEditingMessageBody(message.body);
-                      }}
-                      type="button"
-                    >
-                      {dictionary.messages.edit}
-                    </button>
-                  ) : null}
-                  {canEdit ? (
-                    <button
-                      className="table-action"
-                      onClick={() => void handleDeleteMessage(message.id)}
-                      type="button"
-                    >
-                      {dictionary.messages.delete}
-                    </button>
-                  ) : null}
+                  <MessageActionsMenu
+                    canDelete={canEdit}
+                    canEdit={canEdit}
+                    canPin={canPinThisMessage}
+                    canReply
+                    dictionary={dictionary}
+                    isPinned={message.is_pinned}
+                    onDelete={() => void handleDeleteMessage(message.id)}
+                    onEdit={() => {
+                      setEditingMessageId(message.id);
+                      setEditingMessageBody(message.body);
+                    }}
+                    onPinToggle={() => {
+                      const pinId = getMessagePinId(message);
+                      if (pinId) void handleUnpinMessage(pinId);
+                      else setPinDraftMessage(message);
+                    }}
+                    onReply={() => setReplyToMessage(message)}
+                  />
                 </div>
               ) : null}
               {message.id === newestOwnMessage?.id ? (

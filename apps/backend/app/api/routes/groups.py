@@ -55,6 +55,7 @@ from app.services.personal_notifications import (
     group_message_event_payload,
     list_active_group_member_user_ids,
 )
+from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.unread import broadcast_unread_for_chat, broadcast_unread_refresh, broadcast_unread_removed
 from app.services.reactions import add_group_message_reaction, remove_group_message_reaction
 from app.services.websocket_manager import group_websocket_manager
@@ -293,6 +294,7 @@ async def get_messages(
     except PermissionError as exc:
         raise_for_permission_error(exc)
     messages = await list_group_messages(session, group, limit=limit, before=before)
+    await annotate_messages_with_pins(session, "group", group.id, messages)
     return [serialize_message(message, current_user) for message in messages]
 
 
@@ -329,6 +331,7 @@ async def get_archived_messages(
     except PermissionError as exc:
         raise_for_permission_error(exc)
     messages = await list_archived_group_messages(session, group, limit=limit, before=before)
+    await annotate_messages_with_pins(session, "group", group.id, messages)
     return [serialize_message(message, current_user) for message in messages]
 
 
@@ -463,6 +466,7 @@ async def delete_message(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
+        await delete_pins_for_message(session, "group", group.id, message.id)
         deleted_message = await delete_group_message(session, group, message, current_user)
         await group_websocket_manager.broadcast_to_group(
             group_id,

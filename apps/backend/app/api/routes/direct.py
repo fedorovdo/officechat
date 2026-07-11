@@ -36,6 +36,7 @@ from app.services.direct import (
 )
 from app.services.attachments import resolve_attachment_path
 from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
+from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.reactions import add_direct_message_reaction, remove_direct_message_reaction
 from app.services.websocket_manager import direct_websocket_manager
 from app.services.unread import broadcast_unread_for_chat
@@ -60,6 +61,8 @@ async def serialize_conversation(
     current_user: User,
 ) -> DirectConversationPublic:
     last_message = await get_last_direct_message(session, conversation)
+    if last_message is not None:
+        await annotate_messages_with_pins(session, "direct", conversation.id, [last_message])
     return DirectConversationPublic(
         id=conversation.id,
         user_one_id=conversation.user_one_id,
@@ -123,6 +126,7 @@ async def get_messages(
     try:
         ensure_direct_conversation_access(conversation, current_user)
         messages = await list_direct_messages(session, conversation, limit=limit, before=before)
+        await annotate_messages_with_pins(session, "direct", conversation.id, messages)
         return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -140,6 +144,7 @@ async def get_archived_messages(
     try:
         ensure_direct_conversation_access(conversation, current_user)
         messages = await list_archived_direct_messages(session, conversation, limit, before)
+        await annotate_messages_with_pins(session, "direct", conversation.id, messages)
         return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -305,6 +310,7 @@ async def delete_message(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
 
     try:
+        await delete_pins_for_message(session, "direct", conversation.id, message.id)
         deleted_message = await delete_direct_message(session, conversation, message, current_user)
         await direct_websocket_manager.broadcast_to_conversation(
             conversation_id,

@@ -4,6 +4,21 @@
 
 `superadmin` видит в `/ru/admin/users` раздел специальных прав. Можно назначать `can_broadcast` и `can_pin_messages` доверенным пользователям; обычный `admin` эти controls не видит. Проверка API: `GET /api/admin/permissions`, `GET /api/admin/users/{user_id}/permissions`, `PUT /api/admin/users/{user_id}/permissions`. Изменения должны появляться в Audit Log как `permission.granted` или `permission.revoked`, а affected user получает `permissions.updated` через `/api/ws/me`.
 
+## Закреплённые сообщения
+
+Pinned Messages v0.1 проверяется в `/ru/app` в group, direct и discussion чатах. Пользователь должен иметь эффективное право `can_pin_messages`; обычная роль `admin` сама по себе не считается разрешением для pin/unpin. Лимит на один чат задаётся `PINNED_MESSAGES_MAX_PER_CHAT=20`.
+
+API для ручной проверки:
+
+```text
+GET    /api/pins?chat_type=group&chat_id=<uuid>
+POST   /api/pins
+PATCH  /api/pins/{pin_id}
+DELETE /api/pins/{pin_id}
+```
+
+Проверьте: назначение `can_pin_messages`, закрепление сообщения, изменение заметки, переход к сообщению, открепление, автоснятие закрепления после удаления сообщения и отсутствие тела сообщения/заметки в Audit Log. Подробности: `docs/PINNED_MESSAGES_RU.md`.
+
 ## Backend-тесты
 
 Локальный backend-сервис Docker Compose собирается из стадии `development`, которая устанавливает зависимости из `apps/backend/requirements-dev.txt` и включает каталог `apps/backend/tests`. Runtime-стадия образа остаётся без pytest.

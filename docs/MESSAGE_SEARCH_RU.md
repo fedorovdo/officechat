@@ -35,7 +35,7 @@ GET /api/search/context
 
 `GET /api/search/messages` принимает `q`, необязательные `chat_type`, `chat_id`, `sender_id`, `date_from`, `date_to`, `has_attachment`, `limit` и `cursor`.
 
-`GET /api/search/context` принимает `chat_type`, `chat_id`, `message_id`, `before` и `after`. Endpoint повторно проверяет доступ и принадлежность target к чату, возвращает target и соседние сообщения в обычном порядке. Используются существующие публичные схемы, поэтому сохраняются replies, reactions, mentions и attachments.
+`GET /api/search/context` принимает `chat_type`, `chat_id`, `message_id`, `before` и `after`. Endpoint повторно проверяет доступ и принадлежность target к чату, возвращает target и соседние сообщения в обычном порядке. Используются существующие публичные схемы, поэтому сохраняются replies, reactions, mentions, attachments и поля закрепления `is_pinned`, `pin_id`, `pinned_at`. Переход из pinned strip использует тот же механизм jump-to-message.
 
 ## Переход и deep links
 
@@ -56,4 +56,3 @@ GET /api/search/context
 ## Ограничения и roadmap
 
 Не реализованы: расширенный синтаксис и точные фразы, сохранённые запросы, история поиска, OCR и поиск внутри документов, отдельные eDiscovery-права, `pg_trgm` и OpenSearch. Эти функции требуют отдельной модели разрешений и эксплуатации.
-

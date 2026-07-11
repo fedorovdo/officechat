@@ -13,6 +13,7 @@ from app.api.routes.direct import router as direct_router
 from app.api.routes.discussions import router as discussions_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.presence import router as presence_router
+from app.api.routes.pins import router as pins_router
 from app.api.routes.search import router as search_router
 from app.api.routes.system import router as system_router
 from app.api.routes.users import router as users_router
@@ -36,5 +37,6 @@ api_router.include_router(admin_users_router, prefix="/admin/users", tags=["admi
 api_router.include_router(admin_retention_router, prefix="/admin", tags=["admin", "retention"])
 api_router.include_router(groups_router, prefix="/groups", tags=["groups"])
 api_router.include_router(presence_router, prefix="/presence", tags=["presence"])
+api_router.include_router(pins_router, prefix="/pins", tags=["pins"])
 api_router.include_router(search_router, prefix="/search", tags=["search"])
 api_router.include_router(ws_router, prefix="/ws", tags=["websocket"])

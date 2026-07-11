@@ -26,6 +26,7 @@ from app.schemas.retention import (
 )
 from app.services.audit import record_audit_event
 from app.services.attachments import resolve_attachment_path
+from app.services.pins import delete_pins_for_messages
 
 RETENTION_SETTINGS_ID = 1
 retention_cleanup_lock = asyncio.Lock()
@@ -36,6 +37,11 @@ MESSAGE_MODELS: tuple[tuple[type[Any], str], ...] = (
     (DiscussionMessage, "discussion_messages_archived"),
 )
 ATTACHMENT_MODELS = (MessageAttachment, DirectMessageAttachment, DiscussionMessageAttachment)
+PIN_CHAT_TYPE_BY_MODEL = {
+    Message: "group",
+    DirectMessage: "direct",
+    DiscussionMessage: "discussion",
+}
 
 
 async def get_retention_settings(session: AsyncSession) -> RetentionSettings:
@@ -175,6 +181,8 @@ async def archive_model_batches(
         for row in rows:
             row.is_archived = True
             row.archived_at = archived_at
+        message_ids = [row.id for row in rows if getattr(row, "id", None) is not None]
+        await delete_pins_for_messages(session, PIN_CHAT_TYPE_BY_MODEL[model], message_ids)
         await session.commit()
         archived_count += len(rows)
 

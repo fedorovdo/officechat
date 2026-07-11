@@ -11,13 +11,19 @@ import {
   getArchivedGroupMessages,
   getGroupMessages,
   getGroupWebSocketUrl,
+  getPinnedMessages,
   getStoredAccessToken,
+  hasPermission,
+  pinMessage,
   removeGroupMessageReaction,
   sendGroupMessage,
   sendGroupMessageWithAttachments,
+  unpinMessage,
+  updatePinnedMessage,
   type GroupMessageEvent,
   type OfficeChatMessage,
   type OfficeChatMessageContext,
+  type OfficeChatPinnedMessage,
   type OfficeChatMessageReaction,
   type OfficeChatUnreadChat,
   type OfficeChatUser
@@ -34,6 +40,8 @@ import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
+import { MessageActionsMenu } from "./MessageActionsMenu";
+import { PinnedMessages } from "./PinnedMessages";
 import { UserAvatar } from "./UserAvatar";
 import { TypingIndicator } from "./TypingIndicator";
 import { UnreadSeparator } from "./UnreadSeparator";
@@ -50,6 +58,7 @@ type GroupChatPanelProps = {
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
   onContextExpand?: (before: number, after: number) => void | Promise<void>;
+  onJumpToMessage?: (messageId: string) => void | Promise<void>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -65,7 +74,8 @@ export function GroupChatPanel({
   unread,
   messageContext,
   onContextClosed,
-  onContextExpand
+  onContextExpand,
+  onJumpToMessage
 }: GroupChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -95,6 +105,10 @@ export function GroupChatPanel({
   const [archivedMessages, setArchivedMessages] = useState<OfficeChatMessage[]>([]);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const [pins, setPins] = useState<OfficeChatPinnedMessage[]>([]);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [pinDraftMessage, setPinDraftMessage] = useState<OfficeChatMessage | null>(null);
+  const [pinNote, setPinNote] = useState("");
   const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
     socketRef,
     currentUser.id,
@@ -143,6 +157,7 @@ export function GroupChatPanel({
       }),
     [locale]
   );
+  const canPinMessages = hasPermission(currentUser, "can_pin_messages");
 
   function isNearMessagesBottom() {
     const messagesList = messagesListRef.current;
@@ -179,6 +194,37 @@ export function GroupChatPanel({
     [groupId]
   );
 
+  const refreshPins = useCallback(
+    async (token: string) => {
+      setPins(await getPinnedMessages(token, "group", groupId));
+    },
+    [groupId]
+  );
+
+  function applyPinnedMessage(pin: OfficeChatPinnedMessage) {
+    setPins((current) => [pin, ...current.filter((item) => item.id !== pin.id)]);
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === pin.message_id
+          ? { ...message, is_pinned: true, pin_id: pin.id, pinned_at: pin.pinned_at }
+          : message
+      )
+    );
+  }
+
+  function applyUnpinnedMessage(pinId: string, messageId: string) {
+    setPins((current) => current.filter((pin) => pin.id !== pinId));
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId ? { ...message, is_pinned: false, pin_id: null, pinned_at: null } : message
+      )
+    );
+  }
+
+  function getMessagePinId(message: OfficeChatMessage) {
+    return message.pin_id ?? pins.find((pin) => pin.message_id === message.id)?.id ?? null;
+  }
+
   useEffect(() => {
     hasInitialMessageScrollRef.current = false;
     shouldScrollToBottomRef.current = false;
@@ -186,6 +232,9 @@ export function GroupChatPanel({
     setReplyToMessage(null);
     setArchiveOpen(false);
     setArchivedMessages([]);
+    setPinsOpen(false);
+    setPinDraftMessage(null);
+    setPinNote("");
     clearAttachments();
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [groupId]);
@@ -197,9 +246,9 @@ export function GroupChatPanel({
       return;
     }
     if (!messageContext || messageContext.chat_id !== groupId) {
-      void refreshMessages(token).catch(() => setError(dictionary.messages.loadError));
+      void Promise.all([refreshMessages(token), refreshPins(token)]).catch(() => setError(dictionary.messages.loadError));
     }
-  }, [dictionary.messages.loadError, groupId, locale, messageContext?.target_message_id, refreshMessages, router]);
+  }, [dictionary.messages.loadError, groupId, locale, messageContext?.target_message_id, refreshMessages, refreshPins, router]);
 
   useEffect(() => {
     if (!messageContext || messageContext.chat_type !== "group" || messageContext.chat_id !== groupId) return;
@@ -269,8 +318,13 @@ export function GroupChatPanel({
             setMessages((current) =>
               current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
             );
+          } else if (payload.type === "message.pinned" || payload.type === "message.pin_updated") {
+            applyPinnedMessage(payload.pin);
+          } else if (payload.type === "message.unpinned") {
+            applyUnpinnedMessage(payload.pin_id, payload.message_id);
           } else if (payload.type.startsWith("message.")) {
             markIncomingMessage();
+            if (payload.type === "message.deleted") void refreshPins(accessToken);
             if (!historicalTargetRef.current) void refreshMessages(accessToken);
           }
         } catch {
@@ -334,7 +388,7 @@ export function GroupChatPanel({
     setError("");
     try {
       shouldScrollToBottomRef.current = true;
-      await refreshMessages(token);
+      await Promise.all([refreshMessages(token), refreshPins(token)]);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.loadError);
     }
@@ -488,11 +542,73 @@ export function GroupChatPanel({
     setSuccess("");
     try {
       await deleteGroupMessage(token, groupId, messageId);
-      setMessages(await getGroupMessages(token, groupId));
+      await Promise.all([refreshMessages(token), refreshPins(token)]);
       setSuccess(dictionary.messages.deleteSuccess);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.messages.deleteError);
     }
+  }
+
+  async function handlePinMessage() {
+    const token = getStoredAccessToken();
+    if (!token || !pinDraftMessage) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const pin = await pinMessage(token, "group", groupId, pinDraftMessage.id, pinNote);
+      setPinDraftMessage(null);
+      setPinNote("");
+      applyPinnedMessage(pin);
+      setSuccess(dictionary.pins.pinSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.pinError);
+    }
+  }
+
+  async function handleUnpinMessage(pinId: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const pinnedMessage = pins.find((pin) => pin.id === pinId);
+      await unpinMessage(token, pinId);
+      if (pinnedMessage) {
+        applyUnpinnedMessage(pinId, pinnedMessage.message_id);
+      } else {
+        await refreshPins(token);
+      }
+      setSuccess(dictionary.pins.unpinSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.unpinError);
+    }
+  }
+
+  async function handleUpdatePinNote(pinId: string, note: string) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setError("");
+    try {
+      const pin = await updatePinnedMessage(token, pinId, note);
+      applyPinnedMessage(pin);
+      setSuccess(dictionary.pins.noteSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.noteError);
+    }
+  }
+
+  function handleJumpToPinnedMessage(messageId: string) {
+    if (onJumpToMessage) {
+      void onJumpToMessage(messageId);
+      return;
+    }
+    messagesListRef.current?.querySelector(`[data-message-id="${messageId}"]`)?.scrollIntoView({ block: "center" });
   }
 
   async function handleDownloadAttachment(downloadUrl: string, filename: string) {
@@ -563,6 +679,46 @@ export function GroupChatPanel({
         />
       ) : null}
 
+      <PinnedMessages
+        canPin={canPinMessages}
+        dictionary={dictionary}
+        isOpen={pinsOpen}
+        locale={locale}
+        onClose={() => setPinsOpen(false)}
+        onJump={handleJumpToPinnedMessage}
+        onOpen={() => setPinsOpen(true)}
+        onUnpin={(pinId) => void handleUnpinMessage(pinId)}
+        onUpdateNote={(pinId, note) => void handleUpdatePinNote(pinId, note)}
+        pins={pins}
+      />
+
+      {pinDraftMessage ? (
+        <form className="pin-draft-panel" onSubmit={(event) => {
+          event.preventDefault();
+          void handlePinMessage();
+        }}>
+          <div>
+            <strong>{dictionary.pins.pinMessage}</strong>
+            <p>{getSelectedReplyPreviewText(pinDraftMessage)}</p>
+            <p className="note">{dictionary.pins.attachmentWarning}</p>
+          </div>
+          <input
+            className="field-input"
+            maxLength={300}
+            onChange={(event) => setPinNote(event.target.value)}
+            placeholder={dictionary.pins.notePlaceholder}
+            value={pinNote}
+          />
+          <div className="actions">
+            <button className="primary-button" type="submit">{dictionary.pins.pin}</button>
+            <button className="table-action" onClick={() => {
+              setPinDraftMessage(null);
+              setPinNote("");
+            }} type="button">{dictionary.pins.cancel}</button>
+          </div>
+        </form>
+      ) : null}
+
       <div className="messages-list" ref={messagesListRef}>
         {messageContext?.has_more_before ? (
           <button className="context-load-button" onClick={() => {
@@ -573,6 +729,7 @@ export function GroupChatPanel({
         {messages.map((message) => {
           const canEdit = currentUser.id === message.sender_user_id && !message.is_deleted;
           const canDelete = (canEdit || canModerateMessages) && !message.is_deleted;
+          const canPinThisMessage = canPinMessages && !message.is_deleted && !message.is_archived;
           const isOwnMessage = currentUser.id === message.sender_user_id;
           const isBotMessage = message.sender.role === "bot";
           const messageItemClasses = [
@@ -600,6 +757,7 @@ export function GroupChatPanel({
                 <span className="message-username">@{message.sender.username}</span>
                 <span className="message-time">{dateFormatter.format(new Date(message.created_at))}</span>
                 {message.edited_at ? <span>{dictionary.messages.edited}</span> : null}
+                {message.is_pinned ? <span className="pin-badge">{dictionary.pins.pinned}</span> : null}
               </div>
               {editingMessageId === message.id ? (
                 <form className="message-edit-form" onSubmit={handleEditMessage}>
@@ -654,35 +812,27 @@ export function GroupChatPanel({
               />
               {!message.is_deleted ? (
                 <div className="message-actions">
-                  <button className="table-action" onClick={() => setReplyToMessage(message)} type="button">
-                    {dictionary.messages.reply}
-                  </button>
-                  {onDiscuss ? (
-                    <button className="table-action" onClick={() => onDiscuss(message)} type="button">
-                      {dictionary.discussions.discuss}
-                    </button>
-                  ) : null}
-                  {canEdit ? (
-                    <button
-                      className="table-action"
-                      onClick={() => {
-                        setEditingMessageId(message.id);
-                        setEditingMessageBody(message.body);
-                      }}
-                      type="button"
-                    >
-                      {dictionary.messages.edit}
-                    </button>
-                  ) : null}
-                  {canDelete ? (
-                    <button
-                      className="table-action"
-                      onClick={() => void handleDeleteMessage(message.id)}
-                      type="button"
-                    >
-                      {dictionary.messages.delete}
-                    </button>
-                  ) : null}
+                  <MessageActionsMenu
+                    canDelete={canDelete}
+                    canDiscuss={Boolean(onDiscuss)}
+                    canEdit={canEdit}
+                    canPin={canPinThisMessage}
+                    canReply
+                    dictionary={dictionary}
+                    isPinned={message.is_pinned}
+                    onDelete={() => void handleDeleteMessage(message.id)}
+                    onDiscuss={onDiscuss ? () => onDiscuss(message) : undefined}
+                    onEdit={() => {
+                      setEditingMessageId(message.id);
+                      setEditingMessageBody(message.body);
+                    }}
+                    onPinToggle={() => {
+                      const pinId = getMessagePinId(message);
+                      if (pinId) void handleUnpinMessage(pinId);
+                      else setPinDraftMessage(message);
+                    }}
+                    onReply={() => setReplyToMessage(message)}
+                  />
                 </div>
               ) : null}
             </article>
@@ -749,11 +899,12 @@ export function GroupChatPanel({
           <button
             aria-label={dictionary.messages.attachFiles}
             className="composer-icon-button"
+            disabled={isSending}
             onClick={() => fileInputRef.current?.click()}
             title={dictionary.messages.attachFiles}
             type="button"
           >
-            +
+            📎
           </button>
           <EmojiPicker
             contextKey={groupId}

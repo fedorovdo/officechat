@@ -1186,6 +1186,20 @@ a {
   color: #9a3412;
 }
 
+.pin-badge {
+  min-height: 20px;
+  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #facc15;
+  background: #fefce8;
+  color: #854d0e;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .live-status {
   margin: 6px 0 0;
   color: var(--muted);
@@ -1255,6 +1269,111 @@ a {
 .reply-compose-context {
   grid-template-columns: minmax(0, 1fr) max-content;
   align-items: start;
+}
+
+.pinned-strip {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+
+.pinned-strip-main {
+  min-width: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.pinned-strip-main span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.pinned-strip-main span:last-child span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pin-icon {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #facc15;
+  color: #422006;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.pinned-list-panel,
+.pin-draft-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.pinned-list {
+  display: grid;
+  max-height: min(420px, 55vh);
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.pinned-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.pinned-list-item p,
+.pin-note {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.pin-note {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.pinned-list-item small {
+  color: var(--muted);
+}
+
+.pinned-list-actions,
+.pin-note-form {
+  display: grid;
+  gap: 8px;
+}
+
+.pin-draft-panel {
+  margin-top: 12px;
 }
 
 .attachments-list {
@@ -2945,6 +3064,82 @@ a {
   padding-top: 0;
 }
 
+.message-actions-menu {
+  position: relative;
+  display: inline-flex;
+  justify-self: start;
+  max-width: 100%;
+}
+
+.message-item-own .message-actions-menu {
+  justify-self: end;
+}
+
+.message-actions-trigger {
+  min-height: 28px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.message-actions-trigger:hover,
+.message-actions-trigger:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.message-actions-menu-list {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 6px);
+  right: auto;
+  left: 0;
+  display: grid;
+  min-width: 150px;
+  max-width: min(240px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 16px 34px rgb(15 23 42 / 18%);
+}
+
+.message-item-own .message-actions-menu-list {
+  right: 0;
+  left: auto;
+}
+
+.message-actions-menu-item {
+  min-height: 34px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.message-actions-menu-item:last-child {
+  border-bottom: 0;
+}
+
+.message-actions-menu-item:hover,
+.message-actions-menu-item:focus-visible {
+  background: var(--surface-strong);
+}
+
 .message-actions .table-action {
   min-height: 26px;
   padding: 0 7px;
@@ -3049,18 +3244,6 @@ a {
   display: block;
   color: #b42318;
   font-size: 11px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .message-actions {
-    opacity: 0;
-    transition: opacity 140ms ease;
-  }
-
-  .message-item:hover .message-actions,
-  .message-item:focus-within .message-actions {
-    opacity: 1;
-  }
 }
 
 .message-compose,

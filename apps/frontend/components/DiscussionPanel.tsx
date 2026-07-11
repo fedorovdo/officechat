@@ -13,16 +13,22 @@ import {
   getDiscussion,
   getDiscussionMessages,
   getDiscussionWebSocketUrl,
+  getPinnedMessages,
   getStoredAccessToken,
+  hasPermission,
   isAdminRole,
+  pinMessage,
   removeDiscussionMember,
   removeDiscussionMessageReaction,
   sendDiscussionMessage,
   sendDiscussionMessageWithAttachments,
+  unpinMessage,
+  updatePinnedMessage,
   type DiscussionEvent,
   type OfficeChatDiscussion,
   type OfficeChatDiscussionMessage,
   type OfficeChatMessageContext,
+  type OfficeChatPinnedMessage,
   type OfficeChatMessageReaction,
   type OfficeChatPresence,
   type OfficeChatUnreadChat,
@@ -40,6 +46,8 @@ import { ComposerDropOverlay } from "./ComposerDropOverlay";
 import { EmojiPicker } from "./EmojiPicker";
 import { getAttachmentUploadError, MessageAttachments } from "./MessageAttachments";
 import { MessageReactions, reactionsForCurrentUser } from "./MessageReactions";
+import { MessageActionsMenu } from "./MessageActionsMenu";
+import { PinnedMessages } from "./PinnedMessages";
 import { UserAvatar } from "./UserAvatar";
 import { TypingIndicator } from "./TypingIndicator";
 import { PresenceStatus } from "./PresenceStatus";
@@ -57,6 +65,7 @@ type DiscussionPanelProps = {
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
   onContextExpand?: (before: number, after: number) => void | Promise<void>;
+  onJumpToMessage?: (messageId: string) => void | Promise<void>;
 };
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
@@ -72,7 +81,8 @@ export function DiscussionPanel({
   unread,
   messageContext,
   onContextClosed,
-  onContextExpand
+  onContextExpand,
+  onJumpToMessage
 }: DiscussionPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -100,6 +110,10 @@ export function DiscussionPanel({
   const [historicalTargetId, setHistoricalTargetId] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [showNewMessagesButton, setShowNewMessagesButton] = useState(false);
+  const [pins, setPins] = useState<OfficeChatPinnedMessage[]>([]);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [pinDraftMessage, setPinDraftMessage] = useState<OfficeChatDiscussionMessage | null>(null);
+  const [pinNote, setPinNote] = useState("");
   const { handleTypingEvent, notifyTyping, stopTyping, typingUsers } = useTyping(
     socketRef,
     currentUser.id,
@@ -143,6 +157,7 @@ export function DiscussionPanel({
       }),
     [locale]
   );
+  const canPinMessages = hasPermission(currentUser, "can_pin_messages");
 
   function resizeComposer(textarea: HTMLTextAreaElement) {
     textarea.style.height = "0px";
@@ -152,13 +167,43 @@ export function DiscussionPanel({
   }
 
   const refreshDiscussion = useCallback(async (token: string) => {
-    const [loadedDiscussion, loadedMessages] = await Promise.all([
+    const [loadedDiscussion, loadedMessages, loadedPins] = await Promise.all([
       getDiscussion(token, discussionId),
-      getDiscussionMessages(token, discussionId)
+      getDiscussionMessages(token, discussionId),
+      getPinnedMessages(token, "discussion", discussionId)
     ]);
     setDiscussion(loadedDiscussion);
     setMessages(loadedMessages);
+    setPins(loadedPins);
   }, [discussionId]);
+
+  const refreshPins = useCallback(async (token: string) => {
+    setPins(await getPinnedMessages(token, "discussion", discussionId));
+  }, [discussionId]);
+
+  function applyPinnedMessage(pin: OfficeChatPinnedMessage) {
+    setPins((current) => [pin, ...current.filter((item) => item.id !== pin.id)]);
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === pin.message_id
+          ? { ...message, is_pinned: true, pin_id: pin.id, pinned_at: pin.pinned_at }
+          : message
+      )
+    );
+  }
+
+  function applyUnpinnedMessage(pinId: string, messageId: string) {
+    setPins((current) => current.filter((pin) => pin.id !== pinId));
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId ? { ...message, is_pinned: false, pin_id: null, pinned_at: null } : message
+      )
+    );
+  }
+
+  function getMessagePinId(message: OfficeChatDiscussionMessage) {
+    return message.pin_id ?? pins.find((pin) => pin.message_id === message.id)?.id ?? null;
+  }
 
   useEffect(() => {
     setMessageBody("");
@@ -169,6 +214,9 @@ export function DiscussionPanel({
     clearAttachments();
     setArchiveOpen(false);
     setArchivedMessages([]);
+    setPinsOpen(false);
+    setPinDraftMessage(null);
+    setPinNote("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [discussionId]);
 
@@ -231,7 +279,12 @@ export function DiscussionPanel({
             setMessages((current) =>
               current.map((message) => (message.id === payload.message_id ? { ...message, reactions } : message))
             );
+          } else if (payload.type === "message.pinned" || payload.type === "message.pin_updated") {
+            applyPinnedMessage(payload.pin);
+          } else if (payload.type === "message.unpinned") {
+            applyUnpinnedMessage(payload.pin_id, payload.message_id);
           } else if (payload.type.startsWith("discussion.")) {
+            if (payload.type === "discussion.message.deleted") void refreshPins(accessToken);
             if (historicalTargetRef.current) setShowNewMessagesButton(true);
             else void refreshDiscussion(accessToken);
           }
@@ -247,7 +300,7 @@ export function DiscussionPanel({
       if (socketRef.current === connection) socketRef.current = null;
       connection();
     };
-  }, [currentUser.id, dictionary.session.accessDenied, discussionId, handleTypingEvent, locale, refreshDiscussion, router, stopTyping]);
+  }, [currentUser.id, dictionary.session.accessDenied, discussionId, handleTypingEvent, locale, refreshDiscussion, refreshPins, router, stopTyping]);
 
   async function returnToLatest() {
     const token = getStoredAccessToken();
@@ -397,11 +450,73 @@ export function DiscussionPanel({
     setSuccess("");
     try {
       await deleteDiscussionMessage(token, discussionId, messageId);
-      setMessages(await getDiscussionMessages(token, discussionId));
+      await refreshDiscussion(token);
       setSuccess(dictionary.discussions.deleteSuccess);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.deleteError);
     }
+  }
+
+  async function handlePinMessage() {
+    const token = getStoredAccessToken();
+    if (!token || !pinDraftMessage) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const pin = await pinMessage(token, "discussion", discussionId, pinDraftMessage.id, pinNote);
+      setPinDraftMessage(null);
+      setPinNote("");
+      applyPinnedMessage(pin);
+      setSuccess(dictionary.pins.pinSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.pinError);
+    }
+  }
+
+  async function handleUnpinMessage(pinId: string) {
+    const token = getStoredAccessToken();
+    if (!token) {
+      router.replace(`/${locale}/login`);
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const pinnedMessage = pins.find((pin) => pin.id === pinId);
+      await unpinMessage(token, pinId);
+      if (pinnedMessage) {
+        applyUnpinnedMessage(pinId, pinnedMessage.message_id);
+      } else {
+        await refreshPins(token);
+      }
+      setSuccess(dictionary.pins.unpinSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.unpinError);
+    }
+  }
+
+  async function handleUpdatePinNote(pinId: string, note: string) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setError("");
+    try {
+      const pin = await updatePinnedMessage(token, pinId, note);
+      applyPinnedMessage(pin);
+      setSuccess(dictionary.pins.noteSuccess);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : dictionary.pins.noteError);
+    }
+  }
+
+  function handleJumpToPinnedMessage(messageId: string) {
+    if (onJumpToMessage) {
+      void onJumpToMessage(messageId);
+      return;
+    }
+    messagesListRef.current?.querySelector(`[data-message-id="${messageId}"]`)?.scrollIntoView({ block: "center" });
   }
 
   async function handleDownloadAttachment(downloadUrl: string, filename: string) {
@@ -517,6 +632,40 @@ export function DiscussionPanel({
         />
       ) : null}
 
+      <PinnedMessages
+        canPin={canPinMessages}
+        dictionary={dictionary}
+        isOpen={pinsOpen}
+        locale={locale}
+        onClose={() => setPinsOpen(false)}
+        onJump={handleJumpToPinnedMessage}
+        onOpen={() => setPinsOpen(true)}
+        onUnpin={(pinId) => void handleUnpinMessage(pinId)}
+        onUpdateNote={(pinId, note) => void handleUpdatePinNote(pinId, note)}
+        pins={pins}
+      />
+
+      {pinDraftMessage ? (
+        <form className="pin-draft-panel" onSubmit={(event) => {
+          event.preventDefault();
+          void handlePinMessage();
+        }}>
+          <div>
+            <strong>{dictionary.pins.pinMessage}</strong>
+            <p>{pinDraftMessage.body.trim() || dictionary.messages.replyPreviewUnavailable}</p>
+            <p className="note">{dictionary.pins.attachmentWarning}</p>
+          </div>
+          <input className="field-input" maxLength={300} onChange={(event) => setPinNote(event.target.value)} placeholder={dictionary.pins.notePlaceholder} value={pinNote} />
+          <div className="actions">
+            <button className="primary-button" type="submit">{dictionary.pins.pin}</button>
+            <button className="table-action" onClick={() => {
+              setPinDraftMessage(null);
+              setPinNote("");
+            }} type="button">{dictionary.pins.cancel}</button>
+          </div>
+        </form>
+      ) : null}
+
       {discussion ? (
         <>
           <section className="discussion-source">
@@ -595,6 +744,7 @@ export function DiscussionPanel({
           {messages.map((message) => {
             const canEdit = message.sender_user_id === currentUser.id && !message.is_deleted;
             const canDelete = (message.sender_user_id === currentUser.id || canDeleteOthers) && !message.is_deleted;
+            const canPinThisMessage = canPinMessages && !message.is_deleted && !message.is_archived;
             return (
               <Fragment key={message.id}>
                 {message.id === unread?.first_unread_message_id ? <UnreadSeparator dictionary={dictionary} /> : null}
@@ -608,6 +758,7 @@ export function DiscussionPanel({
                   <span>@{message.sender.username}</span>
                   <span>{dateFormatter.format(new Date(message.created_at))}</span>
                   {message.edited_at ? <span>{dictionary.messages.edited}</span> : null}
+                  {message.is_pinned ? <span className="pin-badge">{dictionary.pins.pinned}</span> : null}
                 </div>
                 {editingMessageId === message.id ? (
                   <form className="message-edit-form" onSubmit={handleEditMessage}>
@@ -650,23 +801,23 @@ export function DiscussionPanel({
                 />
                 {!message.is_deleted ? (
                   <div className="message-actions">
-                    {canEdit ? (
-                      <button
-                        className="table-action"
-                        onClick={() => {
-                          setEditingMessageId(message.id);
-                          setEditingMessageBody(message.body);
-                        }}
-                        type="button"
-                      >
-                        {dictionary.messages.edit}
-                      </button>
-                    ) : null}
-                    {canDelete ? (
-                      <button className="table-action" onClick={() => void handleDeleteMessage(message.id)} type="button">
-                        {dictionary.messages.delete}
-                      </button>
-                    ) : null}
+                    <MessageActionsMenu
+                      canDelete={canDelete}
+                      canEdit={canEdit}
+                      canPin={canPinThisMessage}
+                      dictionary={dictionary}
+                      isPinned={message.is_pinned}
+                      onDelete={() => void handleDeleteMessage(message.id)}
+                      onEdit={() => {
+                        setEditingMessageId(message.id);
+                        setEditingMessageBody(message.body);
+                      }}
+                      onPinToggle={() => {
+                        const pinId = getMessagePinId(message);
+                        if (pinId) void handleUnpinMessage(pinId);
+                        else setPinDraftMessage(message);
+                      }}
+                    />
                   </div>
                 ) : null}
               </article>

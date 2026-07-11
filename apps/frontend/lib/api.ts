@@ -223,6 +223,9 @@ export type OfficeChatMessage = {
   is_deleted: boolean;
   is_archived: boolean;
   archived_at: string | null;
+  is_pinned: boolean;
+  pin_id: string | null;
+  pinned_at: string | null;
   edited_at: string | null;
   created_at: string;
   updated_at: string;
@@ -275,6 +278,9 @@ export type OfficeChatDirectMessage = {
   is_deleted: boolean;
   is_archived: boolean;
   archived_at: string | null;
+  is_pinned: boolean;
+  pin_id: string | null;
+  pinned_at: string | null;
   edited_at: string | null;
   created_at: string;
   updated_at: string;
@@ -344,12 +350,45 @@ export type OfficeChatDiscussionMessage = {
   is_deleted: boolean;
   is_archived: boolean;
   archived_at: string | null;
+  is_pinned: boolean;
+  pin_id: string | null;
+  pinned_at: string | null;
   edited_at: string | null;
   created_at: string;
   updated_at: string;
   sender: OfficeChatDirectoryUser;
   attachments: OfficeChatAttachment[];
   reactions: OfficeChatMessageReaction[];
+};
+
+export type OfficeChatPinnedMessage = {
+  id: string;
+  chat_type: ChatType;
+  chat_id: string;
+  message_id: string;
+  note: string | null;
+  pinned_by: {
+    id: string | null;
+    username: string;
+    display_name: string;
+  };
+  pinned_at: string;
+  created_at: string;
+  updated_at: string;
+  message: {
+    id: string;
+    sender: {
+      id: string;
+      username: string;
+      display_name: string;
+    };
+    body_preview: string;
+    attachment_count: number;
+    is_deleted: boolean;
+    is_archived: boolean;
+    archived_at: string | null;
+    created_at: string;
+  };
 };
 
 export type OfficeChatBot = {
@@ -394,6 +433,23 @@ export type GroupMessageEvent =
       message_id?: string;
     }
   | {
+      type: "message.pinned" | "message.pin_updated";
+      chat_type: ChatType;
+      chat_id: string;
+      group_id?: string;
+      pin_id: string;
+      message_id: string;
+      pin: OfficeChatPinnedMessage;
+    }
+  | {
+      type: "message.unpinned";
+      chat_type: ChatType;
+      chat_id: string;
+      group_id?: string;
+      pin_id: string;
+      message_id: string;
+    }
+  | {
       type: "message.reactions.updated";
       group_id: string;
       message_id: string;
@@ -407,6 +463,21 @@ export type DirectMessageEvent =
       conversation_id: string;
       message: OfficeChatDirectMessage;
       message_id?: string;
+    }
+  | {
+      type: "message.pinned" | "message.pin_updated";
+      chat_type: ChatType;
+      chat_id: string;
+      pin_id: string;
+      message_id: string;
+      pin: OfficeChatPinnedMessage;
+    }
+  | {
+      type: "message.unpinned";
+      chat_type: ChatType;
+      chat_id: string;
+      pin_id: string;
+      message_id: string;
     }
   | {
       type: "direct.message.reactions.updated";
@@ -423,6 +494,21 @@ export type DiscussionEvent =
       discussion_id: string;
       message: OfficeChatDiscussionMessage;
       message_id?: string;
+    }
+  | {
+      type: "message.pinned" | "message.pin_updated";
+      chat_type: ChatType;
+      chat_id: string;
+      pin_id: string;
+      message_id: string;
+      pin: OfficeChatPinnedMessage;
+    }
+  | {
+      type: "message.unpinned";
+      chat_type: ChatType;
+      chat_id: string;
+      pin_id: string;
+      message_id: string;
     }
   | {
       type: "discussion.member.added";
@@ -1030,6 +1116,29 @@ export function removeGroupMember(token: string, groupId: string, memberId: stri
 
 export function getGroupMessages(token: string, groupId: string, limit = 50) {
   return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages?limit=${limit}`, token);
+}
+
+export function getPinnedMessages(token: string, chatType: ChatType, chatId: string) {
+  const query = new URLSearchParams({ chat_type: chatType, chat_id: chatId });
+  return apiFetch<OfficeChatPinnedMessage[]>(`/api/pins?${query}`, token);
+}
+
+export function pinMessage(token: string, chatType: ChatType, chatId: string, messageId: string, note?: string | null) {
+  return apiFetch<OfficeChatPinnedMessage>("/api/pins", token, {
+    method: "POST",
+    body: JSON.stringify({ chat_type: chatType, chat_id: chatId, message_id: messageId, note: note || null })
+  });
+}
+
+export function updatePinnedMessage(token: string, pinId: string, note?: string | null) {
+  return apiFetch<OfficeChatPinnedMessage>(`/api/pins/${pinId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ note: note || null })
+  });
+}
+
+export function unpinMessage(token: string, pinId: string) {
+  return apiFetch<void>(`/api/pins/${pinId}`, token, { method: "DELETE" });
 }
 
 export function getArchivedGroupMessages(token: string, groupId: string, limit = 50, before?: string) {

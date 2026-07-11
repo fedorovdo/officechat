@@ -45,6 +45,7 @@ from app.services.personal_notifications import (
     broadcast_discussion_message_created,
     discussion_message_event_payload,
 )
+from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.reactions import add_discussion_message_reaction, remove_discussion_message_reaction
 from app.services.websocket_manager import discussion_websocket_manager
 from app.services.unread import broadcast_unread_for_chat, broadcast_unread_removed
@@ -241,6 +242,7 @@ async def get_messages(
     try:
         await ensure_discussion_access(session, discussion, current_user)
         messages = await list_discussion_messages(session, discussion, limit, before)
+        await annotate_messages_with_pins(session, "discussion", discussion.id, messages)
         return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -258,6 +260,7 @@ async def get_archived_messages(
     try:
         await ensure_discussion_access(session, discussion, current_user)
         messages = await list_archived_discussion_messages(session, discussion, limit, before)
+        await annotate_messages_with_pins(session, "discussion", discussion.id, messages)
         return [serialize_message(message, current_user) for message in messages]
     except PermissionError as exc:
         raise_for_permission_error(exc)
@@ -401,6 +404,7 @@ async def delete_message(
     if message.is_archived:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
     try:
+        await delete_pins_for_message(session, "discussion", discussion.id, message.id)
         deleted_message = await delete_discussion_message(session, discussion, message, current_user)
         await discussion_websocket_manager.broadcast_to_discussion(
             discussion.id,

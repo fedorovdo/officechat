@@ -227,3 +227,6 @@ Broadcast announcement events use the same personal channel and are separate fro
 - Нет reactions.
 - Нет mention autocomplete и profile links.
 - Нет multi-instance pub/sub.
+# RC WebSocket production notes
+
+WebSocket query tokens remain a v0.1 development-compatible mechanism and are redacted from logs. Production reverse proxy deployment must preserve WebSocket upgrade headers. Multi-instance delivery still requires a future Valkey pub/sub bridge; the current connection manager is process-local.

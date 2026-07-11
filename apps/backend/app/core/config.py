@@ -1,6 +1,7 @@
 import json
 from functools import lru_cache
 from typing import Annotated
+from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -12,14 +13,25 @@ DEFAULT_ALLOWED_UPLOAD_EXTENSIONS = [
 BLOCKED_UPLOAD_EXTENSIONS = {
     "exe", "com", "bat", "cmd", "ps1", "msi", "dll", "scr", "js", "vbs", "jar", "sh", "apk",
 }
+WEAK_SECRET_VALUES = {
+    "",
+    "change-me",
+    "change-me-in-production",
+    "development",
+    "officechat",
+    "secret",
+    "test",
+}
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "OfficeChat"
-    app_version: str = "0.1.0"
+    app_version: str = Field(default="0.1.0-rc1", validation_alias=AliasChoices("APP_VERSION", "OFFICECHAT_VERSION"))
     environment: str = "development"
+    public_frontend_url: str | None = Field(default=None, validation_alias=AliasChoices("PUBLIC_FRONTEND_URL", "FRONTEND_URL"))
+    public_backend_url: str | None = Field(default=None, validation_alias=AliasChoices("PUBLIC_BACKEND_URL", "BACKEND_PUBLIC_URL"))
     self_registration_enabled: bool = False
     app_secret_key: str = Field(
         default="change-me-in-production",
@@ -58,6 +70,7 @@ class Settings(BaseSettings):
     postgres_password: str = "officechat_dev_password"
     postgres_host: str = "postgres"
     postgres_port: int = 5432
+    database_url_override: str | None = Field(default=None, validation_alias="DATABASE_URL")
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_recycle_seconds: int = 1800
@@ -77,11 +90,32 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_persistent_production_secret(self) -> "Settings":
-        if self.environment.lower() == "production" and self.app_secret_key == "change-me-in-production":
-            raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
+        if self.environment.lower() == "production":
+            if not self.database_url_override:
+                raise ValueError("DATABASE_URL must be explicitly configured in production")
+            if self.app_secret_key.strip().lower() in WEAK_SECRET_VALUES or len(self.app_secret_key) < 32:
+                raise ValueError("APP_SECRET_KEY/JWT_SECRET must be a strong production secret with at least 32 characters")
+            if not self.public_frontend_url or not self.public_backend_url:
+                raise ValueError("PUBLIC_FRONTEND_URL and PUBLIC_BACKEND_URL must be configured in production")
+            self._validate_http_url(self.public_frontend_url, "PUBLIC_FRONTEND_URL")
+            self._validate_http_url(self.public_backend_url, "PUBLIC_BACKEND_URL")
+            if self.public_frontend_url.rstrip("/") not in [origin.rstrip("/") for origin in self.backend_cors_origins]:
+                raise ValueError("BACKEND_CORS_ORIGINS must include PUBLIC_FRONTEND_URL in production")
+            if any(origin == "*" for origin in self.backend_cors_origins):
+                raise ValueError("BACKEND_CORS_ORIGINS must not contain '*' in production")
         if self.presence_heartbeat_seconds >= self.presence_connection_ttl_seconds:
             raise ValueError("PRESENCE_HEARTBEAT_SECONDS must be lower than PRESENCE_CONNECTION_TTL_SECONDS")
+        if self.attachment_max_upload_size_mb <= 0 or self.attachment_max_total_size_mb <= 0:
+            raise ValueError("Attachment size limits must be positive")
+        if self.attachment_max_total_size_mb < self.attachment_max_upload_size_mb:
+            raise ValueError("ATTACHMENT_MAX_TOTAL_SIZE_MB must be greater than or equal to ATTACHMENT_MAX_UPLOAD_SIZE_MB")
         return self
+
+    @staticmethod
+    def _validate_http_url(value: str, field_name: str) -> None:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(f"{field_name} must be an absolute http(s) URL")
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod
@@ -94,10 +128,18 @@ class Settings(BaseSettings):
                     raise ValueError("BACKEND_CORS_ORIGINS JSON value must be a list")
                 return [str(origin).strip() for origin in parsed_value if str(origin).strip()]
 
-            return [origin.strip() for origin in stripped_value.split(",") if origin.strip()]
+            origins = [origin.strip() for origin in stripped_value.split(",") if origin.strip()]
+            for origin in origins:
+                if origin != "*":
+                    cls._validate_http_url(origin, "BACKEND_CORS_ORIGINS")
+            return origins
 
         if isinstance(value, list):
-            return [str(origin).strip() for origin in value if str(origin).strip()]
+            origins = [str(origin).strip() for origin in value if str(origin).strip()]
+            for origin in origins:
+                if origin != "*":
+                    cls._validate_http_url(origin, "BACKEND_CORS_ORIGINS")
+            return origins
 
         raise ValueError("BACKEND_CORS_ORIGINS must be a list or comma-separated string")
 
@@ -144,6 +186,8 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        if self.database_url_override:
+            return self.database_url_override
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

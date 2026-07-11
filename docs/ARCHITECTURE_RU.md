@@ -68,3 +68,6 @@ Frontend unit/component test layer построен на Vitest, jsdom и React 
 - файлы и политики хранения;
 - боты и интеграции;
 - production deployment profile.
+# Release Candidate architecture notes
+
+Production uses separate Docker runtime targets and `docker-compose.prod.yml`. Backend migrations are explicit and must be run before starting production services. `/health` is liveness-only; `/ready` checks PostgreSQL, Alembic revision, Valkey and writable uploads storage. Runtime WebSocket delivery is still single-instance; multi-instance production still needs Valkey pub/sub.

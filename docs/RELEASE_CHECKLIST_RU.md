@@ -1,0 +1,51 @@
+# Release checklist
+
+Перед internal release:
+
+- environment validation completed;
+- production `.env` содержит сильный `APP_SECRET_KEY`;
+- `DATABASE_URL` задан;
+- `BACKEND_CORS_ORIGINS` содержит только точные origins;
+- uploads volume writable;
+- backup completed;
+- restore test completed in isolated environment;
+- migrations applied;
+- `docker compose exec backend alembic current`;
+- `docker compose exec backend python -m compileall app`;
+- `docker compose exec backend python -m pytest -q`;
+- `docker compose exec frontend npm run test:run`;
+- `docker compose exec frontend npm run build`;
+- `docker compose exec frontend npm run test:e2e`;
+- `docker compose -f docker-compose.prod.yml config`;
+- `/health` returns 200;
+- `/ready` returns 200;
+- CORS checked from allowed and blocked origins;
+- reverse proxy configuration reviewed;
+- browser smoke check completed;
+- no raw secrets in logs;
+- rollback plan prepared;
+- database and uploads backup stored together.
+
+Manual smoke:
+
+1. start clean production-like stack;
+2. apply migrations;
+3. login as superadmin;
+4. login as normal user in second browser;
+5. send group message;
+6. send direct message;
+7. upload and download safe file;
+8. verify unread and read receipt;
+9. search and jump to message;
+10. grant `can_pin_messages`;
+11. pin and unpin message;
+12. grant `can_broadcast`;
+13. send and retract selected-user broadcast;
+14. verify recipient unread badge;
+15. verify audit events;
+16. restart backend;
+17. confirm sessions remain valid with unchanged secret;
+18. create backup;
+19. restore into isolated environment;
+20. confirm restored data and attachments;
+21. confirm no backend traceback.

@@ -1181,11 +1181,10 @@ export function getMessageContext(
 }
 
 export function getPresence(token: string, userIds: string[]) {
-  const query = new URLSearchParams();
-  for (const userId of Array.from(new Set(userIds)).slice(0, 100)) {
-    query.append("user_ids", userId);
-  }
-  return apiFetch<OfficeChatPresence[]>(`/api/presence?${query.toString()}`, token);
+  return apiFetch<OfficeChatPresence[]>("/api/presence/query", token, {
+    method: "POST",
+    body: JSON.stringify({ user_ids: Array.from(new Set(userIds)).slice(0, 100) })
+  });
 }
 
 export function createAdminUser(token: string, payload: CreateAdminUserPayload) {

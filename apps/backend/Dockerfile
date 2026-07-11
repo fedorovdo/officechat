@@ -16,8 +16,6 @@ RUN mkdir -p /data/uploads
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
-
 FROM base AS development
 
 COPY requirements-dev.txt .
@@ -25,4 +23,14 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 
 COPY tests ./tests
 
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+
 FROM base AS runtime
+
+RUN addgroup --system officechat \
+    && adduser --system --ingroup officechat officechat \
+    && chown -R officechat:officechat /app /data/uploads
+
+USER officechat
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

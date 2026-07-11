@@ -1,5 +1,29 @@
 # OfficeChat
 
+## Release Candidate Stabilization
+
+OfficeChat v0.1 RC adds production-oriented Docker targets, `/ready` readiness checks, stricter production configuration validation, security headers, backup/restore scripts, Playwright E2E smoke infrastructure, and release documentation.
+
+Key docs:
+
+- [docs/PRODUCTION_RU.md](docs/PRODUCTION_RU.md)
+- [docs/BACKUP_RESTORE_RU.md](docs/BACKUP_RESTORE_RU.md)
+- [docs/E2E_TESTS_RU.md](docs/E2E_TESTS_RU.md)
+- [docs/RELEASE_CHECKLIST_RU.md](docs/RELEASE_CHECKLIST_RU.md)
+
+Production migrations are explicit:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Health endpoints:
+
+- Backend liveness: `GET /health`
+- Backend readiness: `GET /ready`
+- Frontend liveness: `GET /api/health`
+
 ## Session hardening
 
 Protected frontend routes centrally handle expired or invalid JWTs: only `officechat.access_token` is removed, UI preferences remain intact, active WebSockets stop, and the browser returns to the localized login page. HTTP 401 ends the local session; HTTP 403 reports denied access without logging the user out.

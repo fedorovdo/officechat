@@ -20,6 +20,7 @@ export default defineConfig({
     clearMocks: true,
     restoreMocks: true,
     mockReset: true,
+    exclude: ["node_modules/**", ".next/**", "e2e/**"],
     css: false
   }
 });

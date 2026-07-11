@@ -56,6 +56,7 @@ async def get_current_user(
     user = await get_user_by_id(session, user_id)
     if user is None or not user.is_active:
         raise credentials_error
+    request.state.actor_user_id = str(user.id)
     return user
 
 

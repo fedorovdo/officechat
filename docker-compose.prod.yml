@@ -1,23 +1,21 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: officechat-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-officechat}
       POSTGRES_USER: ${POSTGRES_USER:-officechat}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-officechat_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-postgres-password}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-officechat} -d ${POSTGRES_DB:-officechat}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   valkey:
     image: valkey/valkey:8-alpine
-    container_name: officechat-valkey
     restart: unless-stopped
     command: ["valkey-server", "--appendonly", "yes"]
     volumes:
@@ -31,16 +29,18 @@ services:
   backend:
     build:
       context: ./apps/backend
-      target: development
-    container_name: officechat-backend
+      target: runtime
     restart: unless-stopped
     environment:
       APP_NAME: ${APP_NAME:-OfficeChat}
       APP_VERSION: ${APP_VERSION:-0.1.0-rc1}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      SELF_REGISTRATION_ENABLED: ${SELF_REGISTRATION_ENABLED:-false}
-      APP_SECRET_KEY: ${APP_SECRET_KEY:-${JWT_SECRET:-change-me-in-production}}
+      ENVIRONMENT: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://officechat:replace-with-postgres-password@postgres:5432/officechat}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-change-me-in-production}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      PUBLIC_FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-https://chat.example.com}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://chat.example.com}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
       AUDIT_MAX_EXPORT_ROWS: ${AUDIT_MAX_EXPORT_ROWS:-10000}
       MESSAGE_MAX_LENGTH: ${MESSAGE_MAX_LENGTH:-4000}
@@ -51,23 +51,12 @@ services:
       BROADCAST_MAX_PER_HOUR: ${BROADCAST_MAX_PER_HOUR:-10}
       BROADCAST_PREVIEW_TTL_SECONDS: ${BROADCAST_PREVIEW_TTL_SECONDS:-300}
       BROADCAST_RETENTION_DAYS: ${BROADCAST_RETENTION_DAYS:-365}
-      ATTACHMENT_MAX_UPLOAD_SIZE_MB: ${ATTACHMENT_MAX_UPLOAD_SIZE_MB:-${MAX_UPLOAD_SIZE_MB:-25}}
+      ATTACHMENT_MAX_UPLOAD_SIZE_MB: ${ATTACHMENT_MAX_UPLOAD_SIZE_MB:-25}
       ATTACHMENT_MAX_FILES_PER_MESSAGE: ${ATTACHMENT_MAX_FILES_PER_MESSAGE:-10}
       ATTACHMENT_MAX_TOTAL_SIZE_MB: ${ATTACHMENT_MAX_TOTAL_SIZE_MB:-50}
       ALLOWED_UPLOAD_EXTENSIONS: ${ALLOWED_UPLOAD_EXTENSIONS:-txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip}
       AVATAR_MAX_UPLOAD_SIZE_MB: ${AVATAR_MAX_UPLOAD_SIZE_MB:-5}
       ALLOWED_AVATAR_EXTENSIONS: ${ALLOWED_AVATAR_EXTENSIONS:-png,jpg,jpeg,webp}
-      BOOTSTRAP_SUPERADMIN_USERNAME: ${BOOTSTRAP_SUPERADMIN_USERNAME:-admin}
-      BOOTSTRAP_SUPERADMIN_PASSWORD: ${BOOTSTRAP_SUPERADMIN_PASSWORD:-admin12345}
-      BOOTSTRAP_SUPERADMIN_DISPLAY_NAME: ${BOOTSTRAP_SUPERADMIN_DISPLAY_NAME:-OfficeChat Admin}
-      POSTGRES_DB: ${POSTGRES_DB:-officechat}
-      POSTGRES_USER: ${POSTGRES_USER:-officechat}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-officechat_dev_password}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
-      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
       VALKEY_HOST: valkey
       VALKEY_PORT: 6379
       VALKEY_DB: ${VALKEY_DB:-0}
@@ -75,44 +64,43 @@ services:
       PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
       PRESENCE_OFFLINE_GRACE_SECONDS: ${PRESENCE_OFFLINE_GRACE_SECONDS:-15}
       TYPING_TTL_SECONDS: ${TYPING_TTL_SECONDS:-5}
-      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3100}
-      UPLOADS_DIR: ${UPLOADS_DIR:-/data/uploads}
-    ports:
-      - "8100:8000"
+      UPLOADS_DIR: /data/uploads
     volumes:
       - uploads:/data/uploads
-      - ./apps/backend/app:/app/app
-      - ./apps/backend/tests:/app/tests:ro
     depends_on:
       postgres:
         condition: service_healthy
       valkey:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5).read()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:
       context: ./apps/frontend
-      target: development
-    container_name: officechat-frontend
+      target: runtime
+      args:
+        NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
+        NEXT_PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
+        NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
+        NEXT_PUBLIC_OFFICECHAT_VERSION: ${APP_VERSION:-0.1.0-rc1}
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
-      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8100}
+      NEXT_PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
       NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
       NEXT_PUBLIC_OFFICECHAT_VERSION: ${APP_VERSION:-0.1.0-rc1}
-      E2E_ALLOW_DESTRUCTIVE_TESTS: ${E2E_ALLOW_DESTRUCTIVE_TESTS:-false}
     ports:
-      - "3100:3000"
-    volumes:
-      - ./apps/frontend:/app
-      - frontend-node-modules:/app/node_modules
-      - frontend-next:/app/.next
+      - "${FRONTEND_HOST_PORT:-3100}:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres-data:
   valkey-data:
   uploads:
-  frontend-node-modules:
-  frontend-next:

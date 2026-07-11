@@ -118,3 +118,12 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Безопасные cookie и headers.
 - Backup/restore documentation.
 - LDAP/AD provider.
+# Release Candidate Stabilization v0.1
+
+- Production Docker Compose profile with runtime backend/frontend targets.
+- Strict production configuration validation for secrets, database URL, public URLs and CORS.
+- `/health`, `/ready`, frontend `/api/health`.
+- Backup/restore scripts and recovery test documentation.
+- Playwright E2E smoke infrastructure alongside Vitest.
+- Release checklist, security headers, structured request IDs and quieter presence queries.
+- Future work: trusted proxy mode, full destructive E2E data seeding, service worker push, Valkey pub/sub for multi-instance WebSockets.

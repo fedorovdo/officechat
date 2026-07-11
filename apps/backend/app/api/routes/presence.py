@@ -2,6 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +15,12 @@ router = APIRouter()
 MAX_PRESENCE_USERS = 100
 
 
-@router.get("", response_model=list[PresencePublic])
-async def get_presence_snapshot(
-    user_ids: Annotated[list[UUID], Query()],
+class PresenceQuery(BaseModel):
+    user_ids: list[UUID] = Field(default_factory=list, max_length=MAX_PRESENCE_USERS)
+
+
+async def build_presence_snapshot(
+    user_ids: list[UUID],
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict[str, object]]:
@@ -35,3 +39,21 @@ async def get_presence_snapshot(
     )
     users = list(result.scalars().all())
     return [await get_presence(user) for user in users]
+
+
+@router.get("", response_model=list[PresencePublic])
+async def get_presence_snapshot(
+    user_ids: Annotated[list[UUID], Query()],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[dict[str, object]]:
+    return await build_presence_snapshot(user_ids, session, current_user)
+
+
+@router.post("/query", response_model=list[PresencePublic])
+async def query_presence_snapshot(
+    payload: PresenceQuery,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[dict[str, object]]:
+    return await build_presence_snapshot(payload.user_ids, session, current_user)

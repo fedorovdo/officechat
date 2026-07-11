@@ -15,3 +15,6 @@ Thumbs.db
 postgres-data/
 valkey-data/
 uploads/
+apps/frontend/test-results/
+apps/frontend/playwright-report/
+apps/frontend/blob-report/

@@ -34,7 +34,7 @@ class SensitiveDataFilter(logging.Filter):
 
 
 def configure_sensitive_log_redaction() -> None:
-    for logger_name in ("uvicorn.access", "uvicorn.error"):
+    for logger_name in ("uvicorn.access", "uvicorn.error", "officechat.access"):
         logger = logging.getLogger(logger_name)
         if not any(isinstance(item, SensitiveDataFilter) for item in logger.filters):
             logger.addFilter(SensitiveDataFilter())

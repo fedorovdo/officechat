@@ -293,3 +293,32 @@ GET  /api/announcements/unread
 Рассылки используют отдельный unread counter и события `announcement.created`, `announcement.read`, `announcement.retracted` через `WS /api/ws/me`. В Audit Log не пишутся title/body, usernames получателей, confirmation token и idempotency key.
 
 Переменные окружения для разработки: `BROADCAST_TITLE_MAX_LENGTH`, `BROADCAST_BODY_MAX_LENGTH`, `BROADCAST_MAX_RECIPIENTS`, `BROADCAST_MAX_PER_HOUR`, `BROADCAST_PREVIEW_TTL_SECONDS`, `BROADCAST_RETENTION_DAYS`.
+# Release Candidate checks
+
+RC stabilization adds production Docker targets, readiness checks, backup/restore scripts and Playwright E2E smoke tests.
+
+Standard verification:
+
+```powershell
+docker compose up -d --build backend frontend
+docker compose exec backend alembic current
+docker compose exec backend python -m compileall app
+docker compose exec backend python -m pytest -q
+docker compose exec frontend npm run test:run
+docker compose exec frontend npm run build
+docker compose exec frontend npm run test:e2e
+git diff --check
+```
+
+Production config render:
+
+```powershell
+docker compose -f docker-compose.prod.yml config
+```
+
+Docs:
+
+- `docs/PRODUCTION_RU.md`
+- `docs/BACKUP_RESTORE_RU.md`
+- `docs/E2E_TESTS_RU.md`
+- `docs/RELEASE_CHECKLIST_RU.md`

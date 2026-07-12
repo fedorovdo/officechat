@@ -50,3 +50,10 @@ Manual smoke:
 20. restore into isolated environment;
 21. confirm restored data and attachments;
 22. confirm no backend traceback.
+## Calendar Events v0.1
+
+- Проверить миграцию `20260704_0023`.
+- Проверить, что `calendar-worker` запущен после применения миграций.
+- Проверить `can_manage_calendar` в управлении пользователями.
+- Проверить создание, перенос, отмену события и доставку напоминания.
+- Проверить, что Audit Log не содержит описание, место, ссылку конференции и список получателей.

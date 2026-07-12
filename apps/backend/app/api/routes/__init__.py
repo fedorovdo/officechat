@@ -8,6 +8,7 @@ from app.api.routes.admin_retention import router as admin_retention_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.bots import router as bots_router
 from app.api.routes.broadcasts import router as broadcasts_router
+from app.api.routes.calendar import router as calendar_router
 from app.api.routes.cache import router as cache_router
 from app.api.routes.db import router as db_router
 from app.api.routes.direct import router as direct_router
@@ -31,6 +32,7 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(unread_router, tags=["unread"])
 api_router.include_router(bots_router, prefix="/bots", tags=["bots"])
 api_router.include_router(broadcasts_router, tags=["broadcasts"])
+api_router.include_router(calendar_router, prefix="/calendar", tags=["calendar"])
 api_router.include_router(direct_router, prefix="/direct", tags=["direct"])
 api_router.include_router(discussions_router, prefix="/discussions", tags=["discussions"])
 api_router.include_router(admin_bots_router, prefix="/admin/bots", tags=["admin"])

@@ -326,3 +326,17 @@ Docs:
 ## Notifications Center v0.1
 
 После миграции `20260704_0022` доступны `GET /api/notifications`, `GET /api/notifications/unread-count`, `GET /api/notifications/preferences`, `PUT /api/notifications/preferences`. В `/ru/app` кнопка колокольчика открывает центр уведомлений. Обычные сообщения групп по умолчанию не создают записи; упоминания, ответы, реакции, direct/discussion messages и объявления включены.
+## Calendar Events v0.1
+
+В пользовательском приложении `/ru/app` доступен раздел `Календарь`. Для создания и изменения событий нужен `can_manage_calendar`; назначает его только `superadmin` на странице управления пользователями. Локальная разработка запускает `calendar-worker` вместе с основным стеком:
+
+```powershell
+docker compose up -d --build backend frontend calendar-worker
+```
+
+Проверка:
+
+```powershell
+docker compose exec backend alembic current
+docker compose logs calendar-worker --tail=80
+```

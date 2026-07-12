@@ -113,3 +113,6 @@ require_permission(CAN_PIN_MESSAGES)
 - Нет делегированного администрирования прав.
 - Нет отдельного permission cache; indexed PostgreSQL lookup является источником истины.
 - Multi-instance доставка `permissions.updated` позже должна использовать Valkey pub/sub или другой broker.
+## Calendar Events v0.1
+
+Добавлено право `can_manage_calendar` - управление календарём. Оно позволяет создавать, изменять, переносить и отменять корпоративные события. `superadmin` получает право неявно; обычный `admin`, `moderator`, владелец группы и пользователь не получают его автоматически. Назначать или отзывать право может только `superadmin`; ботам оно не назначается.

@@ -30,6 +30,11 @@ TYPE_TO_PREFERENCE = {
     "discussion_message": "discussion_messages_enabled",
     "announcement": "announcements_enabled",
     "pin": "pins_enabled",
+    "calendar_created": "calendar_events_enabled",
+    "calendar_updated": "calendar_changes_enabled",
+    "calendar_rescheduled": "calendar_changes_enabled",
+    "calendar_cancelled": "calendar_changes_enabled",
+    "calendar_reminder": "calendar_reminders_enabled",
     "system": "system_enabled",
 }
 SAFE_METADATA_KEYS = {
@@ -40,6 +45,10 @@ SAFE_METADATA_KEYS = {
     "discussion_id",
     "source_group_id",
     "announcement_id",
+    "calendar_event_id",
+    "calendar_status",
+    "calendar_event_type",
+    "reminder_minutes",
     "priority",
     "emoji",
     "source_label",
@@ -118,12 +127,48 @@ async def unread_count(session: AsyncSession, user_id: UUID) -> int:
 
 
 def serialize_notification(notification: Notification) -> NotificationPublic:
-    return NotificationPublic.model_validate(notification)
+    actor = notification.actor
+    return NotificationPublic(
+        id=notification.id,
+        type=notification.type,
+        category=notification.category,
+        source_type=notification.source_type,
+        source_id=notification.source_id,
+        chat_type=notification.chat_type,
+        chat_id=notification.chat_id,
+        message_id=notification.message_id,
+        actor={
+            "id": notification.actor_user_id,
+            "username": (actor.username if actor else None) or notification.actor_username,
+            "display_name": (actor.display_name if actor else None) or notification.actor_display_name,
+            "avatar_url": actor.avatar_url if actor else None,
+        },
+        title_key=notification.title_key,
+        body_preview=notification.body_preview,
+        metadata=notification.meta,
+        is_read=notification.is_read,
+        read_at=notification.read_at,
+        is_dismissed=notification.is_dismissed,
+        dismissed_at=notification.dismissed_at,
+        created_at=notification.created_at,
+        updated_at=notification.updated_at,
+    )
+
+
+def serialize_preferences(preferences: NotificationPreference) -> NotificationPreferencesPublic:
+    return NotificationPreferencesPublic.model_validate(preferences)
 
 
 async def broadcast_notification_event(session: AsyncSession, user_id: UUID, event: dict[str, object]) -> None:
     event["unread_count"] = await unread_count(session, user_id)
     await user_websocket_manager.broadcast_to_user(user_id, event)
+
+
+async def safe_broadcast_notification_event(session: AsyncSession, user_id: UUID, event: dict[str, object]) -> None:
+    try:
+        await broadcast_notification_event(session, user_id, event)
+    except Exception:
+        logger.exception("Notification websocket broadcast failed user_id=%s type=%s", user_id, event.get("type"))
 
 
 async def create_notification(
@@ -186,13 +231,14 @@ async def create_notification(
     except IntegrityError:
         await session.rollback()
         return await session.scalar(select(Notification).where(Notification.dedupe_key == dedupe_key))
-    await session.refresh(notification, ["actor"])
-    await broadcast_notification_event(
+    await session.refresh(notification, ["actor", "created_at", "updated_at"])
+    public = serialize_notification(notification)
+    await safe_broadcast_notification_event(
         session,
         recipient_user_id,
         {
             "type": "notification.created",
-            "notification": serialize_notification(notification).model_dump(mode="json"),
+            "notification": public.model_dump(mode="json"),
         },
     )
     return notification
@@ -268,21 +314,23 @@ async def get_user_notification(session: AsyncSession, user_id: UUID, notificati
     )
 
 
-async def mark_notification_read(session: AsyncSession, user_id: UUID, notification_id: UUID) -> Notification:
+async def mark_notification_read(session: AsyncSession, user_id: UUID, notification_id: UUID) -> NotificationPublic:
     notification = await get_user_notification(session, user_id, notification_id)
     if notification is None:
         raise LookupError("Notification not found")
     if not notification.is_read:
         notification.is_read = True
         notification.read_at = now_utc()
-        await session.commit()
-        await session.refresh(notification, ["actor"])
-    await broadcast_notification_event(
+        await session.flush()
+        await session.refresh(notification, ["actor", "updated_at"])
+    public = serialize_notification(notification)
+    await session.commit()
+    await safe_broadcast_notification_event(
         session,
         user_id,
         {"type": "notification.read", "notification_id": str(notification.id)},
     )
-    return notification
+    return public
 
 
 async def mark_all_notifications_read(session: AsyncSession, user_id: UUID, category: str | None = None) -> int:
@@ -296,7 +344,7 @@ async def mark_all_notifications_read(session: AsyncSession, user_id: UUID, cate
         notification.is_read = True
         notification.read_at = timestamp
     await session.commit()
-    await broadcast_notification_event(
+    await safe_broadcast_notification_event(
         session,
         user_id,
         {"type": "notifications.read_all", "category": category},
@@ -325,7 +373,7 @@ async def mark_source_notification_read(
         notification.read_at = timestamp
     await session.commit()
     for notification in notifications:
-        await broadcast_notification_event(
+        await safe_broadcast_notification_event(
             session,
             user_id,
             {"type": "notification.read", "notification_id": str(notification.id)},
@@ -333,44 +381,51 @@ async def mark_source_notification_read(
     return len(notifications)
 
 
-async def dismiss_notification(session: AsyncSession, user_id: UUID, notification_id: UUID) -> Notification:
+async def dismiss_notification(session: AsyncSession, user_id: UUID, notification_id: UUID) -> NotificationPublic:
     notification = await get_user_notification(session, user_id, notification_id)
     if notification is None:
         raise LookupError("Notification not found")
     if not notification.is_dismissed:
         notification.is_dismissed = True
         notification.dismissed_at = now_utc()
-        await session.commit()
-        await session.refresh(notification, ["actor"])
-    await broadcast_notification_event(
+        await session.flush()
+        await session.refresh(notification, ["actor", "updated_at"])
+    public = serialize_notification(notification)
+    await session.commit()
+    await safe_broadcast_notification_event(
         session,
         user_id,
         {"type": "notification.dismissed", "notification_id": str(notification.id)},
     )
-    return notification
+    return public
 
 
 async def update_preferences(
     session: AsyncSession,
     user_id: UUID,
     payload: NotificationPreferencesUpdate,
-) -> NotificationPreference:
+) -> NotificationPreferencesPublic:
     preferences = await get_or_create_preferences(session, user_id)
     for field_name, value in payload.model_dump(exclude_unset=True).items():
         if field_name == "system_enabled":
             setattr(preferences, field_name, True)
         elif hasattr(preferences, field_name):
             setattr(preferences, field_name, value)
-    await session.commit()
+    await session.flush()
     await session.refresh(preferences)
-    await user_websocket_manager.broadcast_to_user(
-        user_id,
-        {
-            "type": "notification.preferences_updated",
-            "preferences": NotificationPreferencesPublic.model_validate(preferences).model_dump(mode="json"),
-        },
-    )
-    return preferences
+    public = serialize_preferences(preferences)
+    await session.commit()
+    try:
+        await user_websocket_manager.broadcast_to_user(
+            user_id,
+            {
+                "type": "notification.preferences_updated",
+                "preferences": public.model_dump(mode="json"),
+            },
+        )
+    except Exception:
+        logger.exception("Notification preferences websocket broadcast failed user_id=%s", user_id)
+    return public
 
 
 async def cleanup_old_notifications(session: AsyncSession, user_id: UUID | None = None) -> int:

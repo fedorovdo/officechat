@@ -579,6 +579,109 @@
       "retracted": "Отозвана"
     }
   },
+  "calendar": {
+    "title": "Календарь",
+    "sidebarPreview": "Встречи и события",
+    "subtitle": "Корпоративные встречи, события на весь день и видеоконференции.",
+    "loading": "Загрузка календаря...",
+    "loadError": "Не удалось загрузить события календаря.",
+    "refresh": "Обновить",
+    "create": "Создать событие",
+    "edit": "Изменить",
+    "save": "Сохранить событие",
+    "saving": "Сохранение",
+    "close": "Закрыть",
+    "createSuccess": "Событие создано.",
+    "updateSuccess": "Событие обновлено.",
+    "saveError": "Не удалось сохранить событие.",
+    "cancelEvent": "Отменить событие",
+    "cancelSuccess": "Событие отменено.",
+    "cancelError": "Не удалось отменить событие.",
+    "cancellationReason": "Причина отмены",
+    "cancelledNotice": "Это событие отменено.",
+    "previewAudience": "Предпросмотр аудитории",
+    "previewError": "Не удалось проверить аудиторию.",
+    "previewCount": "{count} получателей",
+    "previewStale": "Аудитория изменилась. Проверьте её ещё раз перед отправкой события всем сотрудникам.",
+    "audienceSearch": "Поиск по аудитории",
+    "selectedCount": "Выбрано: {count}",
+    "selectedItems": "Выбранные элементы",
+    "moreSelected": "Ещё {count}",
+    "selectFiltered": "Выбрать найденных",
+    "clearSelection": "Очистить выбор",
+    "noAudienceResults": "Ничего не найдено",
+    "editorTitle": "Редактор события календаря",
+    "anchorDate": "Дата календаря",
+    "today": "Сегодня",
+    "noEvents": "Событий нет",
+    "allDay": "Весь день",
+    "more": "Ещё {count}",
+    "join": "Подключиться",
+    "type": "Тип",
+    "status": "Статус",
+    "time": "Время",
+    "timezone": "Часовой пояс",
+    "location": "Место",
+    "organizer": "Организатор",
+    "recipients": "Получатели",
+    "reminders": "Напоминания",
+    "noReminders": "Нет напоминаний",
+    "emptyValue": "-",
+    "desktopReminder": "{title} скоро начнётся.",
+    "views": {
+      "agenda": "Список",
+      "day": "День",
+      "week": "Неделя",
+      "month": "Месяц"
+    },
+    "fields": {
+      "title": "Название",
+      "type": "Тип события",
+      "description": "Описание",
+      "startsAt": "Начало",
+      "endsAt": "Окончание",
+      "startDate": "Дата начала",
+      "endDate": "Дата окончания",
+      "timezone": "Часовой пояс",
+      "location": "Место",
+      "conferenceUrl": "Ссылка на конференцию",
+      "audience": "Аудитория",
+      "groups": "Группы",
+      "users": "Пользователи",
+      "reminders": "Напоминания"
+    },
+    "eventTypes": {
+      "meeting": "Встреча",
+      "video_conference": "Видеоконференция",
+      "office_event": "Офисное событие",
+      "training": "Обучение",
+      "maintenance": "Обслуживание",
+      "other": "Другое"
+    },
+    "statuses": {
+      "scheduled": "Запланировано",
+      "rescheduled": "Перенесено",
+      "cancelled": "Отменено",
+      "completed": "Завершено"
+    },
+    "audienceTypes": {
+      "all_active_users": "Все активные пользователи",
+      "selected_groups": "Выбранные группы",
+      "selected_users": "Выбранные пользователи"
+    },
+    "audienceHelp": {
+      "open": "Пояснение по аудитории",
+      "groups": "Найдите группы по названию или slug и отметьте нужные чекбоксами. Ctrl+click больше не требуется.",
+      "users": "Найдите пользователей по отображаемому имени или username и отметьте нужные чекбоксами. Боты и отключённые пользователи скрыты."
+    },
+    "reminderLabels": {
+      "0": "В момент начала",
+      "15": "За 15 минут",
+      "30": "За 30 минут",
+      "60": "За 1 час",
+      "1440": "За 1 день"
+    }
+  },
   "notifications": {
     "title": "Уведомления",
     "eyebrow": "Центр уведомлений",
@@ -606,6 +709,7 @@
       "mentions": "Упоминания",
       "replies": "Ответы",
       "announcements": "Объявления",
+      "calendar": "Календарь",
       "system": "Системные"
     },
     "titles": {
@@ -617,6 +721,11 @@
       "discussion_message": "Новое сообщение обсуждения",
       "announcement": "Новое объявление",
       "pin": "Сообщение закреплено",
+      "calendar_created": "Создано событие календаря",
+      "calendar_updated": "Событие календаря обновлено",
+      "calendar_rescheduled": "Событие календаря перенесено",
+      "calendar_cancelled": "Событие календаря отменено",
+      "calendar_reminder": "Напоминание календаря",
       "system": "Системное уведомление"
     },
     "preferences": {
@@ -628,6 +737,9 @@
       "discussion_messages_enabled": "Обсуждения",
       "announcements_enabled": "Объявления",
       "pins_enabled": "Закрепления",
+      "calendar_events_enabled": "События календаря",
+      "calendar_reminders_enabled": "Напоминания календаря",
+      "calendar_changes_enabled": "Изменения календаря",
       "system_enabled": "Системные уведомления",
       "desktop_notifications_enabled": "Уведомления браузера",
       "sound_enabled": "Звук"
@@ -722,6 +834,10 @@
         "can_pin_messages": {
           "label": "Закрепление сообщений",
           "description": "Может закреплять и откреплять сообщения в доступных чатах."
+        },
+        "can_manage_calendar": {
+          "label": "Управление календарём",
+          "description": "Может создавать, изменять, переносить и отменять корпоративные события."
         }
       }
     }

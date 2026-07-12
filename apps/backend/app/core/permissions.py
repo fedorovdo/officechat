@@ -1,5 +1,6 @@
 CAN_BROADCAST = "can_broadcast"
 CAN_PIN_MESSAGES = "can_pin_messages"
+CAN_MANAGE_CALENDAR = "can_manage_calendar"
 
 
 PERMISSION_CATALOG = {
@@ -12,6 +13,11 @@ PERMISSION_CATALOG = {
         "category": "messages",
         "description_ru": "Может закреплять и откреплять сообщения в доступных чатах.",
         "description_en": "Can pin and unpin messages in accessible chats.",
+    },
+    CAN_MANAGE_CALENDAR: {
+        "category": "calendar",
+        "description_ru": "Может создавать, изменять, переносить и отменять корпоративные события.",
+        "description_en": "Can create, edit, reschedule and cancel corporate events.",
     },
 }
 

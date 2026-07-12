@@ -579,6 +579,109 @@
       "retracted": "Retracted"
     }
   },
+  "calendar": {
+    "title": "Calendar",
+    "sidebarPreview": "Meetings and events",
+    "subtitle": "Corporate meetings, all-day events and video conferences.",
+    "loading": "Loading calendar...",
+    "loadError": "Could not load calendar events.",
+    "refresh": "Refresh",
+    "create": "Create event",
+    "edit": "Edit",
+    "save": "Save event",
+    "saving": "Saving",
+    "close": "Close",
+    "createSuccess": "Event created.",
+    "updateSuccess": "Event updated.",
+    "saveError": "Could not save event.",
+    "cancelEvent": "Cancel event",
+    "cancelSuccess": "Event cancelled.",
+    "cancelError": "Could not cancel event.",
+    "cancellationReason": "Cancellation reason",
+    "cancelledNotice": "This event is cancelled.",
+    "previewAudience": "Preview audience",
+    "previewError": "Could not preview audience.",
+    "previewCount": "{count} recipients",
+    "previewStale": "Audience changed. Preview again before sending organization-wide events.",
+    "audienceSearch": "Search audience",
+    "selectedCount": "Selected: {count}",
+    "selectedItems": "Selected items",
+    "moreSelected": "{count} more",
+    "selectFiltered": "Select filtered",
+    "clearSelection": "Clear selection",
+    "noAudienceResults": "Nothing found",
+    "editorTitle": "Calendar event editor",
+    "anchorDate": "Calendar date",
+    "today": "Today",
+    "noEvents": "No events",
+    "allDay": "All day",
+    "more": "{count} more",
+    "join": "Join",
+    "type": "Type",
+    "status": "Status",
+    "time": "Time",
+    "timezone": "Timezone",
+    "location": "Location",
+    "organizer": "Organizer",
+    "recipients": "Recipients",
+    "reminders": "Reminders",
+    "noReminders": "No reminders",
+    "emptyValue": "-",
+    "desktopReminder": "{title} starts soon.",
+    "views": {
+      "agenda": "Agenda",
+      "day": "Day",
+      "week": "Week",
+      "month": "Month"
+    },
+    "fields": {
+      "title": "Title",
+      "type": "Event type",
+      "description": "Description",
+      "startsAt": "Starts",
+      "endsAt": "Ends",
+      "startDate": "Start date",
+      "endDate": "End date",
+      "timezone": "Timezone",
+      "location": "Location",
+      "conferenceUrl": "Conference URL",
+      "audience": "Audience",
+      "groups": "Groups",
+      "users": "Users",
+      "reminders": "Reminders"
+    },
+    "eventTypes": {
+      "meeting": "Meeting",
+      "video_conference": "Video conference",
+      "office_event": "Office event",
+      "training": "Training",
+      "maintenance": "Maintenance",
+      "other": "Other"
+    },
+    "statuses": {
+      "scheduled": "Scheduled",
+      "rescheduled": "Rescheduled",
+      "cancelled": "Cancelled",
+      "completed": "Completed"
+    },
+    "audienceTypes": {
+      "all_active_users": "All active users",
+      "selected_groups": "Selected groups",
+      "selected_users": "Selected users"
+    },
+    "audienceHelp": {
+      "open": "Audience help",
+      "groups": "Search groups by name or slug and tick the checkboxes you need. Ctrl+click is no longer required.",
+      "users": "Search users by display name or username and tick the checkboxes you need. Bots and disabled users are hidden."
+    },
+    "reminderLabels": {
+      "0": "At start",
+      "15": "15 minutes before",
+      "30": "30 minutes before",
+      "60": "1 hour before",
+      "1440": "1 day before"
+    }
+  },
   "notifications": {
     "title": "Notifications",
     "eyebrow": "Notification center",
@@ -606,6 +709,7 @@
       "mentions": "Mentions",
       "replies": "Replies",
       "announcements": "Announcements",
+      "calendar": "Calendar",
       "system": "System"
     },
     "titles": {
@@ -617,6 +721,11 @@
       "discussion_message": "New discussion message",
       "announcement": "New announcement",
       "pin": "Message pinned",
+      "calendar_created": "Calendar event created",
+      "calendar_updated": "Calendar event updated",
+      "calendar_rescheduled": "Calendar event rescheduled",
+      "calendar_cancelled": "Calendar event cancelled",
+      "calendar_reminder": "Calendar reminder",
       "system": "System notification"
     },
     "preferences": {
@@ -628,6 +737,9 @@
       "discussion_messages_enabled": "Discussions",
       "announcements_enabled": "Announcements",
       "pins_enabled": "Pinned messages",
+      "calendar_events_enabled": "Calendar events",
+      "calendar_reminders_enabled": "Calendar reminders",
+      "calendar_changes_enabled": "Calendar changes",
       "system_enabled": "System notifications",
       "desktop_notifications_enabled": "Browser notifications",
       "sound_enabled": "Sound"
@@ -722,6 +834,10 @@
         "can_pin_messages": {
           "label": "Pin messages",
           "description": "Can pin and unpin messages in accessible chats."
+        },
+        "can_manage_calendar": {
+          "label": "Manage calendar",
+          "description": "Can create, edit, reschedule and cancel corporate events."
         }
       }
     }

@@ -47,6 +47,7 @@ import {
   type OfficeChatDiscussionMessage,
   type OfficeChatGroup,
   type OfficeChatGroupMember,
+  type OfficeChatCalendarEvent,
   type OfficeChatMessage,
   type OfficeChatMessageContext,
   type OfficeChatMessageSearchResult,
@@ -67,6 +68,7 @@ import { GroupChatPanel } from "./GroupChatPanel";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { AnnouncementUnreadBadge } from "./AnnouncementUnreadBadge";
+import { CalendarPanel } from "./CalendarPanel";
 import { UserAvatar } from "./UserAvatar";
 import { PresenceStatus } from "./PresenceStatus";
 import {
@@ -92,6 +94,7 @@ type AppSelection =
   | { type: "group"; groupId: string }
   | { type: "direct"; conversationId: string }
   | { type: "announcements" }
+  | { type: "calendar" }
   | { type: "empty" };
 
 type AppSettings = {
@@ -318,6 +321,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
   const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0);
   const [announcementReloadKey, setAnnouncementReloadKey] = useState(0);
+  const [latestCalendarEvent, setLatestCalendarEvent] = useState<OfficeChatCalendarEvent | null>(null);
   const [presenceByUserId, setPresenceByUserId] = useState<Record<string, OfficeChatPresence>>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -569,6 +573,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     if (selection.type === "announcements") {
       return "announcements";
     }
+    if (selection.type === "calendar") {
+      return "calendar";
+    }
     return "empty";
   }
 
@@ -751,6 +758,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     if (filter === "mentions") return { type: "mention" };
     if (filter === "replies") return { type: "reply" };
     if (filter === "announcements") return { category: "announcements" };
+    if (filter === "calendar") return { category: "calendar" };
     if (filter === "system") return { category: "system" };
     return {};
   }
@@ -837,6 +845,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           ? "announcements"
           : notificationCenterFilter === "system"
             ? "system"
+            : notificationCenterFilter === "calendar"
+              ? "calendar"
             : undefined;
       const result = await markAllNotificationsRead(token, category);
       setNotificationItems((current) =>
@@ -852,6 +862,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     try {
       if (notification.category === "announcements" && notification.source_id) {
         setSelected({ type: "announcements" });
+        setActiveDiscussionId(null);
+        setIsNotificationCenterOpen(false);
+        await markCenterNotificationRead(notification);
+        return;
+      }
+      if (notification.category === "calendar") {
+        setSelected({ type: "calendar" });
         setActiveDiscussionId(null);
         setIsNotificationCenterOpen(false);
         await markCenterNotificationRead(notification);
@@ -1267,6 +1284,25 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       });
     }
 
+    function handleCalendarEvent(payload: Extract<PersonalNotificationEvent, { type: "calendar.event_created" | "calendar.event_updated" | "calendar.event_cancelled" | "calendar.reminder" }>) {
+      setLatestCalendarEvent(payload.event);
+      const body = payload.type === "calendar.reminder"
+        ? dictionary.calendar.desktopReminder.replace("{title}", payload.event.title)
+        : `${dictionary.calendar.title}: ${payload.event.title}`;
+      attemptBrowserNotification({
+        eventType: payload.type,
+        messageId: payload.event.id,
+        senderUserId: payload.event.created_by.id ?? "-",
+        body,
+        selectedChatId: getSelectionDebugId(selectedRef.current),
+        onClick: () => {
+          setSelected({ type: "calendar" });
+          setActiveDiscussionId(null);
+          clearMessageContext();
+        }
+      });
+    }
+
     return connectResilientWebSocket({
       getUrl: () => getPersonalWebSocketUrl(accessToken),
       heartbeatIntervalMs: presenceHeartbeatIntervalMs,
@@ -1308,6 +1344,15 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           if (payload.type === "announcement.read" || payload.type === "announcement.retracted") {
             setAnnouncementUnreadCount(payload.unread_count);
             setAnnouncementReloadKey((value) => value + 1);
+            return;
+          }
+          if (
+            payload.type === "calendar.event_created" ||
+            payload.type === "calendar.event_updated" ||
+            payload.type === "calendar.event_cancelled" ||
+            payload.type === "calendar.reminder"
+          ) {
+            handleCalendarEvent(payload);
             return;
           }
           if (payload.type === "notification.created") {
@@ -1537,6 +1582,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       | "discussion_messages_enabled"
       | "announcements_enabled"
       | "pins_enabled"
+      | "calendar_events_enabled"
+      | "calendar_reminders_enabled"
+      | "calendar_changes_enabled"
       | "system_enabled"
       | "desktop_notifications_enabled"
       | "sound_enabled"
@@ -1965,6 +2013,29 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               </span>
               <AnnouncementUnreadBadge count={announcementUnreadCount} locale={locale} />
             </button>
+            <button
+              aria-label={dictionary.calendar.title}
+              className={[
+                "user-app-nav-item",
+                "user-app-nav-item-calendar",
+                selected.type === "calendar" ? "user-app-nav-item-active" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => {
+                setSelected({ type: "calendar" });
+                setActiveDiscussionId(null);
+                clearMessageContext();
+              }}
+              title={isSidebarCollapsed ? dictionary.calendar.title : undefined}
+              type="button"
+            >
+              <span className="chat-avatar chat-avatar-group" aria-hidden="true">C</span>
+              <span className="sidebar-item-content">
+                <span className="sidebar-item-top">
+                  <strong>{dictionary.calendar.title}</strong>
+                </span>
+                <span className="sidebar-item-preview">{dictionary.calendar.sidebarPreview}</span>
+              </span>
+            </button>
             {!isLoading && normalizedSidebarSearch && !hasSidebarSearchResults ? (
               <p className="sidebar-empty-state">{dictionary.appShell.nothingFound}</p>
             ) : null}
@@ -2156,6 +2227,17 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               reloadKey={announcementReloadKey}
               users={users}
               onUnreadChange={setAnnouncementUnreadCount}
+            />
+          ) : null}
+
+          {!isLoading && selected.type === "calendar" && currentUser ? (
+            <CalendarPanel
+              currentUser={currentUser}
+              dictionary={dictionary}
+              externalEvent={latestCalendarEvent}
+              groups={groups}
+              locale={locale}
+              users={users}
             />
           ) : null}
 
@@ -2475,6 +2557,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     "discussion_messages_enabled",
                     "announcements_enabled",
                     "pins_enabled",
+                    "calendar_events_enabled",
+                    "calendar_reminders_enabled",
+                    "calendar_changes_enabled",
                     "system_enabled",
                     "desktop_notifications_enabled",
                     "sound_enabled"

@@ -5,7 +5,7 @@ import type { Dictionary, Locale } from "../lib/i18n";
 import { formatUnreadCount } from "../lib/useUnreadStore";
 import { UserAvatar } from "./UserAvatar";
 
-export type NotificationCenterFilter = "all" | "unread" | "mentions" | "replies" | "announcements" | "system";
+export type NotificationCenterFilter = "all" | "unread" | "mentions" | "replies" | "announcements" | "calendar" | "system";
 
 type NotificationCenterProps = {
   dictionary: Dictionary;
@@ -25,7 +25,7 @@ type NotificationCenterProps = {
   isLoading: boolean;
 };
 
-const filters: NotificationCenterFilter[] = ["all", "unread", "mentions", "replies", "announcements", "system"];
+const filters: NotificationCenterFilter[] = ["all", "unread", "mentions", "replies", "announcements", "calendar", "system"];
 
 function notificationTitle(dictionary: Dictionary, notification: OfficeChatNotification) {
   const titles = dictionary.notifications.titles;
@@ -39,6 +39,7 @@ function sourceLabel(dictionary: Dictionary, notification: OfficeChatNotificatio
   if (notification.chat_type === "direct") return dictionary.messageSearch.chatTypes.direct;
   if (notification.chat_type === "discussion") return dictionary.messageSearch.chatTypes.discussion;
   if (notification.category === "announcements") return dictionary.announcements.title;
+  if (notification.category === "calendar") return dictionary.calendar.title;
   if (notification.category === "pins") return dictionary.pins.title;
   return dictionary.notifications.system;
 }

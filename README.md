@@ -44,6 +44,8 @@ Broadcast Announcements v0.1 adds a separate corporate announcement inbox and se
 
 Notifications Center v0.1 adds a separate bell drawer in `/ru/app` for important personal events: mentions, replies, reactions, direct messages, discussion messages, announcements, optional pin notifications, and system notices. Its unread count is independent from chat unread counters and the announcement unread counter. Preferences are stored per user in PostgreSQL and synchronize through the existing `/api/ws/me` channel. See [docs/NOTIFICATIONS_RU.md](docs/NOTIFICATIONS_RU.md).
 
+Calendar Events v0.1 adds a corporate calendar in `/ru/app` for meetings, all-day events, training, maintenance windows, and video conferences. Trusted users need `can_manage_calendar` to create, edit, reschedule, or cancel events; normal users only see events where they are recipients. Calendar reminders use Notification Center and a dedicated `calendar-worker` service with PostgreSQL reminder delivery rows. See [docs/CALENDAR_RU.md](docs/CALENDAR_RU.md).
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
@@ -235,6 +237,10 @@ Important auth environment variables:
 - `BROADCAST_RETENTION_DAYS` - planned broadcast retention window, default `365`.
 - `NOTIFICATION_RETENTION_DAYS` - planned notification retention window, default `90`.
 - `NOTIFICATION_MAX_PER_USER` - planned per-user notification cap, default `5000`.
+- `CALENDAR_DEFAULT_TIMEZONE` - default IANA timezone for new calendar events, default `Europe/Moscow`.
+- `CALENDAR_MAX_RECIPIENTS` - maximum resolved recipients per calendar event, default `10000`.
+- `CALENDAR_MAX_REMINDERS` - maximum reminders per event, default `5`.
+- `CALENDAR_REMINDER_POLL_SECONDS` - calendar worker polling interval, default `30`.
 
 ## Useful Docker Compose Commands
 

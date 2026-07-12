@@ -13,9 +13,14 @@ NotificationType = Literal[
     "discussion_message",
     "announcement",
     "pin",
+    "calendar_created",
+    "calendar_updated",
+    "calendar_rescheduled",
+    "calendar_cancelled",
+    "calendar_reminder",
     "system",
 ]
-NotificationCategory = Literal["messages", "announcements", "pins", "system"]
+NotificationCategory = Literal["messages", "announcements", "pins", "calendar", "system"]
 
 
 class NotificationActorPublic(BaseModel):
@@ -104,6 +109,9 @@ class NotificationPreferencesPublic(BaseModel):
     discussion_messages_enabled: bool
     announcements_enabled: bool
     pins_enabled: bool
+    calendar_events_enabled: bool
+    calendar_reminders_enabled: bool
+    calendar_changes_enabled: bool
     system_enabled: bool
     desktop_notifications_enabled: bool
     sound_enabled: bool
@@ -124,6 +132,9 @@ class NotificationPreferencesUpdate(BaseModel):
     discussion_messages_enabled: bool | None = None
     announcements_enabled: bool | None = None
     pins_enabled: bool | None = None
+    calendar_events_enabled: bool | None = None
+    calendar_reminders_enabled: bool | None = None
+    calendar_changes_enabled: bool | None = None
     system_enabled: bool | None = None
     desktop_notifications_enabled: bool | None = None
     sound_enabled: bool | None = None

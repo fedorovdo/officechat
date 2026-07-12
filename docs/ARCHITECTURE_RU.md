@@ -75,3 +75,6 @@ Production uses separate Docker runtime targets and `docker-compose.prod.yml`. B
 ## Notification Center
 
 Центр уведомлений хранится отдельно от chat read state и announcement recipient state. `notifications` содержит персональные события с короткими безопасными preview, `notification_preferences` хранит настройки категорий, а `/api/ws/me` синхронизирует create/read/dismiss/preferences между вкладками. Ошибки создания notification не должны блокировать основное действие сообщения, реакции, закрепления или рассылки.
+## Calendar Events v0.1
+
+Календарь использует PostgreSQL как источник истины: `calendar_events`, `calendar_event_recipients` и `calendar_reminder_deliveries`. Получатели хранятся снимком, чтобы изменения состава групп не переписывали старую аудиторию без явного обновления события. Напоминания доставляет отдельный `calendar-worker`; Notification Center и `/api/ws/me` остаются пользовательским каналом уведомлений.

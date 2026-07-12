@@ -11,7 +11,7 @@ from app.services.security import decode_access_token
 from app.services.audit import record_audit_event_best_effort, should_record_security_event, token_fingerprint
 from app.services.permissions import require_permission
 from app.services.users import get_user_by_id
-from app.core.permissions import CAN_BROADCAST, CAN_PIN_MESSAGES
+from app.core.permissions import CAN_BROADCAST, CAN_MANAGE_CALENDAR, CAN_PIN_MESSAGES
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 AdminRoles = {"superadmin", "admin"}
@@ -88,4 +88,12 @@ async def require_can_pin_messages(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     await require_permission(session, current_user, CAN_PIN_MESSAGES)
+    return current_user
+
+
+async def require_can_manage_calendar(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    await require_permission(session, current_user, CAN_MANAGE_CALENDAR)
     return current_user

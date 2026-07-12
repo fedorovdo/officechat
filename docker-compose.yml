@@ -53,6 +53,15 @@ services:
       BROADCAST_RETENTION_DAYS: ${BROADCAST_RETENTION_DAYS:-365}
       NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
       NOTIFICATION_MAX_PER_USER: ${NOTIFICATION_MAX_PER_USER:-5000}
+      CALENDAR_TITLE_MAX_LENGTH: ${CALENDAR_TITLE_MAX_LENGTH:-200}
+      CALENDAR_DESCRIPTION_MAX_LENGTH: ${CALENDAR_DESCRIPTION_MAX_LENGTH:-10000}
+      CALENDAR_LOCATION_MAX_LENGTH: ${CALENDAR_LOCATION_MAX_LENGTH:-500}
+      CALENDAR_MAX_RECIPIENTS: ${CALENDAR_MAX_RECIPIENTS:-10000}
+      CALENDAR_DEFAULT_TIMEZONE: ${CALENDAR_DEFAULT_TIMEZONE:-Europe/Moscow}
+      CALENDAR_MAX_REMINDERS: ${CALENDAR_MAX_REMINDERS:-5}
+      CALENDAR_MAX_DURATION_DAYS: ${CALENDAR_MAX_DURATION_DAYS:-30}
+      CALENDAR_REMINDER_POLL_SECONDS: ${CALENDAR_REMINDER_POLL_SECONDS:-30}
+      CALENDAR_REMINDER_BATCH_SIZE: ${CALENDAR_REMINDER_BATCH_SIZE:-100}
       ATTACHMENT_MAX_UPLOAD_SIZE_MB: ${ATTACHMENT_MAX_UPLOAD_SIZE_MB:-${MAX_UPLOAD_SIZE_MB:-25}}
       ATTACHMENT_MAX_FILES_PER_MESSAGE: ${ATTACHMENT_MAX_FILES_PER_MESSAGE:-10}
       ATTACHMENT_MAX_TOTAL_SIZE_MB: ${ATTACHMENT_MAX_TOTAL_SIZE_MB:-50}
@@ -90,6 +99,54 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+
+  calendar-worker:
+    build:
+      context: ./apps/backend
+      target: development
+    container_name: officechat-calendar-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.calendar_reminders"]
+    environment:
+      APP_NAME: ${APP_NAME:-OfficeChat}
+      APP_VERSION: ${APP_VERSION:-0.1.0-rc1}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-${JWT_SECRET:-change-me-in-production}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://officechat:officechat_dev_password@postgres:5432/officechat}
+      POSTGRES_DB: ${POSTGRES_DB:-officechat}
+      POSTGRES_USER: ${POSTGRES_USER:-officechat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-officechat_dev_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      VALKEY_DB: ${VALKEY_DB:-0}
+      NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
+      CALENDAR_TITLE_MAX_LENGTH: ${CALENDAR_TITLE_MAX_LENGTH:-200}
+      CALENDAR_DESCRIPTION_MAX_LENGTH: ${CALENDAR_DESCRIPTION_MAX_LENGTH:-10000}
+      CALENDAR_LOCATION_MAX_LENGTH: ${CALENDAR_LOCATION_MAX_LENGTH:-500}
+      CALENDAR_MAX_RECIPIENTS: ${CALENDAR_MAX_RECIPIENTS:-10000}
+      CALENDAR_DEFAULT_TIMEZONE: ${CALENDAR_DEFAULT_TIMEZONE:-Europe/Moscow}
+      CALENDAR_MAX_REMINDERS: ${CALENDAR_MAX_REMINDERS:-5}
+      CALENDAR_MAX_DURATION_DAYS: ${CALENDAR_MAX_DURATION_DAYS:-30}
+      CALENDAR_REMINDER_POLL_SECONDS: ${CALENDAR_REMINDER_POLL_SECONDS:-30}
+      CALENDAR_REMINDER_BATCH_SIZE: ${CALENDAR_REMINDER_BATCH_SIZE:-100}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3100}
+      UPLOADS_DIR: ${UPLOADS_DIR:-/data/uploads}
+    volumes:
+      - uploads:/data/uploads
+      - ./apps/backend/app:/app/app
+      - ./apps/backend/tests:/app/tests:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      backend:
+        condition: service_started
 
   frontend:
     build:

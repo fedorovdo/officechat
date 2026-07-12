@@ -1,8 +1,9 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
-from app.services.notifications import build_dedupe_key, preferences_allow, sanitize_metadata, sanitize_preview
+from app.services.notifications import build_dedupe_key, preferences_allow, sanitize_metadata, sanitize_preview, serialize_notification
 
 
 class NotificationServiceTests(unittest.TestCase):
@@ -34,6 +35,39 @@ class NotificationServiceTests(unittest.TestCase):
             sanitize_metadata({"group_id": group_id, "filesystem_path": "/data/uploads/private.txt"}),
             {"group_id": str(group_id)},
         )
+
+    def test_notification_serializer_uses_loaded_scalar_snapshot(self):
+        timestamp = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+        actor_id = uuid4()
+        notification = SimpleNamespace(
+            id=uuid4(),
+            type="calendar_updated",
+            category="calendar",
+            source_type="calendar_event",
+            source_id=str(uuid4()),
+            chat_type=None,
+            chat_id=None,
+            message_id=None,
+            actor_user_id=actor_id,
+            actor_username="fallback",
+            actor_display_name="Fallback",
+            actor=SimpleNamespace(username="admin", display_name="Admin", avatar_url="/avatar.png"),
+            title_key="notification.calendar_updated",
+            body_preview="Planning",
+            meta={"calendar_status": "scheduled"},
+            is_read=True,
+            read_at=timestamp,
+            is_dismissed=False,
+            dismissed_at=None,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+
+        public = serialize_notification(notification)
+
+        self.assertEqual(public.actor.id, actor_id)
+        self.assertEqual(public.actor.username, "admin")
+        self.assertEqual(public.updated_at, timestamp)
 
 
 if __name__ == "__main__":

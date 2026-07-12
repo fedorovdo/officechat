@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     broadcast_retention_days: int = Field(default=365, ge=1, le=3650)
     notification_retention_days: int = Field(default=90, ge=1, le=3650)
     notification_max_per_user: int = Field(default=5000, ge=100, le=100000)
+    calendar_title_max_length: int = Field(default=200, ge=1, le=500)
+    calendar_description_max_length: int = Field(default=10000, ge=0, le=50000)
+    calendar_location_max_length: int = Field(default=500, ge=0, le=2000)
+    calendar_max_recipients: int = Field(default=10000, ge=1, le=100000)
+    calendar_default_timezone: str = "Europe/Moscow"
+    calendar_max_reminders: int = Field(default=5, ge=0, le=10)
+    calendar_max_duration_days: int = Field(default=30, ge=1, le=366)
+    calendar_reminder_poll_seconds: int = Field(default=30, ge=5, le=3600)
+    calendar_reminder_batch_size: int = Field(default=100, ge=1, le=1000)
     attachment_max_upload_size_mb: int = Field(
         default=25,
         validation_alias=AliasChoices("ATTACHMENT_MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_SIZE_MB"),
@@ -111,6 +120,7 @@ class Settings(BaseSettings):
             raise ValueError("Attachment size limits must be positive")
         if self.attachment_max_total_size_mb < self.attachment_max_upload_size_mb:
             raise ValueError("ATTACHMENT_MAX_TOTAL_SIZE_MB must be greater than or equal to ATTACHMENT_MAX_UPLOAD_SIZE_MB")
+        self._validate_timezone(self.calendar_default_timezone, "CALENDAR_DEFAULT_TIMEZONE")
         return self
 
     @staticmethod
@@ -118,6 +128,15 @@ class Settings(BaseSettings):
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError(f"{field_name} must be an absolute http(s) URL")
+
+    @staticmethod
+    def _validate_timezone(value: str, field_name: str) -> None:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"{field_name} must be an IANA timezone name") from exc
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

@@ -90,3 +90,6 @@ WS /api/ws/me?token=...
 Уведомления хранят только короткий безопасный preview и metadata без токенов, паролей, путей файловой системы, полного тела приватных сообщений и содержимого вложений. Дедупликация выполняется через `dedupe_key`.
 
 Настройки окружения: `NOTIFICATION_RETENTION_DAYS=90`, `NOTIFICATION_MAX_PER_USER=5000`.
+## Calendar Events v0.1
+
+Центр уведомлений получил категорию `calendar` и настройки `calendar_events_enabled`, `calendar_reminders_enabled`, `calendar_changes_enabled`. События календаря, изменения и напоминания приходят через существующий `/api/ws/me`, но не смешиваются со счётчиками непрочитанных чатов.

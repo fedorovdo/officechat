@@ -41,3 +41,13 @@ docker compose -f docker-compose.prod.yml up -d
 ## Security headers
 
 Backend и frontend выставляют базовые security headers. HSTS включается backend только при HTTPS-запросе. Для локального HTTP режима HSTS не используется.
+## Calendar Worker
+
+Calendar Events v0.1 использует отдельный сервис `calendar-worker`, который доставляет наступившие напоминания из таблицы `calendar_reminder_deliveries`. В production сначала выполните миграции, затем запускайте стек:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Для multi-instance fanout живых WebSocket-событий из worker позже нужен Valkey pub/sub или другой брокер.

@@ -9,10 +9,13 @@ import {
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
 export type GroupRole = "owner" | "moderator" | "member";
 export type DiscussionMemberRole = "owner" | "member";
-export type PermissionKey = "can_broadcast" | "can_pin_messages";
+export type PermissionKey = "can_broadcast" | "can_pin_messages" | "can_manage_calendar";
 export type BroadcastPriority = "normal" | "important" | "urgent";
 export type BroadcastAudienceType = "all_active_users" | "selected_groups" | "selected_users";
 export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partially_failed" | "retracted";
+export type CalendarEventType = "meeting" | "video_conference" | "office_event" | "training" | "maintenance" | "other";
+export type CalendarEventStatus = "scheduled" | "rescheduled" | "cancelled" | "completed";
+export type CalendarAudienceType = "all_active_users" | "selected_groups" | "selected_users";
 
 export type OfficeChatUser = {
   id: string;
@@ -566,6 +569,19 @@ export type PersonalNotificationEvent =
       unread_count: number;
     }
   | {
+      type: "calendar.event_created" | "calendar.event_updated";
+      event: OfficeChatCalendarEvent;
+    }
+  | {
+      type: "calendar.event_cancelled";
+      event: OfficeChatCalendarEvent;
+    }
+  | {
+      type: "calendar.reminder";
+      event: OfficeChatCalendarEvent;
+      reminder_minutes: number;
+    }
+  | {
       type: "presence.updated";
       user_id: string;
       status: "online" | "offline";
@@ -683,7 +699,76 @@ export type OfficeChatAnnouncementEvent = {
   is_read: boolean;
 };
 
-export type NotificationCategory = "messages" | "announcements" | "pins" | "system";
+export type CalendarAudiencePayload = {
+  audience_type: CalendarAudienceType;
+  group_ids?: string[];
+  user_ids?: string[];
+};
+
+export type CalendarEventPayload = CalendarAudiencePayload & {
+  title: string;
+  description?: string | null;
+  event_type: CalendarEventType;
+  is_all_day: boolean;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  all_day_start_date?: string | null;
+  all_day_end_date?: string | null;
+  timezone?: string | null;
+  location?: string | null;
+  conference_url?: string | null;
+  reminder_minutes?: number[];
+};
+
+export type CalendarEventUpdatePayload = Partial<CalendarEventPayload>;
+
+export type OfficeChatCalendarEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  event_type: CalendarEventType;
+  status: CalendarEventStatus;
+  is_all_day: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  all_day_start_date: string | null;
+  all_day_end_date: string | null;
+  timezone: string;
+  location: string | null;
+  conference_url: string | null;
+  created_by: {
+    id: string | null;
+    username: string | null;
+    display_name: string | null;
+  };
+  audience_summary: {
+    type: CalendarAudienceType;
+    recipient_count: number;
+  };
+  editable_audience: CalendarAudiencePayload | null;
+  reminder_minutes: number[];
+  can_manage: boolean;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CalendarEventPage = {
+  items: OfficeChatCalendarEvent[];
+  total: number;
+  limit: number;
+};
+
+export type CalendarAudiencePreview = {
+  recipient_count: number;
+  group_count: number;
+  excluded_disabled: number;
+  excluded_bots: number;
+  duplicates_removed: number;
+};
+
+export type NotificationCategory = "messages" | "announcements" | "pins" | "calendar" | "system";
 export type NotificationKind =
   | "mention"
   | "reply"
@@ -693,6 +778,11 @@ export type NotificationKind =
   | "discussion_message"
   | "announcement"
   | "pin"
+  | "calendar_created"
+  | "calendar_updated"
+  | "calendar_rescheduled"
+  | "calendar_cancelled"
+  | "calendar_reminder"
   | "system";
 
 export type OfficeChatNotification = {
@@ -735,6 +825,9 @@ export type NotificationPreferences = {
   discussion_messages_enabled: boolean;
   announcements_enabled: boolean;
   pins_enabled: boolean;
+  calendar_events_enabled: boolean;
+  calendar_reminders_enabled: boolean;
+  calendar_changes_enabled: boolean;
   system_enabled: boolean;
   desktop_notifications_enabled: boolean;
   sound_enabled: boolean;
@@ -757,6 +850,9 @@ export type NotificationPreferencesUpdate = Partial<
     | "discussion_messages_enabled"
     | "announcements_enabled"
     | "pins_enabled"
+    | "calendar_events_enabled"
+    | "calendar_reminders_enabled"
+    | "calendar_changes_enabled"
     | "system_enabled"
     | "desktop_notifications_enabled"
     | "sound_enabled"
@@ -1281,6 +1377,67 @@ export function getSentBroadcasts(token: string, page = 1, limit = 20) {
 
 export function getBroadcastStats(token: string, broadcastId: string) {
   return apiFetch<BroadcastStats>(`/api/broadcasts/${broadcastId}/stats`, token);
+}
+
+export type CalendarEventQuery = {
+  date_from: string;
+  date_to: string;
+  status?: CalendarEventStatus | "";
+  event_type?: CalendarEventType | "";
+  include_cancelled?: boolean;
+  limit?: number;
+};
+
+function buildCalendarEventQuery(query: CalendarEventQuery) {
+  const params = new URLSearchParams({
+    date_from: query.date_from,
+    date_to: query.date_to,
+    include_cancelled: String(query.include_cancelled ?? true),
+    limit: String(query.limit ?? 200)
+  });
+  if (query.status) params.set("status", query.status);
+  if (query.event_type) params.set("event_type", query.event_type);
+  return params.toString();
+}
+
+export function getCalendarEvents(token: string, query: CalendarEventQuery) {
+  return apiFetch<CalendarEventPage>(`/api/calendar/events?${buildCalendarEventQuery(query)}`, token);
+}
+
+export function getCalendarEvent(token: string, eventId: string) {
+  return apiFetch<OfficeChatCalendarEvent>(`/api/calendar/events/${eventId}`, token);
+}
+
+export function previewCalendarAudience(token: string, payload: CalendarAudiencePayload) {
+  return apiFetch<CalendarAudiencePreview>("/api/calendar/events/preview-audience", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function createCalendarEvent(token: string, payload: CalendarEventPayload) {
+  return apiFetch<OfficeChatCalendarEvent>("/api/calendar/events", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateCalendarEvent(token: string, eventId: string, payload: CalendarEventUpdatePayload) {
+  return apiFetch<OfficeChatCalendarEvent>(`/api/calendar/events/${eventId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function cancelCalendarEvent(token: string, eventId: string, reason?: string | null) {
+  return apiFetch<OfficeChatCalendarEvent>(`/api/calendar/events/${eventId}/cancel`, token, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason ?? null })
+  });
+}
+
+export function restoreCalendarEvent(token: string, eventId: string) {
+  return apiFetch<OfficeChatCalendarEvent>(`/api/calendar/events/${eventId}/restore`, token, { method: "POST" });
 }
 
 export function getUnreadSummary(token: string) {

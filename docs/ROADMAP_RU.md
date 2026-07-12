@@ -132,3 +132,6 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 
 - Реализован базовый центр уведомлений: persistent rows, per-user preferences, bell drawer, read/dismiss, personal WebSocket sync.
 - Запланировано: Calendar Events reminders, quiet hours, maintenance cleanup job, Service Worker / Push, расширенная агрегация повторяющихся событий.
+## Calendar Roadmap
+
+Calendar Events v0.1 добавляет корпоративный календарь, аудиторию по снимкам получателей, напоминания через Notification Center и право `can_manage_calendar`. В следующих версиях запланированы повторяющиеся события, RSVP, ICS-подписки, Google Calendar, Outlook/Microsoft 365 и CalDAV.

@@ -20,6 +20,7 @@ from app.services.notifications import (
     list_notifications,
     mark_all_notifications_read,
     mark_notification_read,
+    serialize_preferences,
     unread_count,
     update_preferences,
 )
@@ -65,7 +66,7 @@ async def post_notification_read(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> NotificationPublic:
     try:
-        return NotificationPublic.model_validate(await mark_notification_read(session, current_user.id, notification_id))
+        return await mark_notification_read(session, current_user.id, notification_id)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -87,7 +88,7 @@ async def post_notification_dismiss(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> NotificationPublic:
     try:
-        return NotificationPublic.model_validate(await dismiss_notification(session, current_user.id, notification_id))
+        return await dismiss_notification(session, current_user.id, notification_id)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -98,8 +99,9 @@ async def get_notification_preferences(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> NotificationPreferencesPublic:
     preferences = await get_or_create_preferences(session, current_user.id)
+    response = serialize_preferences(preferences)
     await session.commit()
-    return NotificationPreferencesPublic.model_validate(preferences)
+    return response
 
 
 @router.put("/preferences", response_model=NotificationPreferencesPublic)
@@ -108,4 +110,4 @@ async def put_notification_preferences(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> NotificationPreferencesPublic:
-    return NotificationPreferencesPublic.model_validate(await update_preferences(session, current_user.id, payload))
+    return await update_preferences(session, current_user.id, payload)

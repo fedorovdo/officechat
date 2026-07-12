@@ -234,3 +234,6 @@ WebSocket query tokens remain a v0.1 development-compatible mechanism and are re
 # Notifications Center events
 
 Персональный канал `WS /api/ws/me?token=...` также синхронизирует центр уведомлений: `notification.created`, `notification.read`, `notifications.read_all`, `notification.dismissed`, `notification.preferences_updated`. Канал остаётся single-instance; для нескольких backend-инстансов потребуется Valkey pub/sub или другой broker.
+## Calendar Events v0.1
+
+Персональный канал `WS /api/ws/me?token=...` доставляет события календаря: `calendar.event_created`, `calendar.event_updated`, `calendar.event_cancelled`, `calendar.reminder`. Отдельный WebSocket для календаря не создаётся. В multi-instance production потребуется Valkey pub/sub или другой брокер для fanout из `calendar-worker`.

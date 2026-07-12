@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Dictionary, Locale } from "../lib/i18n";
 import {
@@ -9,6 +9,7 @@ import {
   getCalendarEvents,
   hasPermission,
   previewCalendarAudience,
+  restoreCalendarEvent,
   updateCalendarEvent,
   type CalendarAudiencePreview,
   type CalendarAudienceType,
@@ -36,6 +37,9 @@ const calendarViewKey = "officechat.calendar.view";
 const eventTypes: CalendarEventType[] = ["meeting", "video_conference", "office_event", "training", "maintenance", "other"];
 const audienceTypes: CalendarAudienceType[] = ["all_active_users", "selected_groups", "selected_users"];
 const reminderOptions = [0, 15, 30, 60, 1440];
+const monthEventLimit = 3;
+const calendarStartHour = 7;
+const calendarEndHour = 20;
 
 type AudienceOption = {
   id: string;
@@ -44,7 +48,14 @@ type AudienceOption = {
 };
 
 function formatDateInput(date: Date) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateFromInput(value: string) {
+  return new Date(`${value}T00:00:00`);
 }
 
 function startOfWeek(date: Date) {
@@ -57,6 +68,12 @@ function startOfWeek(date: Date) {
 function addDays(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function addMonths(date: Date, months: number) {
+  const copy = new Date(date);
+  copy.setMonth(copy.getMonth() + months);
   return copy;
 }
 
@@ -73,6 +90,12 @@ function toLocalDateTimeValue(value: string | null) {
   const date = new Date(value);
   const offset = date.getTimezoneOffset();
   return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16);
+}
+
+function dateTimeValueForDate(date: Date, hour = 9) {
+  const copy = new Date(date);
+  copy.setHours(hour, 0, 0, 0);
+  return toLocalDateTimeValue(copy.toISOString());
 }
 
 function fromLocalDateTimeValue(value: string) {
@@ -111,6 +134,14 @@ function eventOccursOn(event: OfficeChatCalendarEvent, dateValue: string) {
 function eventSortValue(event: OfficeChatCalendarEvent) {
   if (event.is_all_day) return event.all_day_start_date ?? "";
   return event.starts_at ?? "";
+}
+
+function currentTimePercent() {
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const start = calendarStartHour * 60;
+  const end = calendarEndHour * 60;
+  return Math.min(100, Math.max(0, ((minutes - start) / (end - start)) * 100));
 }
 
 function createInitialForm(timezone: string): CalendarEventPayload {
@@ -157,6 +188,8 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   const [groupSearch, setGroupSearch] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [activeAudienceHelp, setActiveAudienceHelp] = useState<"groups" | "users" | null>(null);
+  const detailsOpenButtonRef = useRef<HTMLElement | null>(null);
+  const editorOpenButtonRef = useRef<HTMLElement | null>(null);
 
   const canManageCalendar = currentUser.role === "superadmin" || hasPermission(currentUser, "can_manage_calendar");
   const formatter = useMemo(
@@ -185,6 +218,9 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     if (view === "month") return monthRange(anchorDate);
     return { start: anchorDate, end: addDays(anchorDate, 30) };
   }, [anchorDate, view]);
+
+  const todayValue = formatDateInput(new Date());
+  const selectedDateValue = formatDateInput(anchorDate);
 
   const loadEvents = useCallback(async () => {
     const token = getStoredAccessToken();
@@ -215,13 +251,22 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   }, [loadEvents]);
 
   useEffect(() => {
-    if (!activeAudienceHelp) return undefined;
+    if (!activeAudienceHelp && !selectedEvent && !isEditorOpen) return undefined;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setActiveAudienceHelp(null);
+      if (event.key !== "Escape") return;
+      if (selectedEvent) {
+        setSelectedEvent(null);
+        detailsOpenButtonRef.current?.focus();
+      } else if (isEditorOpen) {
+        setIsEditorOpen(false);
+        editorOpenButtonRef.current?.focus();
+      } else {
+        setActiveAudienceHelp(null);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeAudienceHelp]);
+  }, [activeAudienceHelp, isEditorOpen, selectedEvent]);
 
   useEffect(() => {
     if (!externalEvent) return;
@@ -237,9 +282,18 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     setPreview(null);
   }
 
-  function openCreateForm() {
+  function openCreateForm(date: Date = anchorDate, hour = 9, opener?: HTMLElement | null) {
+    const startsAt = dateTimeValueForDate(date, hour);
+    const endsAt = dateTimeValueForDate(date, hour + 1);
+    editorOpenButtonRef.current = opener ?? null;
     setEditingEventId(null);
-    setForm(createInitialForm(defaultTimezone));
+    setForm({
+      ...createInitialForm(defaultTimezone),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      all_day_start_date: formatDateInput(date),
+      all_day_end_date: formatDateInput(date),
+    });
     setPreview(null);
     setIsPreviewStale(false);
     setIsEditorOpen(true);
@@ -250,7 +304,8 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     setActiveAudienceHelp(null);
   }
 
-  function openEditForm(event: OfficeChatCalendarEvent) {
+  function openEditForm(event: OfficeChatCalendarEvent, opener?: HTMLElement | null) {
+    editorOpenButtonRef.current = opener ?? null;
     setEditingEventId(event.id);
     setForm({
       title: event.title,
@@ -277,6 +332,21 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     setGroupSearch("");
     setUserSearch("");
     setActiveAudienceHelp(null);
+  }
+
+  function openEventDetails(event: OfficeChatCalendarEvent, opener?: HTMLElement | null) {
+    detailsOpenButtonRef.current = opener ?? null;
+    setSelectedEvent(event);
+  }
+
+  function closeEventDetails() {
+    setSelectedEvent(null);
+    detailsOpenButtonRef.current?.focus();
+  }
+
+  function closeEditor() {
+    setIsEditorOpen(false);
+    editorOpenButtonRef.current?.focus();
   }
 
   function toggleSelection(field: "group_ids" | "user_ids", optionId: string, checked: boolean) {
@@ -443,6 +513,35 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     }
   }
 
+  async function handleRestoreEvent(event: OfficeChatCalendarEvent) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    if (!window.confirm(dictionary.calendar.restoreConfirm)) return;
+    try {
+      const restored = await restoreCalendarEvent(token, event.id);
+      setSelectedEvent(restored);
+      setMessage(dictionary.calendar.restoreSuccess);
+      await loadEvents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : dictionary.calendar.restoreError);
+    }
+  }
+
+  function moveCalendar(direction: -1 | 1) {
+    if (view === "day") setAnchorDate((current) => addDays(current, direction));
+    else if (view === "week") setAnchorDate((current) => addDays(current, direction * 7));
+    else if (view === "month") setAnchorDate((current) => addMonths(current, direction));
+    else setAnchorDate((current) => addDays(current, direction * 30));
+  }
+
+  function handleDateClick(dateValue: string, hour = 9, opener?: HTMLElement | null) {
+    const date = dateFromInput(dateValue);
+    setAnchorDate(date);
+    if (canManageCalendar) {
+      openCreateForm(date, hour, opener);
+    }
+  }
+
   const isSaveDisabled = isSaving || (form.audience_type === "all_active_users" && isPreviewStale);
 
   const eventsByDate = useMemo(() => {
@@ -454,10 +553,40 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     return grouped;
   }, [events, range.end, range.start]);
 
+  const nearestVisibleEvent = useMemo(() => {
+    const now = Date.now();
+    return [...events]
+      .filter((event) => event.status !== "cancelled")
+      .filter((event) => {
+        const value = event.is_all_day ? event.all_day_start_date : event.starts_at;
+        return value ? new Date(event.is_all_day ? `${value}T00:00:00` : value).getTime() >= now : false;
+      })
+      .sort((a, b) => eventSortValue(a).localeCompare(eventSortValue(b)))[0] ?? null;
+  }, [events]);
+
   function renderEventTime(event: OfficeChatCalendarEvent) {
     if (event.is_all_day) return dictionary.calendar.allDay;
     if (!event.starts_at || !event.ends_at) return "";
     return `${formatter.format(new Date(event.starts_at))} - ${formatter.format(new Date(event.ends_at))}`;
+  }
+
+  function eventStatusLabel(event: OfficeChatCalendarEvent) {
+    if (event.status === "cancelled" || event.status === "rescheduled") {
+      return dictionary.calendar.statuses[event.status];
+    }
+    return null;
+  }
+
+  function eventTypeIcon(type: CalendarEventType) {
+    const icons: Record<CalendarEventType, string> = {
+      meeting: "M",
+      video_conference: "V",
+      office_event: "O",
+      training: "T",
+      maintenance: "!",
+      other: "*",
+    };
+    return icons[type];
   }
 
   function renderEventChip(event: OfficeChatCalendarEvent) {
@@ -465,12 +594,17 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
       <button
         className={`calendar-event-chip calendar-event-${event.status}`}
         key={event.id}
-        onClick={() => setSelectedEvent(event)}
+        onClick={(clickEvent) => openEventDetails(event, clickEvent.currentTarget)}
+        title={`${event.title} - ${dictionary.calendar.eventTypes[event.event_type]}`}
         type="button"
       >
-        <span className="calendar-event-time">{event.is_all_day ? dictionary.calendar.allDay : new Date(event.starts_at ?? "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        <span className="calendar-event-meta">
+          <span className="calendar-type-icon" aria-hidden="true">{eventTypeIcon(event.event_type)}</span>
+          <span>{event.is_all_day ? dictionary.calendar.allDay : new Date(event.starts_at ?? "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          {eventStatusLabel(event) ? <span className="calendar-status-pill">{eventStatusLabel(event)}</span> : null}
+        </span>
         <strong>{event.title}</strong>
-        <small>{dictionary.calendar.eventTypes[event.event_type]}</small>
+        <small>{dictionary.calendar.eventTypes[event.event_type]}{event.location ? ` - ${event.location}` : event.conference_url ? ` - ${dictionary.calendar.video}` : ""}</small>
       </button>
     );
   }
@@ -480,8 +614,14 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
       <div className="calendar-agenda">
         {Array.from(eventsByDate.entries()).map(([dateValue, dayEvents]) => (
           <section className="calendar-agenda-day" key={dateValue}>
-            <h3>{dateValue === formatDateInput(new Date()) ? dictionary.calendar.today : dayFormatter.format(new Date(`${dateValue}T00:00:00`))}</h3>
-            {dayEvents.length ? dayEvents.map(renderEventChip) : <p className="muted">{dictionary.calendar.noEvents}</p>}
+            <h3>
+              {dateValue === todayValue
+                ? dictionary.calendar.today
+                : dateValue === formatDateInput(addDays(new Date(), 1))
+                  ? dictionary.calendar.tomorrow
+                  : dayFormatter.format(dateFromInput(dateValue))}
+            </h3>
+            {dayEvents.length ? dayEvents.map(renderEventChip) : <p className="muted">{dictionary.calendar.noEventsForDate}</p>}
           </section>
         ))}
       </div>
@@ -492,12 +632,31 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     return (
       <div className="calendar-month-grid">
         {Array.from(eventsByDate.entries()).map(([dateValue, dayEvents]) => (
-          <div className="calendar-month-cell" key={dateValue}>
-            <button className="calendar-date-button" onClick={() => { setAnchorDate(new Date(`${dateValue}T00:00:00`)); setView("day"); }} type="button">
-              {new Date(`${dateValue}T00:00:00`).getDate()}
+          <div
+            className={`calendar-month-cell${dateValue === todayValue ? " calendar-date-today" : ""}${dateValue === selectedDateValue ? " calendar-date-selected" : ""}`}
+            key={dateValue}
+          >
+            <button
+              aria-current={dateValue === todayValue ? "date" : undefined}
+              className="calendar-date-button"
+              onClick={(event) => handleDateClick(dateValue, 9, event.currentTarget)}
+              type="button"
+            >
+              {dateFromInput(dateValue).getDate()}
             </button>
-            {dayEvents.slice(0, 3).map(renderEventChip)}
-            {dayEvents.length > 3 ? <span className="calendar-more">{dictionary.calendar.more.replace("{count}", String(dayEvents.length - 3))}</span> : null}
+            {dayEvents.slice(0, monthEventLimit).map(renderEventChip)}
+            {dayEvents.length > monthEventLimit ? (
+              <button
+                className="calendar-more"
+                onClick={() => {
+                  setAnchorDate(dateFromInput(dateValue));
+                  setView("day");
+                }}
+                type="button"
+              >
+                {dictionary.calendar.more.replace("{count}", String(dayEvents.length - monthEventLimit))}
+              </button>
+            ) : null}
           </div>
         ))}
       </div>
@@ -505,16 +664,46 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   }
 
   function renderLinearView() {
+    const hours = Array.from({ length: calendarEndHour - calendarStartHour + 1 }, (_, index) => calendarStartHour + index);
     return (
       <div className="calendar-time-grid">
         {Array.from(eventsByDate.entries()).map(([dateValue, dayEvents]) => (
-          <section className="calendar-time-day" key={dateValue}>
+          <section className={`calendar-time-day${dateValue === todayValue ? " calendar-date-today" : ""}`} key={dateValue}>
             <h3>{dayFormatter.format(new Date(`${dateValue}T00:00:00`))}</h3>
             <div className="calendar-all-day-strip">
               {dayEvents.filter((event) => event.is_all_day).map(renderEventChip)}
             </div>
-            {dayEvents.filter((event) => !event.is_all_day).map(renderEventChip)}
-            {!dayEvents.length ? <p className="muted">{dictionary.calendar.noEvents}</p> : null}
+            <div className="calendar-hour-grid">
+              {dateValue === todayValue ? <span className="calendar-current-time" style={{ top: `${currentTimePercent()}%` }} /> : null}
+              {hours.map((hour) => {
+                const hourEvents = dayEvents.filter((event) => {
+                  if (event.is_all_day || !event.starts_at) return false;
+                  const date = new Date(event.starts_at);
+                  return date.getHours() === hour;
+                });
+                return (
+                  <div
+                    className="calendar-hour-row"
+                    key={hour}
+                    onClick={(event) => handleDateClick(dateValue, hour, event.currentTarget)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleDateClick(dateValue, hour, event.currentTarget);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <span className="calendar-hour-label">{String(hour).padStart(2, "0")}:00</span>
+                    <span className="calendar-hour-events" onClick={(event) => event.stopPropagation()}>
+                      {hourEvents.map(renderEventChip)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {!dayEvents.length ? <p className="muted">{dictionary.calendar.noEventsForDate}</p> : null}
           </section>
         ))}
       </div>
@@ -528,11 +717,27 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
           <h2 className="section-title">{dictionary.calendar.title}</h2>
           <p className="admin-current">{dictionary.calendar.subtitle}</p>
         </div>
+        {nearestVisibleEvent ? (
+          <div className="calendar-next-event">
+            <span>{dictionary.calendar.nextEvent}</span>
+            <strong>{nearestVisibleEvent.title}</strong>
+            <small>{renderEventTime(nearestVisibleEvent)} - {dictionary.calendar.eventTypes[nearestVisibleEvent.event_type]}</small>
+            <div className="calendar-next-actions">
+              <button className="secondary-link compact-button" onClick={(event) => openEventDetails(nearestVisibleEvent, event.currentTarget)} type="button">{dictionary.calendar.open}</button>
+              {nearestVisibleEvent.conference_url ? (
+                <a className="secondary-link compact-button" href={nearestVisibleEvent.conference_url} rel="noopener noreferrer" target="_blank">{dictionary.calendar.join}</a>
+              ) : null}
+            </div>
+          </div>
+        ) : <p className="calendar-next-event muted">{dictionary.calendar.noUpcomingEvents}</p>}
         <div className="calendar-toolbar-actions">
+          <button className="secondary-link" onClick={() => moveCalendar(-1)} type="button">{dictionary.calendar.previous}</button>
+          <button className="secondary-link" onClick={() => setAnchorDate(new Date())} type="button">{dictionary.calendar.today}</button>
+          <button className="secondary-link" onClick={() => moveCalendar(1)} type="button">{dictionary.calendar.next}</button>
           <input
             aria-label={dictionary.calendar.anchorDate}
             className="field-input"
-            onChange={(event) => setAnchorDate(new Date(`${event.target.value}T00:00:00`))}
+            onChange={(event) => setAnchorDate(dateFromInput(event.target.value))}
             type="date"
             value={formatDateInput(anchorDate)}
           />
@@ -542,7 +747,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
             </button>
           ))}
           <button className="secondary-link" onClick={() => void loadEvents()} type="button">{dictionary.calendar.refresh}</button>
-          {canManageCalendar ? <button className="primary-button" onClick={openCreateForm} type="button">{dictionary.calendar.create}</button> : null}
+          {canManageCalendar ? <button className="primary-button" onClick={(event) => openCreateForm(anchorDate, 9, event.currentTarget)} type="button">{dictionary.calendar.create}</button> : null}
         </div>
       </div>
       {message ? <p className="form-success">{message}</p> : null}
@@ -555,7 +760,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
           <section className="settings-panel calendar-detail-panel" aria-label={selectedEvent.title}>
             <div className="settings-panel-header">
               <h2 className="section-title">{selectedEvent.title}</h2>
-              <button className="secondary-link" onClick={() => setSelectedEvent(null)} type="button">{dictionary.calendar.close}</button>
+              <button className="secondary-link" onClick={closeEventDetails} type="button">{dictionary.calendar.close}</button>
             </div>
             <dl className="calendar-detail-list">
               <dt>{dictionary.calendar.type}</dt><dd>{dictionary.calendar.eventTypes[selectedEvent.event_type]}</dd>
@@ -566,6 +771,8 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
               <dt>{dictionary.calendar.organizer}</dt><dd>{selectedEvent.created_by.display_name || selectedEvent.created_by.username || dictionary.calendar.emptyValue}</dd>
               <dt>{dictionary.calendar.recipients}</dt><dd>{selectedEvent.audience_summary.recipient_count}</dd>
               <dt>{dictionary.calendar.reminders}</dt><dd>{selectedEvent.reminder_minutes.length ? selectedEvent.reminder_minutes.map((item) => reminderLabel(dictionary, item)).join(", ") : dictionary.calendar.noReminders}</dd>
+              {selectedEvent.cancelled_at ? <><dt>{dictionary.calendar.cancelledAt}</dt><dd>{formatter.format(new Date(selectedEvent.cancelled_at))}</dd></> : null}
+              {selectedEvent.cancellation_reason ? <><dt>{dictionary.calendar.cancellationReason}</dt><dd>{selectedEvent.cancellation_reason}</dd></> : null}
             </dl>
             {selectedEvent.description ? <p className="calendar-description">{selectedEvent.description}</p> : null}
             {selectedEvent.conference_url && selectedEvent.status !== "cancelled" ? (
@@ -576,10 +783,14 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
             {selectedEvent.status === "cancelled" ? <p className="form-error">{dictionary.calendar.cancelledNotice}</p> : null}
             {selectedEvent.can_manage ? (
               <div className="actions">
-                <button className="secondary-link" onClick={() => openEditForm(selectedEvent)} type="button">{dictionary.calendar.edit}</button>
                 {selectedEvent.status !== "cancelled" ? (
-                  <button className="secondary-link" onClick={() => void handleCancelEvent(selectedEvent)} type="button">{dictionary.calendar.cancelEvent}</button>
-                ) : null}
+                  <>
+                    <button className="secondary-link" onClick={(event) => openEditForm(selectedEvent, event.currentTarget)} type="button">{dictionary.calendar.edit}</button>
+                    <button className="secondary-link" onClick={() => void handleCancelEvent(selectedEvent)} type="button">{dictionary.calendar.cancelEvent}</button>
+                  </>
+                ) : (
+                  <button className="secondary-link" onClick={() => void handleRestoreEvent(selectedEvent)} type="button">{dictionary.calendar.restoreEvent}</button>
+                )}
               </div>
             ) : null}
           </section>
@@ -591,7 +802,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
           <section className="settings-panel calendar-editor-panel" aria-label={dictionary.calendar.editorTitle}>
             <div className="settings-panel-header">
               <h2 className="section-title">{editingEventId ? dictionary.calendar.edit : dictionary.calendar.create}</h2>
-              <button className="secondary-link" onClick={() => setIsEditorOpen(false)} type="button">{dictionary.calendar.close}</button>
+              <button className="secondary-link" onClick={closeEditor} type="button">{dictionary.calendar.close}</button>
             </div>
             <div className="calendar-form-grid">
               <label className="field"><span className="field-label">{dictionary.calendar.fields.title}</span><input className="field-input" onChange={(event) => updateForm({ title: event.target.value })} value={form.title} /></label>

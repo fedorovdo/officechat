@@ -13,7 +13,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": settings.app_version, "service": "officechat-backend"}
+    return {"status": "ok", **settings.safe_service_metadata}
 
 
 def check_uploads_writable() -> dict[str, object]:
@@ -68,8 +68,7 @@ async def ready() -> JSONResponse:
         status_code=status_code,
         content={
             "status": "ready" if not errors else "not_ready",
-            "version": settings.app_version,
-            "service": "officechat-backend",
+            **settings.safe_service_metadata,
             "checks": checks,
             "errors": errors,
         },

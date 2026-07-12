@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { BrandLogo } from "./Brand";
+import { getLocalizedBrand } from "../lib/brand";
 import { getCurrentUser, getLocalizedApiError, isAdminRole, requireStoredAccessToken } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { logoutSession } from "../lib/session";
@@ -19,6 +21,7 @@ type CurrentUser = {
 };
 
 export function Dashboard({ dictionary, locale }: DashboardProps) {
+  const localizedBrand = getLocalizedBrand(locale);
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [error, setError] = useState("");
 
@@ -47,7 +50,7 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
       <section className="dashboard-shell" aria-label={dictionary.dashboard.ariaLabel}>
         <div className="dashboard-header">
           <div>
-            <p className="eyebrow">{dictionary.app.name}</p>
+            <BrandLogo tagline={localizedBrand.tagline} />
             <h1 className="dashboard-title">{dictionary.dashboard.title}</h1>
           </div>
           <button className="secondary-link" onClick={logout} type="button">
@@ -74,6 +77,9 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
             </div>
             <Link className="primary-button dashboard-admin-link dashboard-open-app" href={`/${locale}/app`}>
               {dictionary.dashboard.openApp}
+            </Link>
+            <Link className="secondary-link dashboard-admin-link" href={`/${locale}/about`}>
+              {dictionary.dashboard.about}
             </Link>
             <Link className="primary-button dashboard-admin-link" href={`/${locale}/groups`}>
               {dictionary.dashboard.groups}

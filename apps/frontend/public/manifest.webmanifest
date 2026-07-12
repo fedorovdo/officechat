@@ -1,0 +1,27 @@
+{
+  "name": "OfficeChat",
+  "short_name": "OC",
+  "description": "A self-hosted corporate messenger for chats, announcements, notifications and events.",
+  "start_url": "/ru/app",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#1f2d29",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

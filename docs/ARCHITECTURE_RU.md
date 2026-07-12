@@ -1,5 +1,9 @@
 # Архитектура OfficeChat
 
+## Branding metadata
+
+Frontend хранит публичную конфигурацию продукта в `apps/frontend/lib/brand.ts` и использует общие компоненты `BrandLogo`/`BrandMark`. Backend `/health` отдаёт только безопасные metadata: service, product, version и опциональный короткий build SHA. Секреты, filesystem paths, database host/credentials и JWT-настройки не раскрываются. Подробнее: `docs/BRANDING_RU.md`.
+
 ## Гранулярные права
 
 Помимо ролей OfficeChat использует таблицы `permissions` и `user_permissions`. Роли задают широкий доступ, а специальные права закрывают чувствительные будущие функции: `can_broadcast` и `can_pin_messages`. `superadmin` получает все активные права неявно, остальные пользователи - только через явные grants. JWT не хранит авторитетные права; backend проверяет их через `app/services/permissions.py`. После изменения grants affected user получает `permissions.updated` через `/api/ws/me`. Подробности: `docs/PERMISSIONS_RU.md`.

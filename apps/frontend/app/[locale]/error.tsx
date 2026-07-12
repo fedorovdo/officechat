@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
+
+import { BrandLogo } from "../../components/Brand";
+import { getLocalizedBrand } from "../../lib/brand";
 
 type ErrorPageProps = {
   error: Error & { digest?: string };
@@ -9,6 +13,8 @@ type ErrorPageProps = {
 
 export default function LocaleErrorPage({ error, reset }: ErrorPageProps) {
   const isEnglish = typeof window !== "undefined" && window.location.pathname.startsWith("/en");
+  const locale = isEnglish ? "en" : "ru";
+  const localizedBrand = getLocalizedBrand(locale);
 
   useEffect(() => {
     console.error("OfficeChat frontend boundary caught an error", { digest: error.digest });
@@ -17,6 +23,7 @@ export default function LocaleErrorPage({ error, reset }: ErrorPageProps) {
   return (
     <main className="error-boundary-page">
       <section className="error-boundary-card" role="alert">
+        <BrandLogo tagline={localizedBrand.tagline} />
         <h1>{isEnglish ? "Something went wrong." : "Произошла ошибка."}</h1>
         <p>{isEnglish ? "Try refreshing the page." : "Попробуйте обновить страницу."}</p>
         {error.digest ? (
@@ -26,9 +33,9 @@ export default function LocaleErrorPage({ error, reset }: ErrorPageProps) {
           <button className="primary-button" onClick={reset} type="button">
             {isEnglish ? "Retry" : "Повторить"}
           </button>
-          <button className="secondary-button" onClick={() => window.location.reload()} type="button">
-            {isEnglish ? "Reload" : "Обновить"}
-          </button>
+          <Link className="secondary-link" href={`/${locale}/app`}>
+            {isEnglish ? "To app" : "В приложение"}
+          </Link>
         </div>
       </section>
     </main>

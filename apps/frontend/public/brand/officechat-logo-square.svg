@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">OfficeChat</title>
+  <rect width="128" height="128" rx="30" fill="#f7f8fb"/>
+  <rect x="20" y="18" width="88" height="88" rx="24" fill="#1f2d29"/>
+  <path d="M44 62.5C44 51.9 51.5 44.5 62 44.5c10 0 16.6 6.2 17.6 15.4h-9.9c-.9-3.8-3.6-6.2-7.7-6.2-4.9 0-8.2 3.6-8.2 8.8 0 5.3 3.3 8.9 8.3 8.9 3.9 0 6.6-2 7.7-5.3h10c-1.4 8.6-7.9 14.5-17.7 14.5C51.5 80.6 44 73.2 44 62.5Z" fill="#ffffff"/>
+  <path d="M36 96l12-4.4c3.8 2.4 8.4 3.7 13.9 3.7 15.4 0 26.1-9.9 26.1-24.3S77.3 46.7 61.9 46.7 35.8 56.6 35.8 71c0 5.2 1.5 9.9 4.2 13.9L36 96Z" fill="none" stroke="#7ee0b2" stroke-width="6" stroke-linejoin="round"/>
+</svg>

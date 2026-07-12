@@ -153,6 +153,60 @@ a {
   font-weight: 800;
 }
 
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--foreground);
+}
+
+.brand-logo-dark {
+  color: var(--sidebar-text, #ffffff);
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-mark-compact {
+  width: 36px;
+  height: 36px;
+}
+
+.brand-wordmark {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.brand-wordmark strong,
+.brand-wordmark small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-wordmark small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.brand-logo-dark .brand-wordmark small {
+  color: var(--sidebar-muted, #c8d2ce);
+}
+
 .status-panel {
   padding: 24px;
   display: flex;
@@ -214,6 +268,12 @@ a {
   box-shadow: var(--shadow);
 }
 
+.auth-brand {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 .auth-title {
   margin: 18px 0 8px;
   font-size: 28px;
@@ -223,6 +283,22 @@ a {
   margin: 0 0 24px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.auth-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auth-footer a {
+  color: var(--accent);
+  font-weight: 800;
+  text-decoration: none;
 }
 
 .auth-language-field {
@@ -304,7 +380,7 @@ a {
 }
 
 .dashboard-title {
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 28px;
 }
 
@@ -340,6 +416,159 @@ a {
 .admin-page {
   min-height: 100vh;
   padding: 32px 18px;
+}
+
+.about-page {
+  min-height: 100vh;
+  padding: 32px 18px;
+}
+
+.about-shell {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+
+.about-hero,
+.about-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.about-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  padding: 28px;
+}
+
+.about-hero .brand-logo {
+  grid-column: 1 / -1;
+}
+
+.about-description {
+  max-width: 760px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.about-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.about-card {
+  padding: 22px;
+}
+
+.about-card h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+}
+
+.about-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.about-facts {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.about-facts div {
+  display: grid;
+  gap: 4px;
+}
+
+.about-facts dt {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.about-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.about-feature-list {
+  margin: 0;
+  padding-left: 20px;
+  columns: 2;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.about-service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.about-service-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.about-service-card span {
+  font-weight: 800;
+}
+
+.about-service-ok span {
+  color: var(--success);
+}
+
+.about-service-unavailable span {
+  color: #b42318;
+}
+
+.about-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.about-links a,
+.about-facts a {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.about-technical {
+  display: grid;
+  gap: 16px;
+}
+
+.about-technical .secondary-link {
+  justify-self: start;
+}
+
+.about-footer {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 .admin-shell {
@@ -2376,6 +2605,18 @@ a {
   box-shadow: var(--shadow);
 }
 
+.settings-menu-group {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-menu-logout .secondary-link {
+  color: #b42318;
+}
+
 .profile-panel {
   width: min(100%, 520px);
 }
@@ -3488,6 +3729,10 @@ a {
   display: none;
 }
 
+.user-app-sidebar-collapsed .brand-logo {
+  justify-content: center;
+}
+
 .user-app-sidebar-collapsed .messenger-sidebar-header,
 .user-app-sidebar-collapsed .messenger-sidebar-account {
   padding: 10px;
@@ -4431,6 +4676,20 @@ select:focus-visible,
 }
 
 @media (max-width: 760px) {
+  .about-hero,
+  .about-grid,
+  .about-service-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-actions {
+    justify-content: flex-start;
+  }
+
+  .about-feature-list {
+    columns: 1;
+  }
+
   .user-app-layout,
   .user-app-shell-sidebar-right .user-app-layout {
     grid-template-columns: minmax(0, 1fr);

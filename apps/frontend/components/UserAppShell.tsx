@@ -13,6 +13,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { BrandLogo } from "./Brand";
+import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 import {
   createDirectConversation,
   createDiscussion,
@@ -282,6 +284,7 @@ function truncateNotificationPreview(preview: string) {
 
 export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const router = useRouter();
+  const localizedBrand = getLocalizedBrand(locale);
   const notifiedMessageIdsRef = useRef<string[]>([]);
   const messageSearchTriggerRef = useRef<HTMLButtonElement | null>(null);
   const deepLinkHandledRef = useRef(false);
@@ -1913,11 +1916,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         <aside className="user-app-sidebar" aria-label={dictionary.appShell.sidebarAriaLabel}>
           <div className="messenger-sidebar-header">
             <div className="messenger-brand">
-              <span className="messenger-brand-mark" aria-hidden="true">OC</span>
-              <span className="messenger-brand-copy">
-                <strong>{dictionary.app.name}</strong>
-                <small>{dictionary.appShell.title}</small>
-              </span>
+              <BrandLogo compact={isSidebarCollapsed} tagline={localizedBrand.tagline} variant="dark" />
             </div>
             <button
               aria-label={isSidebarCollapsed ? dictionary.appShell.expandSidebar : dictionary.appShell.collapseSidebar}
@@ -2679,7 +2678,20 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   ) : null}
                 </div>
               </div>
+              <div className="settings-menu-group">
+                <Link className="secondary-link" href={`/${locale}/about`}>
+                  {dictionary.appShell.about}
+                </Link>
+              </div>
+              <div className="settings-menu-group settings-menu-logout">
+                <button className="secondary-link" onClick={() => void logout()} type="button">
+                  {dictionary.dashboard.logout}
+                </button>
+              </div>
               <p className="note">{dictionary.appShell.settingsNote}</p>
+              <p className="note">
+                {officeChatBrand.productName} · {officeChatBrand.version || "development"}
+              </p>
             </div>
           </section>
           {isNotificationGuideOpen ? (

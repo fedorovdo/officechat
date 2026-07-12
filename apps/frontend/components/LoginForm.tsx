@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { BrandLogo } from "./Brand";
+import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { getSafeLoginNext, storeAccessToken } from "../lib/session";
 
@@ -14,6 +16,7 @@ type LoginFormProps = {
 
 export function LoginForm({ dictionary, locale }: LoginFormProps) {
   const router = useRouter();
+  const localizedBrand = getLocalizedBrand(locale);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -69,8 +72,15 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
         <Link className="locale-link" href={`/${locale}`}>
           {dictionary.login.back}
         </Link>
+        <div className="auth-brand">
+          <BrandLogo tagline={localizedBrand.tagline} />
+          {officeChatBrand.organizationName ? (
+            <p className="note">{officeChatBrand.organizationName}</p>
+          ) : null}
+        </div>
         <h1 className="auth-title">{dictionary.login.title}</h1>
-        <p className="auth-description">{dictionary.login.description}</p>
+        <p className="auth-description">{localizedBrand.description}</p>
+        <p className="note">{dictionary.login.description}</p>
         {notice ? <p className="form-success">{notice}</p> : null}
 
         <label className="field auth-language-field">
@@ -116,6 +126,12 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
             {isSubmitting ? dictionary.login.submitting : dictionary.login.submit}
           </button>
         </form>
+        <footer className="auth-footer">
+          <span>
+            {officeChatBrand.productName} · {officeChatBrand.version || "development"}
+          </span>
+          <Link href={`/${locale}/about`}>{dictionary.dashboard.about}</Link>
+        </footer>
       </section>
     </main>
   );

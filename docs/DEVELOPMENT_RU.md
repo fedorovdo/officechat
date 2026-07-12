@@ -1,5 +1,9 @@
 # Разработка OfficeChat
 
+## Branding и About
+
+Страница About доступна по `/ru/about` и `/en/about`. Публичная конфигурация бренда находится в `apps/frontend/lib/brand.ts`, SVG-логотипы - в `apps/frontend/public/brand/`, favicon/manifest - в `apps/frontend/public/`. Подробности: `docs/BRANDING_RU.md`.
+
 ## Гранулярные права
 
 `superadmin` видит в `/ru/admin/users` раздел специальных прав. Можно назначать `can_broadcast` и `can_pin_messages` доверенным пользователям; обычный `admin` эти controls не видит. Проверка API: `GET /api/admin/permissions`, `GET /api/admin/users/{user_id}/permissions`, `PUT /api/admin/users/{user_id}/permissions`. Изменения должны появляться в Audit Log как `permission.granted` или `permission.revoked`, а affected user получает `permissions.updated` через `/api/ws/me`.

@@ -24,6 +24,14 @@ Health endpoints:
 - Backend readiness: `GET /ready`
 - Frontend liveness: `GET /api/health`
 
+Branding and About:
+
+- About pages: `http://localhost:3100/ru/about`, `http://localhost:3100/en/about`
+- Brand config: `apps/frontend/lib/brand.ts`
+- Replaceable assets: `apps/frontend/public/brand/`
+- Favicon and manifest are served from `apps/frontend/public/`.
+- See [docs/BRANDING_RU.md](docs/BRANDING_RU.md).
+
 ## Session hardening
 
 Protected frontend routes centrally handle expired or invalid JWTs: only `officechat.access_token` is removed, UI preferences remain intact, active WebSockets stop, and the browser returns to the localized login page. HTTP 401 ends the local session; HTTP 403 reports denied access without logging the user out.

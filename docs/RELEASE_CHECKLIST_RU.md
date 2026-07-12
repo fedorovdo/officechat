@@ -19,6 +19,9 @@
 - `docker compose -f docker-compose.prod.yml config`;
 - `/health` returns 200;
 - `/ready` returns 200;
+- `/favicon.ico` returns 200;
+- `/ru/about` and `/en/about` show safe frontend/backend versions;
+- About page and `/health` do not expose secrets, filesystem paths, database hosts or credentials;
 - CORS checked from allowed and blocked origins;
 - reverse proxy configuration reviewed;
 - browser smoke check completed;

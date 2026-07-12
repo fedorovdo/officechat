@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     app_name: str = "OfficeChat"
     app_version: str = Field(default="0.1.0-rc1", validation_alias=AliasChoices("APP_VERSION", "OFFICECHAT_VERSION"))
+    app_build_sha: str | None = Field(default=None, validation_alias="OFFICECHAT_BUILD_SHA")
+    app_build_date: str | None = Field(default=None, validation_alias="OFFICECHAT_BUILD_DATE")
     environment: str = "development"
     public_frontend_url: str | None = Field(default=None, validation_alias=AliasChoices("PUBLIC_FRONTEND_URL", "FRONTEND_URL"))
     public_backend_url: str | None = Field(default=None, validation_alias=AliasChoices("PUBLIC_BACKEND_URL", "BACKEND_PUBLIC_URL"))
@@ -217,6 +219,27 @@ class Settings(BaseSettings):
     @property
     def valkey_url(self) -> str:
         return f"redis://{self.valkey_host}:{self.valkey_port}/{self.valkey_db}"
+
+    @property
+    def short_build_sha(self) -> str | None:
+        if not self.app_build_sha:
+            return None
+        return self.app_build_sha.strip()[:12]
+
+    @property
+    def safe_service_metadata(self) -> dict[str, str]:
+        metadata = {
+            "service": "officechat-backend",
+            "product": self.app_name,
+            "version": self.app_version,
+        }
+        if self.environment:
+            metadata["environment"] = self.environment
+        if self.short_build_sha:
+            metadata["build_sha"] = self.short_build_sha
+        if self.app_build_date:
+            metadata["build_date"] = self.app_build_date
+        return metadata
 
 
 @lru_cache

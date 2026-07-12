@@ -4,6 +4,25 @@
 
 OfficeChat v0.1 RC adds production-oriented Docker targets, `/ready` readiness checks, stricter production configuration validation, security headers, backup/restore scripts, Playwright E2E smoke infrastructure, and release documentation.
 
+## Release Packaging 0.1.0-rc2
+
+OfficeChat 0.1.0-rc2 adds release packaging for Linux `amd64` self-hosted installs:
+
+- release Compose: `deploy/docker-compose.release.yml`
+- installer scripts: `scripts/release/`
+- install guide: [docs/INSTALL_RU.md](docs/INSTALL_RU.md)
+- release notes: [docs/releases/0.1.0-rc2_RU.md](docs/releases/0.1.0-rc2_RU.md)
+- metadata: `deploy/release-metadata.json`
+
+Images are intended to be published as `ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2` and `ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2`, with immutable `sha-<short_git_sha>` tags and optional moving `rc`. Production should not depend on `latest`.
+
+This task does not publish images, create a git tag, or create a GitHub Release. After verification, tag manually:
+
+```bash
+git tag -a v0.1.0-rc2 -m "OfficeChat 0.1.0-rc2"
+git push origin v0.1.0-rc2
+```
+
 Key docs:
 
 - [docs/PRODUCTION_RU.md](docs/PRODUCTION_RU.md)
@@ -258,6 +277,16 @@ docker compose ps
 docker compose logs -f backend
 docker compose logs -f frontend
 docker compose down
+```
+
+## Release Bundle Commands
+
+```bash
+bash scripts/release/create-release-bundle.sh
+sudo ./release/install-linux.sh
+sudo /opt/officechat/update-linux.sh 0.1.0-rc2
+sudo /opt/officechat/rollback-linux.sh 0.1.0-rc1
+/opt/officechat/officechatctl health
 ```
 
 ## Frontend Tests

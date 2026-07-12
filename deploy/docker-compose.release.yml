@@ -1,0 +1,167 @@
+name: officechat
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: ${LOG_MAX_FILE:-5}
+
+x-backend-env: &backend-env
+  APP_NAME: ${APP_NAME:-OfficeChat}
+  APP_VERSION: ${OFFICECHAT_VERSION:-0.1.0-rc2}
+  OFFICECHAT_BUILD_SHA: ${OFFICECHAT_BUILD_SHA:-}
+  OFFICECHAT_BUILD_DATE: ${OFFICECHAT_BUILD_DATE:-}
+  ENVIRONMENT: production
+  DATABASE_URL: ${DATABASE_URL:-postgresql://officechat:replace-with-postgres-password@postgres:5432/officechat}
+  APP_SECRET_KEY: ${APP_SECRET_KEY:-replace-with-a-long-random-secret-at-least-32-characters}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+  PUBLIC_FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-https://chat.example.com}
+  PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://chat.example.com}
+  AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
+  AUDIT_MAX_EXPORT_ROWS: ${AUDIT_MAX_EXPORT_ROWS:-10000}
+  MESSAGE_MAX_LENGTH: ${MESSAGE_MAX_LENGTH:-4000}
+  PINNED_MESSAGES_MAX_PER_CHAT: ${PINNED_MESSAGES_MAX_PER_CHAT:-20}
+  BROADCAST_TITLE_MAX_LENGTH: ${BROADCAST_TITLE_MAX_LENGTH:-160}
+  BROADCAST_BODY_MAX_LENGTH: ${BROADCAST_BODY_MAX_LENGTH:-10000}
+  BROADCAST_MAX_RECIPIENTS: ${BROADCAST_MAX_RECIPIENTS:-10000}
+  BROADCAST_MAX_PER_HOUR: ${BROADCAST_MAX_PER_HOUR:-10}
+  BROADCAST_PREVIEW_TTL_SECONDS: ${BROADCAST_PREVIEW_TTL_SECONDS:-300}
+  BROADCAST_RETENTION_DAYS: ${BROADCAST_RETENTION_DAYS:-365}
+  NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
+  NOTIFICATION_MAX_PER_USER: ${NOTIFICATION_MAX_PER_USER:-5000}
+  CALENDAR_TITLE_MAX_LENGTH: ${CALENDAR_TITLE_MAX_LENGTH:-200}
+  CALENDAR_DESCRIPTION_MAX_LENGTH: ${CALENDAR_DESCRIPTION_MAX_LENGTH:-10000}
+  CALENDAR_LOCATION_MAX_LENGTH: ${CALENDAR_LOCATION_MAX_LENGTH:-500}
+  CALENDAR_MAX_RECIPIENTS: ${CALENDAR_MAX_RECIPIENTS:-10000}
+  CALENDAR_DEFAULT_TIMEZONE: ${CALENDAR_DEFAULT_TIMEZONE:-Europe/Moscow}
+  CALENDAR_MAX_REMINDERS: ${CALENDAR_MAX_REMINDERS:-5}
+  CALENDAR_MAX_DURATION_DAYS: ${CALENDAR_MAX_DURATION_DAYS:-30}
+  CALENDAR_REMINDER_POLL_SECONDS: ${CALENDAR_REMINDER_POLL_SECONDS:-30}
+  CALENDAR_REMINDER_BATCH_SIZE: ${CALENDAR_REMINDER_BATCH_SIZE:-100}
+  ATTACHMENT_MAX_UPLOAD_SIZE_MB: ${ATTACHMENT_MAX_UPLOAD_SIZE_MB:-25}
+  ATTACHMENT_MAX_FILES_PER_MESSAGE: ${ATTACHMENT_MAX_FILES_PER_MESSAGE:-10}
+  ATTACHMENT_MAX_TOTAL_SIZE_MB: ${ATTACHMENT_MAX_TOTAL_SIZE_MB:-50}
+  ALLOWED_UPLOAD_EXTENSIONS: ${ALLOWED_UPLOAD_EXTENSIONS:-txt,log,csv,md,json,xml,yaml,yml,ini,conf,pdf,doc,docx,xls,xlsx,png,jpg,jpeg,webp,zip}
+  AVATAR_MAX_UPLOAD_SIZE_MB: ${AVATAR_MAX_UPLOAD_SIZE_MB:-5}
+  ALLOWED_AVATAR_EXTENSIONS: ${ALLOWED_AVATAR_EXTENSIONS:-png,jpg,jpeg,webp}
+  VALKEY_HOST: valkey
+  VALKEY_PORT: 6379
+  VALKEY_DB: ${VALKEY_DB:-0}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+  DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
+  PRESENCE_CONNECTION_TTL_SECONDS: ${PRESENCE_CONNECTION_TTL_SECONDS:-90}
+  PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
+  PRESENCE_OFFLINE_GRACE_SECONDS: ${PRESENCE_OFFLINE_GRACE_SECONDS:-15}
+  TYPING_TTL_SECONDS: ${TYPING_TTL_SECONDS:-5}
+  UPLOADS_DIR: /data/uploads
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-officechat}
+      POSTGRES_USER: ${POSTGRES_USER:-officechat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-postgres-password}
+    volumes:
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/postgres:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/valkey:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  backend:
+    image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:-0.1.0-rc2}
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads
+    ports:
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_HOST_PORT:-8100}:8000"
+    networks:
+      - internal
+      - public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5).read()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+
+  calendar-worker:
+    image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:-0.1.0-rc2}
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.calendar_reminders"]
+    environment: *backend-env
+    volumes:
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads
+    networks:
+      - internal
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *default-logging
+
+  frontend:
+    image: ghcr.io/fedorovdo/officechat-frontend:${OFFICECHAT_VERSION:-0.1.0-rc2}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
+      NEXT_PUBLIC_FRONTEND_URL: ${NEXT_PUBLIC_FRONTEND_URL:-https://chat.example.com}
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-https://chat.example.com}
+      NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
+      NEXT_PUBLIC_OFFICECHAT_VERSION: ${OFFICECHAT_VERSION:-0.1.0-rc2}
+      NEXT_PUBLIC_OFFICECHAT_BUILD_SHA: ${OFFICECHAT_BUILD_SHA:-}
+      NEXT_PUBLIC_OFFICECHAT_BUILD_DATE: ${OFFICECHAT_BUILD_DATE:-}
+      NEXT_PUBLIC_OFFICECHAT_PRODUCT_NAME: ${NEXT_PUBLIC_OFFICECHAT_PRODUCT_NAME:-OfficeChat}
+      NEXT_PUBLIC_OFFICECHAT_AUTHOR_NAME: ${NEXT_PUBLIC_OFFICECHAT_AUTHOR_NAME:-Dmitrii Fedorov}
+      NEXT_PUBLIC_OFFICECHAT_AUTHOR_URL: ${NEXT_PUBLIC_OFFICECHAT_AUTHOR_URL:-https://simplyadmin.org}
+      NEXT_PUBLIC_OFFICECHAT_REPOSITORY_URL: ${NEXT_PUBLIC_OFFICECHAT_REPOSITORY_URL:-https://github.com/fedorovdo/officechat}
+      NEXT_PUBLIC_OFFICECHAT_SUPPORT_EMAIL: ${NEXT_PUBLIC_OFFICECHAT_SUPPORT_EMAIL:-}
+      NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME: ${NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME:-}
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HOST_PORT:-3100}:3000"
+    networks:
+      - public
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+
+networks:
+  internal:
+    internal: true
+  public:

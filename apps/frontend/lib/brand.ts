@@ -20,7 +20,7 @@ function optionalSafeHttpUrl(value: string | undefined) {
   }
 }
 
-export const officeChatVersion = process.env.NEXT_PUBLIC_OFFICECHAT_VERSION ?? "0.1.0-rc1";
+export const officeChatVersion = process.env.NEXT_PUBLIC_OFFICECHAT_VERSION ?? "0.1.0-rc2";
 export const officeChatBuildSha = process.env.NEXT_PUBLIC_OFFICECHAT_BUILD_SHA ?? "";
 export const officeChatBuildDate = process.env.NEXT_PUBLIC_OFFICECHAT_BUILD_DATE ?? "";
 
@@ -61,4 +61,3 @@ export function getLocalizedBrand(locale: Locale) {
         : `${officeChatBrand.productName} — corporate messenger`
   };
 }
-

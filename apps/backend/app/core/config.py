@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "OfficeChat"
-    app_version: str = Field(default="0.1.0-rc1", validation_alias=AliasChoices("APP_VERSION", "OFFICECHAT_VERSION"))
+    app_version: str = Field(default="0.1.0-rc2", validation_alias=AliasChoices("APP_VERSION", "OFFICECHAT_VERSION"))
     app_build_sha: str | None = Field(default=None, validation_alias="OFFICECHAT_BUILD_SHA")
     app_build_date: str | None = Field(default=None, validation_alias="OFFICECHAT_BUILD_DATE")
     environment: str = "development"

@@ -132,3 +132,11 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 ## Calendar Roadmap
 
 Calendar Events v0.1 добавляет корпоративный календарь, аудиторию по снимкам получателей, напоминания через Notification Center и право `can_manage_calendar`. В следующих версиях запланированы повторяющиеся события, RSVP, ICS-подписки, Google Calendar, Outlook/Microsoft 365 и CalDAV.
+
+## Release Packaging v0.1
+
+- Подготовлен Linux `amd64` release bundle для `0.1.0-rc2`.
+- GHCR image strategy: immutable `0.1.0-rc2`, `sha-<short_git_sha>`, optional moving `rc`, no `latest` dependency.
+- Добавлены install/update/rollback/uninstall/verify scripts и `officechatctl`.
+- Добавлены reverse proxy examples для nginx и Caddy.
+- Будущие этапы: подписанные артефакты, обязательный SBOM, offline registry mirror, multi-arch images, systemd unit wrapper.

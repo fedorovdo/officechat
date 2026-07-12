@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+usage() {
+  cat <<'EOF_HELP'
+Usage: officechatctl COMMAND [ARGS]
+
+Commands:
+  status                 Show Compose service status
+  health                 Run installation health checks
+  logs [service]         Show recent logs for a known service
+  restart               Restart all services
+  stop                  Stop all services
+  start                 Start all services
+  backup                Create PostgreSQL and uploads backup
+  update VERSION        Update images to VERSION
+  rollback VERSION      Roll back images to VERSION
+  version               Show installed version
+  integrity-check       Run compose config and alembic current
+EOF_HELP
+}
+
+command_name="${1:-}"
+shift || true
+case "$command_name" in
+  --help|-h|"") usage ;;
+  status) compose ps ;;
+  health) "${SCRIPT_DIR}/verify-install.sh" ;;
+  logs)
+    service="${1:-backend}"
+    case "$service" in backend|frontend|calendar-worker|postgres|valkey) compose logs --tail=200 "$service" ;; *) fail "Unsupported service: $service" ;; esac
+    ;;
+  restart) compose restart ;;
+  stop) compose stop ;;
+  start) compose up -d ;;
+  backup) backup_now ;;
+  update) "${SCRIPT_DIR}/update-linux.sh" "$@" ;;
+  rollback) "${SCRIPT_DIR}/rollback-linux.sh" "$@" ;;
+  version) read_installed_version ;;
+  integrity-check)
+    compose config >/dev/null
+    compose exec -T backend alembic current
+    ;;
+  *) fail "Unknown command: $command_name" ;;
+esac

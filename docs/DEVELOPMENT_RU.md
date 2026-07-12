@@ -344,3 +344,27 @@ docker compose up -d --build backend frontend calendar-worker
 docker compose exec backend alembic current
 docker compose logs calendar-worker --tail=80
 ```
+
+## Release Packaging v0.1
+
+Release Packaging v0.1 добавляет Linux bundle для `0.1.0-rc2`:
+
+- `deploy/docker-compose.release.yml`
+- `scripts/release/create-release-bundle.sh`
+- `scripts/release/install-linux.sh`
+- `scripts/release/update-linux.sh`
+- `scripts/release/rollback-linux.sh`
+- `scripts/release/uninstall-linux.sh`
+- `scripts/release/verify-install.sh`
+- `scripts/release/officechatctl`
+
+Проверка release tooling без публикации:
+
+```powershell
+docker compose -f deploy/docker-compose.release.yml config
+bash -n scripts/release/*.sh
+bash -n scripts/release/officechatctl
+bash scripts/release/create-release-bundle.sh --dry-run
+```
+
+Workflow `.github/workflows/release-images.yml` публикует GHCR images только при tag `v*` или ручном `workflow_dispatch`; локальная разработка ничего не публикует.

@@ -60,3 +60,19 @@ Manual smoke:
 - Проверить `can_manage_calendar` в управлении пользователями.
 - Проверить создание, перенос, отмену события и доставку напоминания.
 - Проверить, что Audit Log не содержит описание, место, ссылку конференции и список получателей.
+
+## Release Packaging 0.1.0-rc2
+
+- `deploy/release-metadata.json` version is `0.1.0-rc2`.
+- Backend `/health`, frontend `/api/health` and About show `0.1.0-rc2`.
+- `docker compose -f deploy/docker-compose.release.yml config`.
+- `bash -n scripts/release/*.sh` and `bash -n scripts/release/officechatctl`.
+- `bash scripts/release/create-release-bundle.sh --dry-run`.
+- Release archive name is `officechat-0.1.0-rc2-linux-amd64.tar.gz`.
+- Release bundle excludes `.env`, DB data, uploads, `.git`, node_modules, venv and test results.
+- Manual git tag is prepared but not created automatically:
+
+```bash
+git tag -a v0.1.0-rc2 -m "OfficeChat 0.1.0-rc2"
+git push origin v0.1.0-rc2
+```

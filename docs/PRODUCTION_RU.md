@@ -55,3 +55,31 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Для multi-instance fanout живых WebSocket-событий из worker позже нужен Valkey pub/sub или другой брокер.
+
+## Release packaging 0.1.0-rc2
+
+Рекомендуемый путь для серверной установки RC2 - release bundle:
+
+- `deploy/docker-compose.release.yml` использует GHCR images `ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION}` и `ghcr.io/fedorovdo/officechat-frontend:${OFFICECHAT_VERSION}`.
+- PostgreSQL и Valkey не публикуют порты наружу.
+- Данные хранятся в `/var/lib/officechat`, конфигурация - в `/opt/officechat`, backup - в `/var/backups/officechat`.
+- `calendar-worker` использует тот же backend image.
+- `scripts/release/install-linux.sh`, `update-linux.sh`, `rollback-linux.sh`, `uninstall-linux.sh`, `verify-install.sh` и `officechatctl` выполняют повторяемые операции без печати секретов.
+
+Подробно: `docs/INSTALL_RU.md`.
+
+Release image tags:
+
+```text
+ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2
+ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2
+ghcr.io/fedorovdo/officechat-backend:sha-<short_git_sha>
+ghcr.io/fedorovdo/officechat-frontend:sha-<short_git_sha>
+```
+
+`latest` не используется как production-зависимость.
+
+Примеры reverse proxy:
+
+- `deploy/nginx/officechat.conf`
+- `deploy/caddy/Caddyfile`

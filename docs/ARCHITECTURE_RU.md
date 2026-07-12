@@ -82,3 +82,7 @@ Production uses separate Docker runtime targets and `docker-compose.prod.yml`. B
 ## Calendar Events v0.1
 
 Календарь использует PostgreSQL как источник истины: `calendar_events`, `calendar_event_recipients` и `calendar_reminder_deliveries`. Получатели хранятся снимком, чтобы изменения состава групп не переписывали старую аудиторию без явного обновления события. Напоминания доставляет отдельный `calendar-worker`; Notification Center и `/api/ws/me` остаются пользовательским каналом уведомлений.
+
+## Release packaging architecture
+
+`deploy/docker-compose.release.yml` is the image-based deployment descriptor for `0.1.0-rc2`. It runs PostgreSQL, Valkey, backend, frontend and `calendar-worker`, stores persistent data under `/var/lib/officechat`, and keeps PostgreSQL/Valkey on an internal network. The backend image is reused for one-off migrations and the calendar worker. Release scripts in `scripts/release/` wrap Compose operations, backups, version records and safe rollback without embedding secrets in the compose file.

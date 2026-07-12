@@ -127,3 +127,8 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Playwright E2E smoke infrastructure alongside Vitest.
 - Release checklist, security headers, structured request IDs and quieter presence queries.
 - Future work: trusted proxy mode, full destructive E2E data seeding, service worker push, Valkey pub/sub for multi-instance WebSockets.
+
+## Notifications Center
+
+- Реализован базовый центр уведомлений: persistent rows, per-user preferences, bell drawer, read/dismiss, personal WebSocket sync.
+- Запланировано: Calendar Events reminders, quiet hours, maintenance cleanup job, Service Worker / Push, расширенная агрегация повторяющихся событий.

@@ -571,6 +571,25 @@ export type PersonalNotificationEvent =
       status: "online" | "offline";
       last_seen_at: string | null;
     }
+  | {
+      type: "notification.created";
+      notification: OfficeChatNotification;
+      unread_count: number;
+    }
+  | {
+      type: "notification.read" | "notification.dismissed";
+      notification_id: string;
+      unread_count: number;
+    }
+  | {
+      type: "notifications.read_all";
+      category: string | null;
+      unread_count: number;
+    }
+  | {
+      type: "notification.preferences_updated";
+      preferences: NotificationPreferences;
+    }
   | UnreadEvent
   | { type: "unread.refresh" };
 
@@ -663,6 +682,86 @@ export type OfficeChatAnnouncementEvent = {
   sender_display_name: string;
   is_read: boolean;
 };
+
+export type NotificationCategory = "messages" | "announcements" | "pins" | "system";
+export type NotificationKind =
+  | "mention"
+  | "reply"
+  | "reaction"
+  | "direct_message"
+  | "group_message"
+  | "discussion_message"
+  | "announcement"
+  | "pin"
+  | "system";
+
+export type OfficeChatNotification = {
+  id: string;
+  type: NotificationKind | string;
+  category: NotificationCategory | string;
+  source_type: string | null;
+  source_id: string | null;
+  chat_type: ChatType | string | null;
+  chat_id: string | null;
+  message_id: string | null;
+  actor: {
+    id: string | null;
+    username: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+  };
+  title_key: string;
+  body_preview: string | null;
+  metadata: Record<string, unknown> | null;
+  is_read: boolean;
+  read_at: string | null;
+  is_dismissed: boolean;
+  dismissed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationPage = {
+  items: OfficeChatNotification[];
+  next_cursor: string | null;
+};
+
+export type NotificationPreferences = {
+  mentions_enabled: boolean;
+  replies_enabled: boolean;
+  reactions_enabled: boolean;
+  direct_messages_enabled: boolean;
+  group_messages_enabled: boolean;
+  discussion_messages_enabled: boolean;
+  announcements_enabled: boolean;
+  pins_enabled: boolean;
+  system_enabled: boolean;
+  desktop_notifications_enabled: boolean;
+  sound_enabled: boolean;
+  quiet_hours_enabled: boolean;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  timezone: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationPreferencesUpdate = Partial<
+  Pick<
+    NotificationPreferences,
+    | "mentions_enabled"
+    | "replies_enabled"
+    | "reactions_enabled"
+    | "direct_messages_enabled"
+    | "group_messages_enabled"
+    | "discussion_messages_enabled"
+    | "announcements_enabled"
+    | "pins_enabled"
+    | "system_enabled"
+    | "desktop_notifications_enabled"
+    | "sound_enabled"
+  >
+>;
 
 export type AnnouncementPage = {
   items: OfficeChatAnnouncement[];
@@ -1088,6 +1187,56 @@ export function dismissAnnouncement(token: string, announcementId: string) {
 
 export function getAnnouncementUnread(token: string) {
   return apiFetch<{ unread_count: number }>("/api/announcements/unread", token);
+}
+
+export function getNotifications(
+  token: string,
+  params: {
+    limit?: number;
+    cursor?: string | null;
+    category?: string | null;
+    type?: string | null;
+    unreadOnly?: boolean;
+    includeDismissed?: boolean;
+  } = {}
+) {
+  const query = new URLSearchParams({ limit: String(params.limit ?? 30) });
+  if (params.cursor) query.set("cursor", params.cursor);
+  if (params.category) query.set("category", params.category);
+  if (params.type) query.set("type", params.type);
+  if (params.unreadOnly) query.set("unread_only", "true");
+  if (params.includeDismissed) query.set("include_dismissed", "true");
+  return apiFetch<NotificationPage>(`/api/notifications?${query}`, token);
+}
+
+export function getNotificationUnreadCount(token: string) {
+  return apiFetch<{ unread_count: number }>("/api/notifications/unread-count", token);
+}
+
+export function markNotificationRead(token: string, notificationId: string) {
+  return apiFetch<OfficeChatNotification>(`/api/notifications/${notificationId}/read`, token, { method: "POST" });
+}
+
+export function markAllNotificationsRead(token: string, category?: string | null) {
+  return apiFetch<{ marked_read: number; unread_count: number }>("/api/notifications/read-all", token, {
+    method: "POST",
+    body: JSON.stringify({ category: category ?? null })
+  });
+}
+
+export function dismissNotification(token: string, notificationId: string) {
+  return apiFetch<OfficeChatNotification>(`/api/notifications/${notificationId}/dismiss`, token, { method: "POST" });
+}
+
+export function getNotificationPreferences(token: string) {
+  return apiFetch<NotificationPreferences>("/api/notifications/preferences", token);
+}
+
+export function updateNotificationPreferences(token: string, payload: NotificationPreferencesUpdate) {
+  return apiFetch<NotificationPreferences>("/api/notifications/preferences", token, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function createBroadcast(token: string, payload: BroadcastCreatePayload) {

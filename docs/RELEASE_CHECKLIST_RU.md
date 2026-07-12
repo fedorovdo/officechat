@@ -42,10 +42,11 @@ Manual smoke:
 12. grant `can_broadcast`;
 13. send and retract selected-user broadcast;
 14. verify recipient unread badge;
-15. verify audit events;
-16. restart backend;
-17. confirm sessions remain valid with unchanged secret;
-18. create backup;
-19. restore into isolated environment;
-20. confirm restored data and attachments;
-21. confirm no backend traceback.
+15. verify notification bell unread count, read, read-all and dismiss;
+16. verify audit events;
+17. restart backend;
+18. confirm sessions remain valid with unchanged secret;
+19. create backup;
+20. restore into isolated environment;
+21. confirm restored data and attachments;
+22. confirm no backend traceback.

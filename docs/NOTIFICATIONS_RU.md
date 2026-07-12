@@ -76,3 +76,17 @@ WS /api/ws/me?token=...
 ## План
 
 Позже планируется добавить Service Worker / Push для фоновых уведомлений, серверные unread counters, read receipts и multi-instance доставку событий через Valkey pub/sub.
+
+## Центр уведомлений v0.1
+
+В `/ru/app` добавлен отдельный центр уведомлений с кнопкой-колокольчиком. Его unread count не объединяется со счётчиками чатов и не заменяет счётчик объявлений.
+
+Категории: `mention`, `reply`, `reaction`, `direct_message`, `group_message`, `discussion_message`, `announcement`, `pin`, `system`. Обычные сообщения групп и уведомления о закреплениях выключены по умолчанию, чтобы центр не становился шумным.
+
+Миграция `20260704_0022` создаёт таблицы `notifications` и `notification_preferences`. Основной API: `GET /api/notifications`, `GET /api/notifications/unread-count`, `POST /api/notifications/{notification_id}/read`, `POST /api/notifications/read-all`, `POST /api/notifications/{notification_id}/dismiss`, `GET /api/notifications/preferences`, `PUT /api/notifications/preferences`.
+
+Новые события существующего персонального канала `/api/ws/me`: `notification.created`, `notification.read`, `notifications.read_all`, `notification.dismissed`, `notification.preferences_updated`.
+
+Уведомления хранят только короткий безопасный preview и metadata без токенов, паролей, путей файловой системы, полного тела приватных сообщений и содержимого вложений. Дедупликация выполняется через `dedupe_key`.
+
+Настройки окружения: `NOTIFICATION_RETENTION_DAYS=90`, `NOTIFICATION_MAX_PER_USER=5000`.

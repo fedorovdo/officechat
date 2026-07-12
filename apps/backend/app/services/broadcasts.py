@@ -29,6 +29,7 @@ from app.schemas.broadcast import (
 )
 from app.services.audit import record_audit_event
 from app.services.websocket_manager import user_websocket_manager
+from app.services.notifications import safe_create_notification
 
 
 class BroadcastError(ValueError):
@@ -448,6 +449,22 @@ async def broadcast_created_events_from_payload(
     recipient_ids: list[UUID],
 ) -> None:
     for user_id in recipient_ids:
+        await safe_create_notification(
+            session,
+            recipient_user_id=user_id,
+            notification_type="announcement",
+            category="announcements",
+            actor_username=None,
+            actor_display_name=str(event_payload.get("sender_display_name") or ""),
+            source_type="announcement",
+            source_id=str(event_payload.get("id") or ""),
+            title_key="notification.announcement",
+            body_preview=str(event_payload.get("title") or ""),
+            metadata={
+                "announcement_id": str(event_payload.get("id") or ""),
+                "priority": str(event_payload.get("priority") or "normal"),
+            },
+        )
         await user_websocket_manager.broadcast_to_user(
             user_id,
             {

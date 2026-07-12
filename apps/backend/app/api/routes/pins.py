@@ -21,6 +21,10 @@ from app.services.pins import (
     serialize_pins,
     update_pin,
 )
+from app.services.direct import get_direct_conversation
+from app.services.discussions import list_active_discussion_member_user_ids
+from app.services.notifications import safe_create_notification
+from app.services.personal_notifications import list_active_group_member_user_ids
 from app.services.websocket_manager import (
     direct_websocket_manager,
     discussion_websocket_manager,
@@ -41,6 +45,17 @@ async def broadcast_pin_event(event_type: str, pin: PinnedMessage, payload: dict
         await direct_websocket_manager.broadcast_to_conversation(pin.chat_id, payload)
     else:
         await discussion_websocket_manager.broadcast_to_discussion(pin.chat_id, payload)
+
+
+async def pin_recipient_ids(session: AsyncSession, pin: PinnedMessage) -> list[UUID]:
+    if pin.chat_type == "group":
+        return await list_active_group_member_user_ids(session, pin.chat_id)
+    if pin.chat_type == "discussion":
+        return await list_active_discussion_member_user_ids(session, pin.chat_id)
+    conversation = await get_direct_conversation(session, pin.chat_id)
+    if conversation is None:
+        return []
+    return [user.id for user in (conversation.user_one, conversation.user_two) if user.is_active]
 
 
 def pin_event_payload(event_type: str, pin: PinnedMessage, public_pin: PinnedMessagePublic) -> dict[str, object]:
@@ -102,6 +117,22 @@ async def post_pin(
             pin = await get_pin(session, pin.id) or pin
             public_pin = await serialize_pin(session, pin)
             await broadcast_pin_event("message.pinned", pin, pin_event_payload("message.pinned", pin, public_pin))
+            for user_id in await pin_recipient_ids(session, pin):
+                await safe_create_notification(
+                    session,
+                    recipient_user_id=user_id,
+                    notification_type="pin",
+                    category="pins",
+                    actor=current_user,
+                    source_type="pin",
+                    source_id=pin.id,
+                    chat_type=pin.chat_type,
+                    chat_id=pin.chat_id,
+                    message_id=pin.message_id,
+                    title_key="notification.pin",
+                    body_preview=public_pin.message.body_preview,
+                    metadata={"source_label": f"{pin.chat_type}:{pin.chat_id}"},
+                )
             return public_pin
 
         public_pin = await serialize_pin(session, pin)

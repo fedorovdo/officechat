@@ -230,3 +230,7 @@ Broadcast announcement events use the same personal channel and are separate fro
 # RC WebSocket production notes
 
 WebSocket query tokens remain a v0.1 development-compatible mechanism and are redacted from logs. Production reverse proxy deployment must preserve WebSocket upgrade headers. Multi-instance delivery still requires a future Valkey pub/sub bridge; the current connection manager is process-local.
+
+# Notifications Center events
+
+Персональный канал `WS /api/ws/me?token=...` также синхронизирует центр уведомлений: `notification.created`, `notification.read`, `notifications.read_all`, `notification.dismissed`, `notification.preferences_updated`. Канал остаётся single-instance; для нескольких backend-инстансов потребуется Valkey pub/sub или другой broker.

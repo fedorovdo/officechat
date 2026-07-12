@@ -44,6 +44,7 @@ from app.services.broadcasts import (
     update_broadcast,
 )
 from app.services.websocket_manager import user_websocket_manager
+from app.services.notifications import mark_source_notification_read
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
@@ -275,6 +276,7 @@ async def get_announcement(
         announcement, count = await mark_announcement_read(session, current_user, announcement_id)
         await session.commit()
         await broadcast_read_event(current_user.id, announcement_id, count)
+        await mark_source_notification_read(session, current_user.id, "announcement", announcement_id)
         return announcement
     except Exception as exc:
         await session.rollback()
@@ -291,6 +293,7 @@ async def post_announcement_read(
         announcement, count = await mark_announcement_read(session, current_user, announcement_id)
         await session.commit()
         await broadcast_read_event(current_user.id, announcement_id, count)
+        await mark_source_notification_read(session, current_user.id, "announcement", announcement_id)
         return announcement
     except Exception as exc:
         await session.rollback()

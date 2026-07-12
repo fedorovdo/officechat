@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     broadcast_max_per_hour: int = Field(default=10, ge=1, le=1000)
     broadcast_preview_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     broadcast_retention_days: int = Field(default=365, ge=1, le=3650)
+    notification_retention_days: int = Field(default=90, ge=1, le=3650)
+    notification_max_per_user: int = Field(default=5000, ge=100, le=100000)
     attachment_max_upload_size_mb: int = Field(
         default=25,
         validation_alias=AliasChoices("ATTACHMENT_MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_SIZE_MB"),

@@ -579,6 +579,60 @@
       "retracted": "Отозвана"
     }
   },
+  "notifications": {
+    "title": "Уведомления",
+    "eyebrow": "Центр уведомлений",
+    "system": "Система",
+    "unreadLabel": "{count} непрочитанных уведомлений",
+    "filtersLabel": "Фильтры уведомлений",
+    "empty": "Уведомлений нет",
+    "loading": "Загрузка уведомлений...",
+    "loadError": "Не удалось загрузить уведомления.",
+    "loadMore": "Загрузить ещё",
+    "markRead": "Отметить прочитанным",
+    "markAllRead": "Отметить все прочитанными",
+    "dismiss": "Скрыть",
+    "open": "Открыть",
+    "actionError": "Не удалось обновить уведомление.",
+    "previewHidden": "Предпросмотр недоступен",
+    "desktopGeneric": "Новое уведомление OfficeChat",
+    "preferencesTitle": "Настройки уведомлений",
+    "preferencesDescription": "Выберите, какие личные события попадут в центр уведомлений. Счётчики непрочитанных чатов остаются отдельными.",
+    "preferencesPolicy": "Системные уведомления безопасности остаются включёнными. Уведомления браузера и звук по умолчанию выключены.",
+    "preferencesError": "Не удалось сохранить настройки уведомлений.",
+    "filters": {
+      "all": "Все",
+      "unread": "Непрочитанные",
+      "mentions": "Упоминания",
+      "replies": "Ответы",
+      "announcements": "Объявления",
+      "system": "Системные"
+    },
+    "titles": {
+      "mention": "Вас упомянули",
+      "reply": "Новый ответ",
+      "reaction": "Новая реакция",
+      "direct_message": "Новое личное сообщение",
+      "group_message": "Новое сообщение группы",
+      "discussion_message": "Новое сообщение обсуждения",
+      "announcement": "Новое объявление",
+      "pin": "Сообщение закреплено",
+      "system": "Системное уведомление"
+    },
+    "preferences": {
+      "mentions_enabled": "Упоминания",
+      "replies_enabled": "Ответы",
+      "reactions_enabled": "Реакции",
+      "direct_messages_enabled": "Личные сообщения",
+      "group_messages_enabled": "Сообщения групп",
+      "discussion_messages_enabled": "Обсуждения",
+      "announcements_enabled": "Объявления",
+      "pins_enabled": "Закрепления",
+      "system_enabled": "Системные уведомления",
+      "desktop_notifications_enabled": "Уведомления браузера",
+      "sound_enabled": "Звук"
+    }
+  },
   "adminUsers": {
     "ariaLabel": "Управление пользователями",
     "title": "Управление пользователями",

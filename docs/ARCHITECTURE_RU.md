@@ -71,3 +71,7 @@ Frontend unit/component test layer построен на Vitest, jsdom и React 
 # Release Candidate architecture notes
 
 Production uses separate Docker runtime targets and `docker-compose.prod.yml`. Backend migrations are explicit and must be run before starting production services. `/health` is liveness-only; `/ready` checks PostgreSQL, Alembic revision, Valkey and writable uploads storage. Runtime WebSocket delivery is still single-instance; multi-instance production still needs Valkey pub/sub.
+
+## Notification Center
+
+Центр уведомлений хранится отдельно от chat read state и announcement recipient state. `notifications` содержит персональные события с короткими безопасными preview, `notification_preferences` хранит настройки категорий, а `/api/ws/me` синхронизирует create/read/dismiss/preferences между вкладками. Ошибки создания notification не должны блокировать основное действие сообщения, реакции, закрепления или рассылки.

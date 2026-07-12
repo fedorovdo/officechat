@@ -26,14 +26,21 @@ import {
   getGroupMessages,
   getLocalizedApiError,
   getMessageContext,
+  getNotificationPreferences,
+  getNotifications,
+  getNotificationUnreadCount,
   getPersonalWebSocketUrl,
   getPresence,
   requireStoredAccessToken,
   getStoredAccessToken,
   getUsers,
+  dismissNotification,
   isAdminRole,
+  markAllNotificationsRead,
+  markNotificationRead,
   uploadMyAvatar,
   updateCurrentUser,
+  updateNotificationPreferences,
   type OfficeChatDirectoryUser,
   type OfficeChatDirectConversation,
   type OfficeChatDirectMessage,
@@ -43,8 +50,10 @@ import {
   type OfficeChatMessage,
   type OfficeChatMessageContext,
   type OfficeChatMessageSearchResult,
+  type OfficeChatNotification,
   type OfficeChatPresence,
   type OfficeChatUser,
+  type NotificationPreferences,
   type PersonalNotificationEvent
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
@@ -60,6 +69,11 @@ import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { AnnouncementUnreadBadge } from "./AnnouncementUnreadBadge";
 import { UserAvatar } from "./UserAvatar";
 import { PresenceStatus } from "./PresenceStatus";
+import {
+  NotificationBell,
+  NotificationCenter,
+  type NotificationCenterFilter
+} from "./NotificationCenter";
 
 type UserAppShellProps = {
   dictionary: Dictionary;
@@ -293,6 +307,14 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [notificationDebug, setNotificationDebug] = useState<BrowserNotificationDebug>(() =>
     createEmptyNotificationDebug()
   );
+  const [notificationItems, setNotificationItems] = useState<OfficeChatNotification[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [notificationCursor, setNotificationCursor] = useState<string | null>(null);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [notificationCenterFilter, setNotificationCenterFilter] =
+    useState<NotificationCenterFilter>("all");
+  const [isNotificationCenterLoading, setIsNotificationCenterLoading] = useState(false);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences | null>(null);
   const [personalSocketStatus, setPersonalSocketStatus] = useState<PersonalSocketStatus>("disconnected");
   const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0);
   const [announcementReloadKey, setAnnouncementReloadKey] = useState(0);
@@ -724,6 +746,132 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }));
   }
 
+  function notificationQueryForFilter(filter: NotificationCenterFilter) {
+    if (filter === "unread") return { unreadOnly: true };
+    if (filter === "mentions") return { type: "mention" };
+    if (filter === "replies") return { type: "reply" };
+    if (filter === "announcements") return { category: "announcements" };
+    if (filter === "system") return { category: "system" };
+    return {};
+  }
+
+  async function reloadNotifications(filter = notificationCenterFilter) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setIsNotificationCenterLoading(true);
+    try {
+      const [page, unread] = await Promise.all([
+        getNotifications(token, { limit: 30, ...notificationQueryForFilter(filter) }),
+        getNotificationUnreadCount(token)
+      ]);
+      setNotificationItems(page.items);
+      setNotificationCursor(page.next_cursor);
+      setNotificationUnreadCount(unread.unread_count);
+    } catch {
+      setError(dictionary.notifications.loadError);
+    } finally {
+      setIsNotificationCenterLoading(false);
+    }
+  }
+
+  async function loadMoreNotifications() {
+    const token = getStoredAccessToken();
+    if (!token || !notificationCursor) return;
+    setIsNotificationCenterLoading(true);
+    try {
+      const page = await getNotifications(token, {
+        limit: 30,
+        cursor: notificationCursor,
+        ...notificationQueryForFilter(notificationCenterFilter)
+      });
+      setNotificationItems((current) => [...current, ...page.items]);
+      setNotificationCursor(page.next_cursor);
+    } catch {
+      setError(dictionary.notifications.loadError);
+    } finally {
+      setIsNotificationCenterLoading(false);
+    }
+  }
+
+  function upsertNotification(notification: OfficeChatNotification) {
+    setNotificationItems((current) => [
+      notification,
+      ...current.filter((item) => item.id !== notification.id)
+    ]);
+  }
+
+  function removeNotification(notificationId: string) {
+    setNotificationItems((current) => current.filter((item) => item.id !== notificationId));
+  }
+
+  async function markCenterNotificationRead(notification: OfficeChatNotification) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    try {
+      const updated = await markNotificationRead(token, notification.id);
+      setNotificationItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setNotificationUnreadCount((count) => Math.max(0, count - (notification.is_read ? 0 : 1)));
+    } catch {
+      setError(dictionary.notifications.actionError);
+    }
+  }
+
+  async function dismissCenterNotification(notification: OfficeChatNotification) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    try {
+      await dismissNotification(token, notification.id);
+      removeNotification(notification.id);
+      setNotificationUnreadCount((count) => Math.max(0, count - (notification.is_read ? 0 : 1)));
+    } catch {
+      setError(dictionary.notifications.actionError);
+    }
+  }
+
+  async function markAllCenterNotificationsRead() {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    try {
+      const category =
+        notificationCenterFilter === "announcements"
+          ? "announcements"
+          : notificationCenterFilter === "system"
+            ? "system"
+            : undefined;
+      const result = await markAllNotificationsRead(token, category);
+      setNotificationItems((current) =>
+        current.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() }))
+      );
+      setNotificationUnreadCount(result.unread_count);
+    } catch {
+      setError(dictionary.notifications.actionError);
+    }
+  }
+
+  async function openCenterNotification(notification: OfficeChatNotification) {
+    try {
+      if (notification.category === "announcements" && notification.source_id) {
+        setSelected({ type: "announcements" });
+        setActiveDiscussionId(null);
+        setIsNotificationCenterOpen(false);
+        await markCenterNotificationRead(notification);
+        return;
+      }
+      if (notification.chat_type && notification.chat_id && notification.message_id) {
+        await openMessageContext(
+          notification.chat_type as "group" | "direct" | "discussion",
+          notification.chat_id,
+          notification.message_id,
+          typeof notification.metadata?.source_group_id === "string" ? notification.metadata.source_group_id : undefined
+        );
+        setIsNotificationCenterOpen(false);
+        await markCenterNotificationRead(notification);
+      }
+    } catch {
+      setError(dictionary.messageSearch.jumpError);
+    }
+  }
+
   function upsertPersonalDirectConversation(event: Extract<PersonalNotificationEvent, { type: "user.direct.message.created" }>) {
     if (!currentUser) {
       return;
@@ -855,18 +1003,43 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
     async function loadApp() {
       try {
-        const [loadedUser, loadedGroups, loadedUsers, loadedDirectConversations, loadedAnnouncementUnread] = await Promise.all([
+        const [
+          loadedUser,
+          loadedGroups,
+          loadedUsers,
+          loadedDirectConversations,
+          loadedAnnouncementUnread,
+          loadedNotificationUnread,
+          loadedNotificationPreferences,
+          loadedNotifications
+        ] = await Promise.all([
           getCurrentUser(accessToken),
           getGroups(accessToken),
           getUsers(accessToken),
           getDirectConversations(accessToken),
-          getAnnouncementUnread(accessToken).catch(() => ({ unread_count: 0 }))
+          getAnnouncementUnread(accessToken).catch(() => ({ unread_count: 0 })),
+          getNotificationUnreadCount(accessToken).catch(() => ({ unread_count: 0 })),
+          getNotificationPreferences(accessToken).catch(() => null),
+          getNotifications(accessToken, { limit: 30 }).catch(() => ({ items: [], next_cursor: null }))
         ]);
         setCurrentUser(loadedUser);
         setGroups(loadedGroups);
         setUsers(loadedUsers);
         setDirectConversations(loadedDirectConversations);
         setAnnouncementUnreadCount(loadedAnnouncementUnread.unread_count);
+        setNotificationUnreadCount(loadedNotificationUnread.unread_count);
+        setNotificationPreferences(loadedNotificationPreferences);
+        setNotificationItems(loadedNotifications.items);
+        setNotificationCursor(loadedNotifications.next_cursor);
+        if (loadedNotificationPreferences) {
+          browserNotificationsEnabledRef.current = loadedNotificationPreferences.desktop_notifications_enabled;
+          setBrowserNotificationsEnabled(loadedNotificationPreferences.desktop_notifications_enabled);
+          localStorage.setItem(
+            notificationPreferenceKey,
+            String(loadedNotificationPreferences.desktop_notifications_enabled)
+          );
+          setNotificationPreferenceRaw(String(loadedNotificationPreferences.desktop_notifications_enabled));
+        }
         void getPresence(accessToken, loadedUsers.map((user) => user.id))
           .then((presenceRows) => {
             setPresenceByUserId(
@@ -945,6 +1118,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       markDirectUserRead(selectedDirectConversation.other_user.id);
     }
   }, [selected, selectedDirectConversation]);
+
+  useEffect(() => {
+    if (!isNotificationCenterOpen || !currentUser) {
+      return;
+    }
+    void reloadNotifications(notificationCenterFilter);
+  }, [isNotificationCenterOpen, notificationCenterFilter, currentUser?.id]);
 
   useEffect(() => {
     if (!currentUser || groups.length === 0) {
@@ -1130,6 +1310,59 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             setAnnouncementReloadKey((value) => value + 1);
             return;
           }
+          if (payload.type === "notification.created") {
+            upsertNotification(payload.notification);
+            setNotificationUnreadCount(payload.unread_count);
+            attemptBrowserNotification({
+              eventType: payload.type,
+              messageId: payload.notification.message_id ?? payload.notification.id,
+              senderUserId: payload.notification.actor.id ?? "-",
+              body: `${payload.notification.actor.display_name ?? dictionary.notifications.title}: ${
+                dictionary.notifications.desktopGeneric
+              }`,
+              selectedChatId: getSelectionDebugId(selectedRef.current),
+              onClick: () => {
+                setIsNotificationCenterOpen(true);
+                void openCenterNotification(payload.notification);
+              }
+            });
+            return;
+          }
+          if (payload.type === "notification.read") {
+            setNotificationUnreadCount(payload.unread_count);
+            setNotificationItems((current) =>
+              current.map((item) =>
+                item.id === payload.notification_id
+                  ? { ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() }
+                  : item
+              )
+            );
+            return;
+          }
+          if (payload.type === "notifications.read_all") {
+            setNotificationUnreadCount(payload.unread_count);
+            setNotificationItems((current) =>
+              current.map((item) =>
+                payload.category && item.category !== payload.category
+                  ? item
+                  : { ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() }
+              )
+            );
+            return;
+          }
+          if (payload.type === "notification.dismissed") {
+            setNotificationUnreadCount(payload.unread_count);
+            removeNotification(payload.notification_id);
+            return;
+          }
+          if (payload.type === "notification.preferences_updated") {
+            setNotificationPreferences(payload.preferences);
+            browserNotificationsEnabledRef.current = payload.preferences.desktop_notifications_enabled;
+            setBrowserNotificationsEnabled(payload.preferences.desktop_notifications_enabled);
+            localStorage.setItem(notificationPreferenceKey, String(payload.preferences.desktop_notifications_enabled));
+            setNotificationPreferenceRaw(String(payload.preferences.desktop_notifications_enabled));
+            return;
+          }
           if (payload.type === "user.group.message.created") {
             handleGroupPersonalEvent(payload);
             return;
@@ -1283,9 +1516,52 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   function updateBrowserNotificationsEnabled(isEnabled: boolean) {
     browserNotificationsEnabledRef.current = isEnabled;
     setBrowserNotificationsEnabled(isEnabled);
-    // TODO: Move notification preferences to backend user_preferences when user settings are persisted server-side.
     localStorage.setItem(notificationPreferenceKey, String(isEnabled));
     setNotificationPreferenceRaw(String(isEnabled));
+    const token = getStoredAccessToken();
+    if (token) {
+      void updateNotificationPreferences(token, { desktop_notifications_enabled: isEnabled })
+        .then(setNotificationPreferences)
+        .catch(() => undefined);
+    }
+  }
+
+  async function updateNotificationPreferenceField(
+    field: keyof Pick<
+      NotificationPreferences,
+      | "mentions_enabled"
+      | "replies_enabled"
+      | "reactions_enabled"
+      | "direct_messages_enabled"
+      | "group_messages_enabled"
+      | "discussion_messages_enabled"
+      | "announcements_enabled"
+      | "pins_enabled"
+      | "system_enabled"
+      | "desktop_notifications_enabled"
+      | "sound_enabled"
+    >,
+    value: boolean
+  ) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    const previousPreferences = notificationPreferences;
+    if (previousPreferences) {
+      setNotificationPreferences({ ...previousPreferences, [field]: value });
+    }
+    try {
+      const nextPreferences = await updateNotificationPreferences(token, { [field]: value });
+      setNotificationPreferences(nextPreferences);
+      if (field === "desktop_notifications_enabled") {
+        browserNotificationsEnabledRef.current = nextPreferences.desktop_notifications_enabled;
+        setBrowserNotificationsEnabled(nextPreferences.desktop_notifications_enabled);
+        localStorage.setItem(notificationPreferenceKey, String(nextPreferences.desktop_notifications_enabled));
+        setNotificationPreferenceRaw(String(nextPreferences.desktop_notifications_enabled));
+      }
+    } catch {
+      if (previousPreferences) setNotificationPreferences(previousPreferences);
+      setError(dictionary.notifications.preferencesError);
+    }
   }
 
   async function requestBrowserNotificationPermission() {
@@ -1790,6 +2066,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               </button>
             ) : null}
             <div className="sidebar-account-actions">
+              <NotificationBell
+                dictionary={dictionary}
+                onClick={() => setIsNotificationCenterOpen(true)}
+                unreadCount={notificationUnreadCount}
+              />
               <button
                 aria-label={dictionary.appShell.settings}
                 className="sidebar-icon-button"
@@ -1982,6 +2263,24 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         />
       ) : null}
 
+      <NotificationCenter
+        dictionary={dictionary}
+        filter={notificationCenterFilter}
+        hasMore={Boolean(notificationCursor)}
+        isLoading={isNotificationCenterLoading}
+        isOpen={isNotificationCenterOpen}
+        items={notificationItems}
+        locale={locale}
+        onClose={() => setIsNotificationCenterOpen(false)}
+        onDismiss={(notification) => void dismissCenterNotification(notification)}
+        onFilterChange={setNotificationCenterFilter}
+        onLoadMore={() => void loadMoreNotifications()}
+        onMarkAllRead={() => void markAllCenterNotificationsRead()}
+        onMarkRead={(notification) => void markCenterNotificationRead(notification)}
+        onOpen={(notification) => void openCenterNotification(notification)}
+        unreadCount={notificationUnreadCount}
+      />
+
       {isProfileOpen && currentUser ? (
         <div className="settings-backdrop" role="presentation">
           <section className="settings-panel profile-panel" aria-label={dictionary.appShell.profile.title}>
@@ -2163,6 +2462,38 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   <option value="forest">{dictionary.appShell.accentForest}</option>
                 </select>
               </label>
+              <div className="field notification-preferences">
+                <span className="field-label">{dictionary.notifications.preferencesTitle}</span>
+                <p className="note">{dictionary.notifications.preferencesDescription}</p>
+                {(
+                  [
+                    "mentions_enabled",
+                    "replies_enabled",
+                    "reactions_enabled",
+                    "direct_messages_enabled",
+                    "group_messages_enabled",
+                    "discussion_messages_enabled",
+                    "announcements_enabled",
+                    "pins_enabled",
+                    "system_enabled",
+                    "desktop_notifications_enabled",
+                    "sound_enabled"
+                  ] as const
+                ).map((fieldName) => (
+                  <label className="checkbox-field" key={fieldName}>
+                    <input
+                      checked={Boolean(notificationPreferences?.[fieldName])}
+                      disabled={!notificationPreferences || fieldName === "system_enabled"}
+                      onChange={(event) =>
+                        void updateNotificationPreferenceField(fieldName, event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>{dictionary.notifications.preferences[fieldName]}</span>
+                  </label>
+                ))}
+                <p className="note">{dictionary.notifications.preferencesPolicy}</p>
+              </div>
               <div className="field">
                 <span className="field-label">{dictionary.appShell.browserNotifications}</span>
                 <p className="note">

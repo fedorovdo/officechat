@@ -43,3 +43,7 @@ Direct conversation room получает participant-only событие `direc
 - Межинстансная доставка WebSocket по-прежнему требует будущий Valkey pub/sub.
 - Frontend unit-test runner пока отсутствует; поведение frontend проверяется TypeScript/Next build и ручными browser checks.
 - Загрузка исторического контекста через Message Search не двигает high-water marker. Автоматический mark-read временно отключается до возврата пользователя к последним сообщениям, поэтому переход к старому результату не очищает новые unread counters.
+
+## Центр уведомлений
+
+Chat unread counters, direct read receipts, announcement unread и notification-center unread остаются отдельными хранилищами. Чтение уведомления не двигает chat read marker. Переход из уведомления к сообщению использует существующий jump-to-message; уже после открытия целевого чата работает обычная логика прочтения.

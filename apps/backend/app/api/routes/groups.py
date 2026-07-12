@@ -58,6 +58,7 @@ from app.services.personal_notifications import (
 from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.unread import broadcast_unread_for_chat, broadcast_unread_refresh, broadcast_unread_removed
 from app.services.reactions import add_group_message_reaction, remove_group_message_reaction
+from app.services.notifications import safe_create_notification
 from app.services.websocket_manager import group_websocket_manager
 
 router = APIRouter()
@@ -511,6 +512,21 @@ async def change_group_message_reaction(
         else:
             rows = await add_group_message_reaction(
                 session, message.id, current_user, payload.emoji, message.is_deleted
+            )
+            await safe_create_notification(
+                session,
+                recipient_user_id=message.sender_user_id,
+                notification_type="reaction",
+                category="messages",
+                actor=current_user,
+                source_type="reaction",
+                source_id=message.id,
+                chat_type="group",
+                chat_id=group.id,
+                message_id=message.id,
+                title_key="notification.reaction",
+                body_preview=message.body,
+                metadata={"emoji": payload.emoji, "group_id": group.id, "group_name": group.name},
             )
     except PermissionError as exc:
         raise_for_permission_error(exc)

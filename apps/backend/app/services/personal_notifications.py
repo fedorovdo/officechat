@@ -19,6 +19,7 @@ from app.services.websocket_manager import (
     user_websocket_manager,
 )
 from app.services.unread import broadcast_unread_for_chat
+from app.services.notifications import safe_create_notification, sanitize_preview
 
 
 def group_message_event_payload(event_type: str, group_id: UUID, message: Message) -> dict[str, object]:
@@ -117,12 +118,66 @@ def personal_direct_message_event_payload(
 
 
 async def broadcast_group_message_created(session: AsyncSession, group: Group, message: Message) -> None:
+    mentioned_user_ids = {mention.mentioned_user_id for mention in message.mentions}
+    for user_id in mentioned_user_ids:
+        await safe_create_notification(
+            session,
+            recipient_user_id=user_id,
+            notification_type="mention",
+            category="messages",
+            actor=message.sender,
+            source_type="message",
+            source_id=message.id,
+            chat_type="group",
+            chat_id=group.id,
+            message_id=message.id,
+            title_key="notification.mention",
+            body_preview=message.body,
+            metadata={"group_id": group.id, "group_name": group.name, "group_slug": group.slug},
+        )
+    if message.reply_to is not None and message.reply_to.sender_user_id not in mentioned_user_ids:
+        await safe_create_notification(
+            session,
+            recipient_user_id=message.reply_to.sender_user_id,
+            notification_type="reply",
+            category="messages",
+            actor=message.sender,
+            source_type="message",
+            source_id=message.id,
+            chat_type="group",
+            chat_id=group.id,
+            message_id=message.id,
+            title_key="notification.reply",
+            body_preview=message.body,
+            metadata={"group_id": group.id, "group_name": group.name, "group_slug": group.slug},
+        )
     await group_websocket_manager.broadcast_to_group(
         group.id,
         group_message_event_payload("message.created", group.id, message),
     )
     event = personal_group_message_event_payload(group, message)
     recipient_ids = await list_active_group_member_user_ids(session, group.id)
+    high_signal_ids = set(mentioned_user_ids)
+    if message.reply_to is not None:
+        high_signal_ids.add(message.reply_to.sender_user_id)
+    for user_id in recipient_ids:
+        if user_id in high_signal_ids or user_id == message.sender_user_id:
+            continue
+        await safe_create_notification(
+            session,
+            recipient_user_id=user_id,
+            notification_type="group_message",
+            category="messages",
+            actor=message.sender,
+            source_type="message",
+            source_id=message.id,
+            chat_type="group",
+            chat_id=group.id,
+            message_id=message.id,
+            title_key="notification.group_message",
+            body_preview=message.body,
+            metadata={"group_id": group.id, "group_name": group.name, "group_slug": group.slug},
+        )
     for user_id in recipient_ids:
         await user_websocket_manager.broadcast_to_user(user_id, event)
     await broadcast_unread_for_chat(session, "group", group.id, recipient_ids, message)
@@ -141,6 +196,40 @@ async def broadcast_direct_message_created(
         for user_id in (conversation.user_one_id, conversation.user_two_id)
         if get_direct_participant(conversation, user_id).is_active
     ]
+    for user_id in recipient_user_ids:
+        if user_id == message.sender_user_id:
+            continue
+        await safe_create_notification(
+            session,
+            recipient_user_id=user_id,
+            notification_type="direct_message",
+            category="messages",
+            actor=message.sender,
+            source_type="direct_message",
+            source_id=message.id,
+            chat_type="direct",
+            chat_id=conversation.id,
+            message_id=message.id,
+            title_key="notification.direct_message",
+            body_preview=message.body,
+            metadata={"conversation_id": conversation.id},
+        )
+    if message.reply_to is not None:
+        await safe_create_notification(
+            session,
+            recipient_user_id=message.reply_to.sender_user_id,
+            notification_type="reply",
+            category="messages",
+            actor=message.sender,
+            source_type="direct_message",
+            source_id=message.id,
+            chat_type="direct",
+            chat_id=conversation.id,
+            message_id=message.id,
+            title_key="notification.reply",
+            body_preview=message.body,
+            metadata={"conversation_id": conversation.id},
+        )
     for user_id in recipient_user_ids:
         recipient = get_direct_participant(conversation, user_id)
         await user_websocket_manager.broadcast_to_user(
@@ -176,6 +265,24 @@ async def broadcast_discussion_message_created(
     )
     event = personal_discussion_message_event_payload(discussion, message)
     recipient_ids = await list_active_discussion_member_user_ids(session, discussion.id)
+    for user_id in recipient_ids:
+        if user_id == message.sender_user_id:
+            continue
+        await safe_create_notification(
+            session,
+            recipient_user_id=user_id,
+            notification_type="discussion_message",
+            category="messages",
+            actor=message.sender,
+            source_type="discussion_message",
+            source_id=message.id,
+            chat_type="discussion",
+            chat_id=discussion.id,
+            message_id=message.id,
+            title_key="notification.discussion_message",
+            body_preview=message.body,
+            metadata={"discussion_id": discussion.id, "source_group_id": discussion.source_group_id},
+        )
     for user_id in recipient_ids:
         await user_websocket_manager.broadcast_to_user(user_id, event)
     await broadcast_unread_for_chat(session, "discussion", discussion.id, recipient_ids, message)

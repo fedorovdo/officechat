@@ -322,3 +322,7 @@ Docs:
 - `docs/BACKUP_RESTORE_RU.md`
 - `docs/E2E_TESTS_RU.md`
 - `docs/RELEASE_CHECKLIST_RU.md`
+
+## Notifications Center v0.1
+
+После миграции `20260704_0022` доступны `GET /api/notifications`, `GET /api/notifications/unread-count`, `GET /api/notifications/preferences`, `PUT /api/notifications/preferences`. В `/ru/app` кнопка колокольчика открывает центр уведомлений. Обычные сообщения групп по умолчанию не создают записи; упоминания, ответы, реакции, direct/discussion messages и объявления включены.

@@ -38,6 +38,7 @@ from app.services.attachments import resolve_attachment_path
 from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
 from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.reactions import add_direct_message_reaction, remove_direct_message_reaction
+from app.services.notifications import safe_create_notification
 from app.services.websocket_manager import direct_websocket_manager
 from app.services.unread import broadcast_unread_for_chat
 
@@ -353,6 +354,21 @@ async def change_direct_message_reaction(
         else:
             rows = await add_direct_message_reaction(
                 session, message.id, current_user, payload.emoji, message.is_deleted
+            )
+            await safe_create_notification(
+                session,
+                recipient_user_id=message.sender_user_id,
+                notification_type="reaction",
+                category="messages",
+                actor=current_user,
+                source_type="reaction",
+                source_id=message.id,
+                chat_type="direct",
+                chat_id=conversation.id,
+                message_id=message.id,
+                title_key="notification.reaction",
+                body_preview=message.body,
+                metadata={"emoji": payload.emoji, "conversation_id": conversation.id},
             )
     except PermissionError as exc:
         raise_for_permission_error(exc)

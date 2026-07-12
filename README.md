@@ -42,6 +42,8 @@ Pinned Messages v0.1 lets trusted human users with `can_pin_messages` pin, unpin
 
 Broadcast Announcements v0.1 adds a separate corporate announcement inbox and sender flow for trusted users with effective `can_broadcast`. Broadcasts are stored as one announcement plus recipient rows, use preview/confirmation tokens and Valkey rate limiting before send, and deliver `announcement.created/read/retracted` through `/api/ws/me`. Announcement unread counters are separate from chat unread counters. See [docs/BROADCASTS_RU.md](docs/BROADCASTS_RU.md).
 
+Notifications Center v0.1 adds a separate bell drawer in `/ru/app` for important personal events: mentions, replies, reactions, direct messages, discussion messages, announcements, optional pin notifications, and system notices. Its unread count is independent from chat unread counters and the announcement unread counter. Preferences are stored per user in PostgreSQL and synchronize through the existing `/api/ws/me` channel. See [docs/NOTIFICATIONS_RU.md](docs/NOTIFICATIONS_RU.md).
+
 OfficeChat is an open-source, self-hosted corporate chat for local networks and private environments. The project is designed to work well in LAN/offline deployments first, while keeping the architecture ready for secure internet-facing deployments later.
 
 Current status: early development. This repository currently contains the Dockerized scaffold, local authentication, admin user management, groups, direct messages, discussions, WebSocket real-time updates, and secure local attachments for group, direct, and discussion messages. LDAP/AD, S3/object storage, antivirus scanning, and production nginx configuration are not implemented yet.
@@ -231,6 +233,8 @@ Important auth environment variables:
 - `BROADCAST_MAX_PER_HOUR` - per-sender broadcast rate limit, default `10`.
 - `BROADCAST_PREVIEW_TTL_SECONDS` - preview confirmation lifetime, default `300`.
 - `BROADCAST_RETENTION_DAYS` - planned broadcast retention window, default `365`.
+- `NOTIFICATION_RETENTION_DAYS` - planned notification retention window, default `90`.
+- `NOTIFICATION_MAX_PER_USER` - planned per-user notification cap, default `5000`.
 
 ## Useful Docker Compose Commands
 

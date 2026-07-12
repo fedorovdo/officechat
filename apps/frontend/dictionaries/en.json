@@ -579,6 +579,60 @@
       "retracted": "Retracted"
     }
   },
+  "notifications": {
+    "title": "Notifications",
+    "eyebrow": "Notification center",
+    "system": "System",
+    "unreadLabel": "{count} unread notifications",
+    "filtersLabel": "Notification filters",
+    "empty": "No notifications",
+    "loading": "Loading notifications...",
+    "loadError": "Could not load notifications.",
+    "loadMore": "Load more",
+    "markRead": "Mark read",
+    "markAllRead": "Mark all read",
+    "dismiss": "Dismiss",
+    "open": "Open",
+    "actionError": "Could not update notification.",
+    "previewHidden": "Preview unavailable",
+    "desktopGeneric": "New OfficeChat notification",
+    "preferencesTitle": "Notification preferences",
+    "preferencesDescription": "Choose which personal events appear in the notification center. Chat unread counters stay separate.",
+    "preferencesPolicy": "System security notices remain enabled. Desktop notifications and sound are disabled by default.",
+    "preferencesError": "Could not save notification preferences.",
+    "filters": {
+      "all": "All",
+      "unread": "Unread",
+      "mentions": "Mentions",
+      "replies": "Replies",
+      "announcements": "Announcements",
+      "system": "System"
+    },
+    "titles": {
+      "mention": "You were mentioned",
+      "reply": "New reply",
+      "reaction": "New reaction",
+      "direct_message": "New direct message",
+      "group_message": "New group message",
+      "discussion_message": "New discussion message",
+      "announcement": "New announcement",
+      "pin": "Message pinned",
+      "system": "System notification"
+    },
+    "preferences": {
+      "mentions_enabled": "Mentions",
+      "replies_enabled": "Replies",
+      "reactions_enabled": "Reactions",
+      "direct_messages_enabled": "Direct messages",
+      "group_messages_enabled": "Group messages",
+      "discussion_messages_enabled": "Discussions",
+      "announcements_enabled": "Announcements",
+      "pins_enabled": "Pinned messages",
+      "system_enabled": "System notifications",
+      "desktop_notifications_enabled": "Browser notifications",
+      "sound_enabled": "Sound"
+    }
+  },
   "adminUsers": {
     "ariaLabel": "Admin user management",
     "title": "User management",

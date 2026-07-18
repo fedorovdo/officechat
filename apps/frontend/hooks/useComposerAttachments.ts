@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type RefObject } from "react";
 
+import { createClientId } from "../lib/client-id";
+
 export const COMPOSER_MAX_FILES = 10;
 export const COMPOSER_MAX_TOTAL_SIZE_BYTES = 50 * 1024 * 1024;
 export const COMPOSER_ALLOWED_EXTENSIONS = [
@@ -118,7 +120,7 @@ export function useComposerAttachments({
         const image = isImageFile(file);
         return {
           file,
-          id: crypto.randomUUID(),
+          id: createClientId(),
           isImage: image,
           previewUrl: image ? URL.createObjectURL(file) : null
         };

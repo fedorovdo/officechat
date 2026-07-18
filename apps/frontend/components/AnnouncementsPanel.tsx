@@ -25,6 +25,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { createClientId } from "../lib/client-id";
 
 type AnnouncementsPanelProps = {
   currentUser: OfficeChatUser;
@@ -45,9 +46,7 @@ function formatDate(value: string | null, locale: Locale) {
 }
 
 function makeIdempotencyKey() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `broadcast-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return createClientId();
 }
 
 function getRequiredToken(locale: Locale) {

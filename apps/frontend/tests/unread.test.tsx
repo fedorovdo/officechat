@@ -108,7 +108,7 @@ describe("visible read marker", () => {
   function renderMarker(visibility: "visible" | "hidden", unread = true) {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: visibility });
     const panel = document.createElement("section");
-    panel.getClientRects = () => [{ width: 100, height: 100 } as DOMRect];
+    panel.getClientRects = () => [{ width: 100, height: 100 } as DOMRect] as unknown as DOMRectList;
     const onMarkRead = vi.fn();
     renderHook(() => useVisibleReadMarker({
       messages: [{ id: "old" }, { id: "newest" }],

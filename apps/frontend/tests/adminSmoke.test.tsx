@@ -106,7 +106,7 @@ describe("admin page smoke coverage", () => {
     await waitFor(() => expect(apiMocks.getAuditEvent).toHaveBeenCalledWith("test-token", event.id));
     expect(within(dialog).getByText(event.event_type)).toBeInTheDocument();
     expect(within(dialog).getByText(event.request_id!)).toBeInTheDocument();
-    expect(within(dialog).getByText(event.details.payload as string)).toBeInTheDocument();
+    expect(within(dialog).getByText(event.details!.payload as string)).toBeInTheDocument();
   });
 
   it("shows special permission controls only to superadmin and saves changed grants", async () => {

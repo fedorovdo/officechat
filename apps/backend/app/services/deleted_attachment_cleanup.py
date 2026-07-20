@@ -69,32 +69,46 @@ async def cleanup_deleted_message_attachments(
     apply: bool = False,
 ) -> DeletedAttachmentCleanupReport:
     attachments = await list_deleted_message_attachments(session)
-    report = DeletedAttachmentCleanupReport(
-        records=len(attachments),
-        records_to_disable=sum(bool(getattr(item, "file_available", False)) for item in attachments),
-        applied=apply,
-    )
+    report = DeletedAttachmentCleanupReport(applied=apply)
+    candidates: list[object] = []
+    attachments_to_disable: list[object] = []
 
     for attachment in attachments:
+        file_available = bool(getattr(attachment, "file_available", False))
         try:
             path = resolve_attachment_path(attachment)
-            if path.exists() and path.is_file():
+            file_exists = path.exists() and path.is_file()
+            if not file_available and not file_exists:
+                continue
+
+            candidates.append(attachment)
+            report.records += 1
+            if file_available:
+                attachments_to_disable.append(attachment)
+                report.records_to_disable += 1
+            if file_exists:
                 report.files_found += 1
                 report.size_bytes += int(getattr(attachment, "size_bytes", 0) or 0)
-            else:
+            elif file_available:
                 report.files_missing += 1
         except (OSError, ValueError):
             report.errors += 1
+            if file_available:
+                candidates.append(attachment)
+                attachments_to_disable.append(attachment)
+                report.records += 1
+                report.records_to_disable += 1
 
     if not apply:
         return report
 
-    mark_attachments_unavailable(attachments)
-    try:
-        await session.commit()
-    except BaseException:
-        await session.rollback()
-        raise
-    report.files_deleted, unlink_errors = delete_attachment_files_best_effort(attachments)
+    if report.records_to_disable:
+        mark_attachments_unavailable(attachments_to_disable)
+        try:
+            await session.commit()
+        except BaseException:
+            await session.rollback()
+            raise
+    report.files_deleted, unlink_errors = delete_attachment_files_best_effort(candidates)
     report.errors += unlink_errors
     return report

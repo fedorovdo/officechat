@@ -379,6 +379,130 @@ class DeletedAttachmentLifecycleTests(unittest.IsolatedAsyncioTestCase):
         finally:
             settings.uploads_dir = original_uploads_dir
 
+    async def test_cleanup_is_idempotent_after_successful_apply(self):
+        original_uploads_dir = settings.uploads_dir
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                settings.uploads_dir = directory
+                path = Path(directory) / "groups" / "orphan.txt"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"orphan")
+                orphan = attachment(path)
+                session = AsyncMock()
+
+                with patch(
+                    "app.services.deleted_attachment_cleanup.list_deleted_message_attachments",
+                    AsyncMock(return_value=[orphan]),
+                ):
+                    first_apply = await cleanup_deleted_message_attachments(session, apply=True)
+                    repeated_dry_run = await cleanup_deleted_message_attachments(session)
+                    repeated_apply = await cleanup_deleted_message_attachments(session, apply=True)
+
+                self.assertEqual(first_apply.records, 1)
+                self.assertEqual(first_apply.files_deleted, 1)
+                self.assertEqual(
+                    repeated_dry_run.as_dict(),
+                    {
+                        "records": 0,
+                        "records_to_disable": 0,
+                        "files_found": 0,
+                        "size_bytes": 0,
+                        "files_deleted": 0,
+                        "files_missing": 0,
+                        "errors": 0,
+                        "applied": False,
+                    },
+                )
+                self.assertEqual(repeated_apply.records, 0)
+                self.assertEqual(repeated_apply.files_deleted, 0)
+                self.assertTrue(repeated_apply.applied)
+                session.commit.assert_awaited_once()
+        finally:
+            settings.uploads_dir = original_uploads_dir
+
+    async def test_cleanup_removes_file_left_for_disabled_attachment(self):
+        original_uploads_dir = settings.uploads_dir
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                settings.uploads_dir = directory
+                path = Path(directory) / "direct" / "left-behind.txt"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"left behind")
+                orphan = attachment(path)
+                orphan.file_available = False
+                session = AsyncMock()
+
+                with patch(
+                    "app.services.deleted_attachment_cleanup.list_deleted_message_attachments",
+                    AsyncMock(return_value=[orphan]),
+                ):
+                    dry_run = await cleanup_deleted_message_attachments(session)
+                    applied = await cleanup_deleted_message_attachments(session, apply=True)
+                    repeated = await cleanup_deleted_message_attachments(session)
+
+                self.assertEqual(dry_run.records, 1)
+                self.assertEqual(dry_run.records_to_disable, 0)
+                self.assertEqual(dry_run.files_found, 1)
+                self.assertEqual(applied.files_deleted, 1)
+                self.assertFalse(path.exists())
+                self.assertEqual(repeated.records, 0)
+                session.commit.assert_not_awaited()
+        finally:
+            settings.uploads_dir = original_uploads_dir
+
+    async def test_cleanup_ignores_disabled_attachment_without_file(self):
+        original_uploads_dir = settings.uploads_dir
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                settings.uploads_dir = directory
+                path = Path(directory) / "discussions" / "already-cleaned.txt"
+                orphan = attachment(path)
+                orphan.file_available = False
+                session = AsyncMock()
+
+                with patch(
+                    "app.services.deleted_attachment_cleanup.list_deleted_message_attachments",
+                    AsyncMock(return_value=[orphan]),
+                ):
+                    dry_run = await cleanup_deleted_message_attachments(session)
+                    applied = await cleanup_deleted_message_attachments(session, apply=True)
+
+                self.assertEqual(dry_run.records, 0)
+                self.assertEqual(dry_run.files_missing, 0)
+                self.assertEqual(applied.records, 0)
+                self.assertEqual(applied.files_deleted, 0)
+                session.commit.assert_not_awaited()
+        finally:
+            settings.uploads_dir = original_uploads_dir
+
+    async def test_cleanup_disables_available_attachment_when_file_is_missing(self):
+        original_uploads_dir = settings.uploads_dir
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                settings.uploads_dir = directory
+                path = Path(directory) / "groups" / "missing.txt"
+                orphan = attachment(path)
+                session = AsyncMock()
+
+                with patch(
+                    "app.services.deleted_attachment_cleanup.list_deleted_message_attachments",
+                    AsyncMock(return_value=[orphan]),
+                ):
+                    dry_run = await cleanup_deleted_message_attachments(session)
+                    applied = await cleanup_deleted_message_attachments(session, apply=True)
+                    repeated = await cleanup_deleted_message_attachments(session)
+
+                self.assertEqual(dry_run.records, 1)
+                self.assertEqual(dry_run.records_to_disable, 1)
+                self.assertEqual(dry_run.files_missing, 1)
+                self.assertEqual(applied.files_deleted, 0)
+                self.assertFalse(orphan.file_available)
+                self.assertEqual(repeated.records, 0)
+                self.assertEqual(repeated.files_missing, 0)
+                session.commit.assert_awaited_once()
+        finally:
+            settings.uploads_dir = original_uploads_dir
+
     async def test_cleanup_never_unlinks_before_database_commit(self):
         original_uploads_dir = settings.uploads_dir
         try:

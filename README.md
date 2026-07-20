@@ -219,6 +219,8 @@ In group, direct, and discussion composers, users can select or drag multiple fi
 
 Sent PNG, JPEG, and WebP attachments display as a compact responsive gallery. The protected lightbox supports previous/next navigation and keyboard arrows; non-image files remain compact authenticated download rows. Storage stays in the local Docker volume. Antivirus scanning, resumable uploads, backend thumbnails/compression, and S3/MinIO are not implemented.
 
+Soft-deleting a group, direct, or discussion message immediately makes its attachments unavailable. Deleted-message responses contain no attachment metadata, old download URLs return `404`, and physical files are removed after the database commit. Existing orphan files can be previewed with `docker compose exec backend python -m app.cli cleanup-deleted-attachments` and removed explicitly with `--apply`; active attachments are never selected.
+
 The group, direct, and discussion message composers include a lightweight Unicode emoji picker with RU/EN search and a local frequently-used list. Recent emoji are stored in the browser under `officechat.emoji.recent`. Message reactions support `👍 ❤️ 😂 ✅ 🔥 👀 🎉 😮 😢 👎`, one reaction per user/emoji/message, repeated-click removal, and real-time channel synchronization. Custom reactions, stickers, GIFs, and reaction notifications are not implemented. Local avatar upload and avatar display in messenger messages and user lists are also available in v0.1, while optional avatar cropping/editing remains planned.
 
 Bot foundation is available for incoming webhooks:

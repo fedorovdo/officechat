@@ -67,7 +67,7 @@ class MessageReplyPreviewPublic(BaseModel):
             return preview
 
         body = str(getattr(data, "body", "") or "").strip()
-        attachments = getattr(data, "attachments", [])
+        attachments = [] if getattr(data, "is_deleted", False) else getattr(data, "attachments", [])
         preview = "Message deleted" if getattr(data, "is_deleted", False) else body
         if len(preview) > REPLY_PREVIEW_MAX_LENGTH:
             preview = f"{preview[: REPLY_PREVIEW_MAX_LENGTH - 3]}..."
@@ -129,8 +129,37 @@ class MessagePublic(BaseModel):
     mentions: list[MessageMentionPublic] = Field(default_factory=list)
     reactions: list[MessageReactionPublic] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def hide_deleted_message_data(cls, data: object) -> object:
+        return sanitize_deleted_message(data, cls.model_fields)
+
     @field_validator("reactions", mode="before")
     @classmethod
     def summarize_reactions(cls, value: object, info: ValidationInfo) -> object:
         current_user_id = info.context.get("current_user_id") if info.context else None
         return aggregate_reaction_rows(value, current_user_id)
+
+
+def sanitize_deleted_message(data: object, model_fields: dict[str, object]) -> object:
+    is_deleted = data.get("is_deleted", False) if isinstance(data, dict) else getattr(data, "is_deleted", False)
+    if not is_deleted:
+        return data
+
+    payload: dict[str, object] = {}
+    for field_name in model_fields:
+        if isinstance(data, dict):
+            if field_name in data:
+                payload[field_name] = data[field_name]
+        elif hasattr(data, field_name):
+            payload[field_name] = getattr(data, field_name)
+    payload.update({"body": "Message deleted", "attachments": []})
+    for field_name, empty_value in (
+        ("mentions", []),
+        ("reactions", []),
+        ("reply_to", None),
+        ("reply_to_message_id", None),
+    ):
+        if field_name in model_fields:
+            payload[field_name] = empty_value
+    return payload

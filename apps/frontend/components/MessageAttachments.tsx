@@ -8,10 +8,12 @@ import type { Dictionary } from "../lib/i18n";
 
 const PREVIEWABLE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const PREVIEWABLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
+const EMPTY_ATTACHMENTS: OfficeChatAttachment[] = [];
 
 type MessageAttachmentsProps = {
   attachments: OfficeChatAttachment[];
   dictionary: Dictionary;
+  isDeleted: boolean;
   onDownload: (downloadUrl: string, filename: string) => void;
 };
 
@@ -45,22 +47,23 @@ export function getAttachmentUploadError(caughtError: unknown, dictionary: Dicti
   return caughtError.message || dictionary.messages.uploadError;
 }
 
-export function MessageAttachments({ attachments, dictionary, onDownload }: MessageAttachmentsProps) {
+export function MessageAttachments({ attachments, dictionary, isDeleted, onDownload }: MessageAttachmentsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [shouldLoadImages, setShouldLoadImages] = useState(false);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const visibleAttachments = isDeleted ? EMPTY_ATTACHMENTS : attachments;
   const images = useMemo(
-    () => attachments.filter((attachment) => attachment.file_available && isPreviewableImage(attachment)),
-    [attachments]
+    () => visibleAttachments.filter((attachment) => attachment.file_available && isPreviewableImage(attachment)),
+    [visibleAttachments]
   );
   const files = useMemo(
-    () => attachments.filter((attachment) => attachment.file_available && !isPreviewableImage(attachment)),
-    [attachments]
+    () => visibleAttachments.filter((attachment) => attachment.file_available && !isPreviewableImage(attachment)),
+    [visibleAttachments]
   );
   const unavailableFiles = useMemo(
-    () => attachments.filter((attachment) => !attachment.file_available),
-    [attachments]
+    () => visibleAttachments.filter((attachment) => !attachment.file_available),
+    [visibleAttachments]
   );
 
   useEffect(() => {

@@ -47,7 +47,7 @@ from app.services.personal_notifications import (
 )
 from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.reactions import add_discussion_message_reaction, remove_discussion_message_reaction
-from app.services.notifications import safe_create_notification
+from app.services.notifications import redact_message_notification_previews, safe_create_notification
 from app.services.websocket_manager import discussion_websocket_manager
 from app.services.unread import broadcast_unread_for_chat, broadcast_unread_removed
 
@@ -351,6 +351,8 @@ async def download_discussion_attachment(
     attachment = await get_discussion_attachment(session, discussion, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if attachment.discussion_message.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     if not attachment.file_available:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="File removed by retention policy")
     try:
@@ -406,6 +408,7 @@ async def delete_message(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archived messages are read-only")
     try:
         await delete_pins_for_message(session, "discussion", discussion.id, message.id)
+        await redact_message_notification_previews(session, message.id)
         deleted_message = await delete_discussion_message(session, discussion, message, current_user)
         await discussion_websocket_manager.broadcast_to_discussion(
             discussion.id,

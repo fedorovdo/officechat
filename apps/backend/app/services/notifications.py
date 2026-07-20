@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -157,6 +157,14 @@ def serialize_notification(notification: Notification) -> NotificationPublic:
 
 def serialize_preferences(preferences: NotificationPreference) -> NotificationPreferencesPublic:
     return NotificationPreferencesPublic.model_validate(preferences)
+
+
+async def redact_message_notification_previews(session: AsyncSession, message_id: UUID) -> None:
+    await session.execute(
+        update(Notification)
+        .where(Notification.message_id == message_id)
+        .values(body_preview=None)
+    )
 
 
 async def broadcast_notification_event(session: AsyncSession, user_id: UUID, event: dict[str, object]) -> None:

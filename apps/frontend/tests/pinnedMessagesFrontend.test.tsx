@@ -132,6 +132,17 @@ function discussionMessage(overrides: Partial<OfficeChatDiscussionMessage> = {})
   };
 }
 
+const staleDeletedAttachment = {
+  id: "attachment-1",
+  original_filename: "private.txt",
+  content_type: "text/plain",
+  size_bytes: 7,
+  created_at: "2026-07-20T10:00:00Z",
+  download_url: "/api/private/download",
+  file_available: true,
+  file_deleted_at: null
+};
+
 function pinFactory(overrides: Partial<OfficeChatPinnedMessage> = {}): OfficeChatPinnedMessage {
   return {
     id: "pin-1",
@@ -237,6 +248,34 @@ describe("pinned message frontend integration", () => {
     render(<DiscussionPanel currentUser={currentUser} dictionary={en} discussionId="discussion-1" locale="en" onClose={vi.fn()} />);
     await openActions();
     expect(screen.getByRole("menuitem", { name: en.pins.pin })).toBeInTheDocument();
+  });
+
+  it("group tombstone hides stale attachment payloads", async () => {
+    setupApi({
+      groupMessages: [groupMessage({
+        is_deleted: true,
+        attachments: [{ ...staleDeletedAttachment, group_id: "group-1" }]
+      })]
+    });
+    render(<GroupChatPanel canModerateMessages currentUser={currentUser} dictionary={en} groupId="group-1" locale="en" />);
+    expect(await screen.findByText(en.messages.deletedMessage)).toBeInTheDocument();
+    expect(screen.queryByText("private.txt")).not.toBeInTheDocument();
+  });
+
+  it("direct tombstone hides stale attachment payloads", async () => {
+    setupApi({ directMessages: [directMessage({ is_deleted: true, attachments: [staleDeletedAttachment] })] });
+    render(<DirectChatPanel conversation={conversation} currentUser={currentUser} dictionary={en} locale="en" />);
+    expect(await screen.findByText(en.messages.deletedMessage)).toBeInTheDocument();
+    expect(screen.queryByText("private.txt")).not.toBeInTheDocument();
+  });
+
+  it("discussion tombstone hides stale attachment payloads", async () => {
+    setupApi({
+      discussionMessages: [discussionMessage({ is_deleted: true, attachments: [staleDeletedAttachment] })]
+    });
+    render(<DiscussionPanel currentUser={currentUser} dictionary={en} discussionId="discussion-1" locale="en" onClose={vi.fn()} />);
+    expect(await screen.findByText(en.messages.deletedMessage)).toBeInTheDocument();
+    expect(screen.queryByText("private.txt")).not.toBeInTheDocument();
   });
 
   it("does not show Pin without effective can_pin_messages permission", async () => {

@@ -207,8 +207,12 @@ async def delete_group_message(
     if message.is_archived:
         raise ValueError("Archived messages are read-only")
 
+    from app.services.attachments import delete_attachment_files_best_effort, mark_attachments_unavailable
+
     message.is_deleted = True
     message.body = DELETED_MESSAGE_BODY
+    mark_attachments_unavailable(message.attachments)
     await session.commit()
+    delete_attachment_files_best_effort(message.attachments)
     await session.refresh(message)
     return await load_message_with_sender(session, message.id)

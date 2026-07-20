@@ -38,7 +38,7 @@ from app.services.attachments import resolve_attachment_path
 from app.services.personal_notifications import broadcast_direct_message_created, direct_message_event_payload
 from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.reactions import add_direct_message_reaction, remove_direct_message_reaction
-from app.services.notifications import safe_create_notification
+from app.services.notifications import redact_message_notification_previews, safe_create_notification
 from app.services.websocket_manager import direct_websocket_manager
 from app.services.unread import broadcast_unread_for_chat
 
@@ -241,6 +241,8 @@ async def download_direct_attachment(
     attachment = await get_direct_attachment(session, conversation, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if attachment.direct_message.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     if not attachment.file_available:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="File removed by retention policy")
     try:
@@ -312,6 +314,7 @@ async def delete_message(
 
     try:
         await delete_pins_for_message(session, "direct", conversation.id, message.id)
+        await redact_message_notification_previews(session, message.id)
         deleted_message = await delete_direct_message(session, conversation, message, current_user)
         await direct_websocket_manager.broadcast_to_conversation(
             conversation_id,

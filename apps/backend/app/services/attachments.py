@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from app.models.message import Message
 from app.models.user import User
 from app.services.mentions import sync_message_mentions
 from app.services.messages import load_message_with_sender
+
+logger = logging.getLogger(__name__)
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 AttachmentStorageKind = Literal["group", "direct", "discussion"]
@@ -170,6 +173,32 @@ async def save_upload(storage_kind: AttachmentStorageKind, owner_id: UUID, uploa
 
 def remove_saved_file(storage_path: str) -> None:
     Path(storage_path).unlink(missing_ok=True)
+
+
+def mark_attachments_unavailable(attachments: list[object], deleted_at: datetime | None = None) -> None:
+    unavailable_at = deleted_at or datetime.now(timezone.utc)
+    for attachment in attachments:
+        setattr(attachment, "file_available", False)
+        setattr(attachment, "file_deleted_at", unavailable_at)
+
+
+def delete_attachment_files_best_effort(attachments: list[object]) -> tuple[int, int]:
+    deleted = 0
+    errors = 0
+    for attachment in attachments:
+        try:
+            path = resolve_attachment_path(attachment)
+            if path.exists() and path.is_file():
+                remove_saved_file(str(path))
+                deleted += 1
+        except (OSError, ValueError) as exc:
+            errors += 1
+            logger.warning(
+                "Attachment cleanup failed for attachment_id=%s: %s",
+                getattr(attachment, "id", "unknown"),
+                type(exc).__name__,
+            )
+    return deleted, errors
 
 
 def validate_attachment_message_body(body: str | None) -> str:

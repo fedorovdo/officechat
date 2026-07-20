@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.schemas.reaction import MessageReactionPublic, aggregate_reaction_rows
+from app.schemas.message import sanitize_deleted_message
 from app.schemas.user import UserDirectoryEntry
 
 REPLY_PREVIEW_MAX_LENGTH = 120
@@ -66,7 +67,7 @@ class DirectMessageReplyPreviewPublic(BaseModel):
             return preview
 
         body = str(getattr(data, "body", "") or "").strip()
-        attachments = getattr(data, "attachments", [])
+        attachments = [] if getattr(data, "is_deleted", False) else getattr(data, "attachments", [])
         preview = "Message deleted" if getattr(data, "is_deleted", False) else body
         if len(preview) > REPLY_PREVIEW_MAX_LENGTH:
             preview = f"{preview[: REPLY_PREVIEW_MAX_LENGTH - 3]}..."
@@ -105,6 +106,11 @@ class DirectMessagePublic(BaseModel):
     reply_to: DirectMessageReplyPreviewPublic | None = None
     attachments: list[DirectMessageAttachmentPublic] = Field(default_factory=list)
     reactions: list[MessageReactionPublic] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def hide_deleted_message_data(cls, data: object) -> object:
+        return sanitize_deleted_message(data, cls.model_fields)
 
     @field_validator("reactions", mode="before")
     @classmethod

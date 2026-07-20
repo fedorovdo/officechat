@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.schemas.reaction import MessageReactionPublic, aggregate_reaction_rows
+from app.schemas.message import sanitize_deleted_message
 from app.schemas.user import UserDirectoryEntry
 
 DiscussionMemberRole = Literal["owner", "member"]
@@ -118,6 +119,11 @@ class DiscussionMessagePublic(BaseModel):
     sender: UserDirectoryEntry
     attachments: list[DiscussionMessageAttachmentPublic] = Field(default_factory=list)
     reactions: list[MessageReactionPublic] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def hide_deleted_message_data(cls, data: object) -> object:
+        return sanitize_deleted_message(data, cls.model_fields)
 
     @field_validator("reactions", mode="before")
     @classmethod

@@ -373,8 +373,12 @@ async def delete_direct_message(
     if message.sender_user_id != current_user.id:
         raise PermissionError("Only sender can delete message")
 
+    from app.services.attachments import delete_attachment_files_best_effort, mark_attachments_unavailable
+
     message.is_deleted = True
     message.body = DELETED_MESSAGE_BODY
+    mark_attachments_unavailable(message.attachments)
     conversation.updated_at = datetime.now(timezone.utc)
     await session.commit()
+    delete_attachment_files_best_effort(message.attachments)
     return await load_direct_message(session, message.id)

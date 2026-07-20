@@ -29,6 +29,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { applyDeletedMessageEvent } from "../lib/message-privacy";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
 import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
@@ -322,9 +323,18 @@ export function GroupChatPanel({
             applyPinnedMessage(payload.pin);
           } else if (payload.type === "message.unpinned") {
             applyUnpinnedMessage(payload.pin_id, payload.message_id);
+          } else if (payload.type === "message.deleted") {
+            markIncomingMessage();
+            setMessages((current) => applyDeletedMessageEvent(current, payload.message));
+            setArchivedMessages((current) => applyDeletedMessageEvent(current, payload.message));
+            setReplyToMessage((current) => current?.id === payload.message.id ? null : current);
+            setPinDraftMessage((current) => current?.id === payload.message.id ? null : current);
+            setEditingMessageId((current) => current === payload.message.id ? null : current);
+            setEditingMessageBody("");
+            void refreshPins(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken);
           } else if (payload.type.startsWith("message.")) {
             markIncomingMessage();
-            if (payload.type === "message.deleted") void refreshPins(accessToken);
             if (!historicalTargetRef.current) void refreshMessages(accessToken);
           }
         } catch {
@@ -785,7 +795,7 @@ export function GroupChatPanel({
                 </form>
               ) : (
                 <>
-                  {message.reply_to ? (
+                  {!message.is_deleted && message.reply_to ? (
                     <div className="message-reply-preview">
                       <span>
                         {dictionary.messages.replyTo} {message.reply_to.sender.display_name}
@@ -801,15 +811,18 @@ export function GroupChatPanel({
               <MessageAttachments
                 attachments={message.attachments}
                 dictionary={dictionary}
+                isDeleted={message.is_deleted}
                 onDownload={(downloadUrl, filename) => void handleDownloadAttachment(downloadUrl, filename)}
               />
-              <MessageReactions
-                canAddReaction={!message.is_deleted}
-                dictionary={dictionary}
-                onAdd={(emoji) => handleAddReaction(message.id, emoji)}
-                onRemove={(emoji) => handleRemoveReaction(message.id, emoji)}
-                reactions={message.reactions}
-              />
+              {!message.is_deleted ? (
+                <MessageReactions
+                  canAddReaction
+                  dictionary={dictionary}
+                  onAdd={(emoji) => handleAddReaction(message.id, emoji)}
+                  onRemove={(emoji) => handleRemoveReaction(message.id, emoji)}
+                  reactions={message.reactions}
+                />
+              ) : null}
               {!message.is_deleted ? (
                 <div className="message-actions">
                   <MessageActionsMenu

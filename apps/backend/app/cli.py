@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import sys
 
@@ -8,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.session import AsyncSessionLocal
 from app.models.user import User
+from app.services.deleted_attachment_cleanup import cleanup_deleted_message_attachments
 from app.services.security import hash_password
 from app.services.users import get_user_by_username, normalize_username
 
@@ -67,6 +69,13 @@ async def _create_admin(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cleanup_deleted_attachments(args: argparse.Namespace) -> int:
+    async with AsyncSessionLocal() as session:
+        report = await cleanup_deleted_message_attachments(session, apply=args.apply)
+    print(json.dumps(report.as_dict(), sort_keys=True))
+    return 1 if report.errors else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="OfficeChat maintenance CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -78,6 +87,17 @@ def build_parser() -> argparse.ArgumentParser:
     password_source.add_argument("--password-file")
     password_source.add_argument("--password-stdin", action="store_true")
     create_admin.set_defaults(handler=_create_admin)
+
+    cleanup_attachments = subparsers.add_parser(
+        "cleanup-deleted-attachments",
+        help="Report or remove files attached to soft-deleted messages",
+    )
+    cleanup_attachments.add_argument(
+        "--apply",
+        action="store_true",
+        help="Disable attachment records and delete files; default is dry-run",
+    )
+    cleanup_attachments.set_defaults(handler=_cleanup_deleted_attachments)
 
     return parser
 

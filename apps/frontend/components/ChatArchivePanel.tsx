@@ -68,8 +68,13 @@ export function ChatArchivePanel({
             <p className={message.is_deleted ? "message-body deleted-message" : "message-body"}>
               {message.is_deleted ? dictionary.messages.deletedMessage : message.body}
             </p>
-            <MessageAttachments attachments={message.attachments} dictionary={dictionary} onDownload={onDownload} />
-            {message.reactions.length > 0 ? (
+            <MessageAttachments
+              attachments={message.attachments}
+              dictionary={dictionary}
+              isDeleted={message.is_deleted}
+              onDownload={onDownload}
+            />
+            {!message.is_deleted && message.reactions.length > 0 ? (
               <div className="archive-reactions">
                 {message.reactions.map((reaction) => (
                   <span key={reaction.emoji}>{reaction.emoji} {reaction.count}</span>

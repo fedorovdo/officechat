@@ -190,7 +190,10 @@ def message_preview(message: MessageLike) -> PinMessagePreviewPublic:
             display_name=message.sender.display_name,
         ),
         body_preview=preview,
-        attachment_count=len(getattr(message, "attachments", []) or []),
+        attachment_count=(
+            0 if getattr(message, "is_deleted", False)
+            else len(getattr(message, "attachments", []) or [])
+        ),
         is_deleted=message.is_deleted,
         is_archived=message.is_archived,
         archived_at=message.archived_at,

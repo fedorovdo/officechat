@@ -458,10 +458,14 @@ async def delete_discussion_message(
     if message.is_archived:
         raise ValueError("Archived messages are read-only")
 
+    from app.services.attachments import delete_attachment_files_best_effort, mark_attachments_unavailable
+
     message.is_deleted = True
     message.body = DELETED_MESSAGE_BODY
+    mark_attachments_unavailable(message.attachments)
     discussion.updated_at = datetime.now(timezone.utc)
     await session.commit()
+    delete_attachment_files_best_effort(message.attachments)
     return await load_discussion_message(session, message.id)
 
 

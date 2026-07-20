@@ -58,7 +58,7 @@ from app.services.personal_notifications import (
 from app.services.pins import annotate_messages_with_pins, delete_pins_for_message
 from app.services.unread import broadcast_unread_for_chat, broadcast_unread_refresh, broadcast_unread_removed
 from app.services.reactions import add_group_message_reaction, remove_group_message_reaction
-from app.services.notifications import safe_create_notification
+from app.services.notifications import redact_message_notification_previews, safe_create_notification
 from app.services.websocket_manager import group_websocket_manager
 
 router = APIRouter()
@@ -427,6 +427,8 @@ async def download_attachment(
     attachment = await get_group_attachment(session, group, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if attachment.message.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     if not attachment.file_available:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="File removed by retention policy")
 
@@ -468,6 +470,7 @@ async def delete_message(
 
     try:
         await delete_pins_for_message(session, "group", group.id, message.id)
+        await redact_message_notification_previews(session, message.id)
         deleted_message = await delete_group_message(session, group, message, current_user)
         await group_websocket_manager.broadcast_to_group(
             group_id,

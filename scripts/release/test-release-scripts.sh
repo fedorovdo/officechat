@@ -15,6 +15,7 @@ ENV_FILE="${TMP_DIR}/officechat.env"
 COMPOSE_FILE="${ROOT_DIR}/deploy/docker-compose.release.yml"
 LOCK_DIR="${TMP_DIR}/officechat.lock"
 VERSION_FILE="${INSTALL_DIR}/VERSION"
+CADDY_FILE="${ROOT_DIR}/deploy/caddy/Caddyfile.example"
 
 mkdir -p "$FAKE_BIN" "$INSTALL_DIR"
 printf '0.1.0-rc2\n' >"$VERSION_FILE"
@@ -50,6 +51,30 @@ export OFFICECHAT_LOCK_FILE="$LOCK_DIR"
 
 bash -n "${SCRIPT_DIR}"/*.sh
 bash -n "${SCRIPT_DIR}/officechatctl"
+
+[[ -f "$CADDY_FILE" ]] || { echo "Caddy template is missing" >&2; exit 1; }
+grep -Fq '@frontend_health path /api/health /api/health/*' "$CADDY_FILE" || {
+  echo "Caddy template does not route frontend health explicitly" >&2
+  exit 1
+}
+grep -Fq '@backend path /api /api/*' "$CADDY_FILE" || {
+  echo "Caddy template does not contain the general backend API route" >&2
+  exit 1
+}
+frontend_health_line="$(grep -n '^[[:space:]]*handle @frontend_health' "$CADDY_FILE" | head -n 1 | cut -d: -f1)"
+backend_line="$(grep -n '^[[:space:]]*handle @backend' "$CADDY_FILE" | head -n 1 | cut -d: -f1)"
+if [[ -z "$frontend_health_line" || -z "$backend_line" || "$frontend_health_line" -ge "$backend_line" ]]; then
+  echo "Caddy frontend health handle must precede the general backend handle" >&2
+  exit 1
+fi
+grep -Fq 'deploy/caddy/Caddyfile.example' "${SCRIPT_DIR}/create-release-bundle.sh" || {
+  echo "Release bundle does not include the Caddy template" >&2
+  exit 1
+}
+grep -Fq 'Caddyfile.example' "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not copy the Caddy template" >&2
+  exit 1
+}
 
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null

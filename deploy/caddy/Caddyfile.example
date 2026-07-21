@@ -11,8 +11,17 @@
 		format console
 	}
 
-	@backend path /api /api/* /docs /docs/* /redoc /redoc/* /openapi.json /ready /health /healthz
-	reverse_proxy @backend backend:8000
+	@frontend_health path /api/health /api/health/*
+	handle @frontend_health {
+		reverse_proxy frontend:3000
+	}
 
-	reverse_proxy frontend:3000
+	@backend path /api /api/* /docs /docs/* /redoc /redoc/* /openapi.json /ready /health /healthz
+	handle @backend {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
 }

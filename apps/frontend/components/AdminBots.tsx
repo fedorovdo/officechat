@@ -20,6 +20,7 @@ import {
   type UpdateAdminBotPayload
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { getIncomingBotWebhookUrl } from "../lib/public-url";
 
 type AdminBotsProps = {
   dictionary: Dictionary;
@@ -64,7 +65,7 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
   );
 
   const webhookExample = oneTimeToken
-    ? `curl.exe -X POST http://localhost:8100/api/bots/incoming/${oneTimeToken} -H "Content-Type: application/json" -d "{\\"group_slug\\":\\"alerts\\",\\"title\\":\\"Backup failed\\",\\"severity\\":\\"high\\",\\"body\\":\\"Check server\\"}"`
+    ? `curl.exe -X POST ${getIncomingBotWebhookUrl(oneTimeToken)} -H "Content-Type: application/json" -d "{\\"group_slug\\":\\"alerts\\",\\"title\\":\\"Backup failed\\",\\"severity\\":\\"high\\",\\"body\\":\\"Check server\\"}"`
     : "";
 
   async function reloadBots(token: string) {

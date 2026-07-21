@@ -1032,9 +1032,6 @@
       "selfHosted": "Self-hosted deployment"
     }
   },
-  "links": {
-    "docsHref": "http://localhost:8100/docs"
-  },
   "status": {
     "ariaLabel": "System status",
     "title": "Backend status",

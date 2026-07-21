@@ -1032,9 +1032,6 @@
       "selfHosted": "Самостоятельное развёртывание"
     }
   },
-  "links": {
-    "docsHref": "http://localhost:8100/docs"
-  },
   "status": {
     "ariaLabel": "Статус системы",
     "title": "Статус backend",

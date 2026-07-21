@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { locales, type Dictionary, type Locale } from "../lib/i18n";
+import { getApiDocsHref } from "../lib/public-url";
 
 type LandingProps = {
   dictionary: Dictionary;
@@ -35,7 +36,7 @@ export function Landing({ dictionary, locale }: LandingProps) {
             <Link className="primary-button" href={`/${locale}/login`}>
               {dictionary.actions.login}
             </Link>
-            <Link className="secondary-link" href={dictionary.links.docsHref}>
+            <Link className="secondary-link" href={getApiDocsHref()}>
               {dictionary.actions.apiDocs}
             </Link>
           </div>

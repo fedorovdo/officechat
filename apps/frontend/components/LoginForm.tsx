@@ -8,6 +8,7 @@ import { BrandLogo } from "./Brand";
 import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { getSafeLoginNext, storeAccessToken } from "../lib/session";
+import { buildApiUrl } from "../lib/public-url";
 
 type LoginFormProps = {
   dictionary: Dictionary;
@@ -42,7 +43,7 @@ export function LoginForm({ dictionary, locale }: LoginFormProps) {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/login`, {
+      const response = await fetch(buildApiUrl("/api/auth/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"

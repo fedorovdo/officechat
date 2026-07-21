@@ -1786,7 +1786,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }
 
   async function logout() {
-    await logoutSession(locale, process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100");
+    await logoutSession(locale);
   }
 
   async function handleOpenDirectUser(user: OfficeChatDirectoryUser) {

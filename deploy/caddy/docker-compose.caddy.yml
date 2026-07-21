@@ -1,0 +1,30 @@
+name: officechat-caddy
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      OFFICECHAT_HOSTNAME: ${OFFICECHAT_HOSTNAME:-officechat.example.local}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - officechat_caddy_data:/data
+      - officechat_caddy_config:/config
+    networks:
+      - officechat_public
+
+# Never use `docker compose down -v` here: the data volume contains the private internal CA.
+volumes:
+  officechat_caddy_data:
+    name: officechat_caddy_data
+  officechat_caddy_config:
+    name: officechat_caddy_config
+
+networks:
+  officechat_public:
+    external: true
+    name: ${OFFICECHAT_PUBLIC_NETWORK:-officechat_public}

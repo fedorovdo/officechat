@@ -40,9 +40,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://officechat:replace-with-postgres-password@postgres:5432/officechat}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-change-me-in-production}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
-      PUBLIC_FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-https://chat.example.com}
-      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
-      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://chat.example.com}
+      PUBLIC_FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-https://officechat.example.local}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://officechat.example.local}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://officechat.example.local}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
       AUDIT_MAX_EXPORT_ROWS: ${AUDIT_MAX_EXPORT_ROWS:-10000}
       MESSAGE_MAX_LENGTH: ${MESSAGE_MAX_LENGTH:-4000}
@@ -80,6 +80,11 @@ services:
       UPLOADS_DIR: /data/uploads
     volumes:
       - uploads:/data/uploads
+    ports:
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_HOST_PORT:-8100}:8000"
+    networks:
+      - default
+      - public
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,9 +111,9 @@ services:
       ENVIRONMENT: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://officechat:replace-with-postgres-password@postgres:5432/officechat}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-change-me-in-production}
-      PUBLIC_FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-https://chat.example.com}
-      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
-      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://chat.example.com}
+      PUBLIC_FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-https://officechat.example.local}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://officechat.example.local}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://officechat.example.local}
       NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
       NOTIFICATION_MAX_PER_USER: ${NOTIFICATION_MAX_PER_USER:-5000}
       CALENDAR_TITLE_MAX_LENGTH: ${CALENDAR_TITLE_MAX_LENGTH:-200}
@@ -138,8 +143,6 @@ services:
       target: runtime
       args:
         NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
-        NEXT_PUBLIC_FRONTEND_URL: ${NEXT_PUBLIC_FRONTEND_URL:-https://chat.example.com}
-        NEXT_PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
         NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
         NEXT_PUBLIC_OFFICECHAT_VERSION: ${APP_VERSION:-0.1.0-rc2}
         NEXT_PUBLIC_OFFICECHAT_BUILD_SHA: ${OFFICECHAT_BUILD_SHA:-}
@@ -153,8 +156,8 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
-      NEXT_PUBLIC_FRONTEND_URL: ${NEXT_PUBLIC_FRONTEND_URL:-https://chat.example.com}
-      NEXT_PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://chat.example.com}
+      NEXT_PUBLIC_FRONTEND_URL: ${NEXT_PUBLIC_FRONTEND_URL:-https://officechat.example.local}
+      NEXT_PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://officechat.example.local}
       NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
       NEXT_PUBLIC_OFFICECHAT_VERSION: ${APP_VERSION:-0.1.0-rc2}
       NEXT_PUBLIC_OFFICECHAT_BUILD_SHA: ${OFFICECHAT_BUILD_SHA:-}
@@ -166,7 +169,10 @@ services:
       NEXT_PUBLIC_OFFICECHAT_SUPPORT_EMAIL: ${NEXT_PUBLIC_OFFICECHAT_SUPPORT_EMAIL:-}
       NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME: ${NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME:-}
     ports:
-      - "${FRONTEND_HOST_PORT:-3100}:3000"
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_HOST_PORT:-3100}:3000"
+    networks:
+      - default
+      - public
     depends_on:
       backend:
         condition: service_healthy
@@ -175,3 +181,7 @@ volumes:
   postgres-data:
   valkey-data:
   uploads:
+
+networks:
+  public:
+    name: officechat_public

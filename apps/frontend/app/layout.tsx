@@ -6,7 +6,6 @@ import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 const localizedBrand = getLocalizedBrand("en");
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_FRONTEND_URL ?? "http://localhost:3100"),
   title: {
     default: localizedBrand.title,
     template: `%s | ${officeChatBrand.productName}`
@@ -25,7 +24,6 @@ export const metadata: Metadata = {
     title: localizedBrand.title,
     description: localizedBrand.description,
     siteName: officeChatBrand.productName,
-    images: [{ url: "/brand/officechat-logo-square.svg", width: 128, height: 128 }],
     type: "website"
   },
   robots: {

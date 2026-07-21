@@ -39,6 +39,8 @@ run() {
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]] || { echo "Invalid version: $VERSION" >&2; exit 2; }
 
 run mkdir -p "$RELEASE_DIR" "$DIST_DIR"
+run mkdir -p "${RELEASE_DIR}/caddy"
+run mkdir -p "${RELEASE_DIR}/deployment"
 run cp "${ROOT_DIR}/deploy/docker-compose.release.yml" "${RELEASE_DIR}/docker-compose.yml"
 run cp "${ROOT_DIR}/.env.production.example" "${RELEASE_DIR}/.env.example"
 run cp "${ROOT_DIR}/scripts/release/install-linux.sh" "${RELEASE_DIR}/install-linux.sh"
@@ -49,6 +51,11 @@ run cp "${ROOT_DIR}/scripts/release/verify-install.sh" "${RELEASE_DIR}/verify-in
 run cp "${ROOT_DIR}/scripts/release/officechatctl" "${RELEASE_DIR}/officechatctl"
 run cp "${ROOT_DIR}/scripts/release/lib.sh" "${RELEASE_DIR}/lib.sh"
 run cp "${ROOT_DIR}/scripts/release/collect-diagnostics.sh" "${RELEASE_DIR}/collect-diagnostics.sh"
+run cp "${ROOT_DIR}/deploy/caddy/Caddyfile.example" "${RELEASE_DIR}/caddy/Caddyfile.example"
+run cp "${ROOT_DIR}/deploy/caddy/docker-compose.caddy.yml" "${RELEASE_DIR}/caddy/docker-compose.caddy.yml"
+for deployment_doc in production-installation.md internal-https.md windows-certificate-installation.md caddy-ca-backup-restore.md; do
+  run cp "${ROOT_DIR}/docs/deployment/${deployment_doc}" "${RELEASE_DIR}/deployment/${deployment_doc}"
+done
 if [[ -f "${ROOT_DIR}/docs/INSTALL_RU.md" ]]; then
   run cp "${ROOT_DIR}/docs/INSTALL_RU.md" "${RELEASE_DIR}/README_INSTALL_RU.md"
 fi
@@ -62,7 +69,7 @@ run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" 
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh VERSION README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh VERSION README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
     cd "$ROOT_DIR"

@@ -91,7 +91,10 @@ services:
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3100}
       UPLOADS_DIR: ${UPLOADS_DIR:-/data/uploads}
     ports:
-      - "8100:8000"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:8100:8000"
+    networks:
+      - default
+      - public
     volumes:
       - uploads:/data/uploads
       - ./apps/backend/app:/app/app
@@ -174,7 +177,10 @@ services:
       NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME: ${NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME:-}
       E2E_ALLOW_DESTRUCTIVE_TESTS: ${E2E_ALLOW_DESTRUCTIVE_TESTS:-false}
     ports:
-      - "3100:3000"
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:3100:3000"
+    networks:
+      - default
+      - public
     volumes:
       - ./apps/frontend:/app
       - frontend-node-modules:/app/node_modules
@@ -188,3 +194,7 @@ volumes:
   uploads:
   frontend-node-modules:
   frontend-next:
+
+networks:
+  public:
+    name: officechat_public

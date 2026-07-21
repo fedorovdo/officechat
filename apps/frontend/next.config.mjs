@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
-const websocketUrl = backendUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
+const websocketUrl = backendUrl?.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+const backendSources = backendUrl ? ` ${backendUrl} ${websocketUrl}` : "";
 
 const nextConfig = {
   output: "standalone",
@@ -15,7 +16,7 @@ const nextConfig = {
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
           {
             key: "Content-Security-Policy",
-            value: `default-src 'self'; connect-src 'self' ${backendUrl} ${websocketUrl}; img-src 'self' data: blob: ${backendUrl}; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'none';`
+            value: `default-src 'self'; connect-src 'self'${backendSources}; img-src 'self' data: blob:${backendUrl ? ` ${backendUrl}` : ""}; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'none';`
           }
         ]
       }

@@ -1,5 +1,7 @@
 # Production deployment
 
+Актуальная пошаговая схема с отдельным Caddy, внутренним HTTPS и закрытыми host ports: [deployment/production-installation.md](deployment/production-installation.md). Модель CA и backup описаны в [deployment/internal-https.md](deployment/internal-https.md) и [deployment/caddy-ca-backup-restore.md](deployment/caddy-ca-backup-restore.md).
+
 ## Branding and public metadata
 
 Для production можно задать `OFFICECHAT_VERSION`, `OFFICECHAT_BUILD_SHA`, `OFFICECHAT_BUILD_DATE` и публичные `NEXT_PUBLIC_OFFICECHAT_*` переменные из `.env.production.example`. Эти значения отображаются на `/ru/about`, `/en/about`, frontend `/api/health` и backend `/health`. Не передавайте через них секреты или внутренние deployment details. По умолчанию frontend metadata использует `noindex,nofollow`; для публичной demo-инсталляции это нужно менять осознанно.
@@ -82,4 +84,5 @@ ghcr.io/fedorovdo/officechat-frontend:sha-<short_git_sha>
 Примеры reverse proxy:
 
 - `deploy/nginx/officechat.conf`
-- `deploy/caddy/Caddyfile`
+- `deploy/caddy/Caddyfile.example`
+- `deploy/caddy/docker-compose.caddy.yml`

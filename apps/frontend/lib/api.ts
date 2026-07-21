@@ -5,6 +5,7 @@ import {
   requireStoredAccessToken,
   storeAccessToken
 } from "./session";
+import { buildWebSocketUrl, getApiBaseUrl } from "./public-url";
 
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
 export type GroupRole = "owner" | "moderator" | "member";
@@ -996,7 +997,7 @@ export type OfficeChatUserPermissionState = {
   inherited_from_superadmin: boolean;
 };
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
+const apiBaseUrl = getApiBaseUrl();
 
 // TODO: Move production auth storage to secure cookies or a stronger session mechanism.
 export { clearStoredAccessToken, getStoredAccessToken, requireStoredAccessToken, storeAccessToken };
@@ -1689,12 +1690,8 @@ export function removeGroupMessageReaction(token: string, groupId: string, messa
 }
 
 export function getGroupWebSocketUrl(token: string, groupId: string) {
-  const backendUrl = new URL(apiBaseUrl);
-  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
-  backendUrl.pathname = `/api/ws/groups/${groupId}`;
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
-  backendUrl.search = new URLSearchParams({ token }).toString();
-  return backendUrl.toString();
+  return buildWebSocketUrl(`/api/ws/groups/${groupId}`, token);
 }
 
 export function getDirectConversations(token: string) {
@@ -1813,21 +1810,13 @@ export function removeDirectMessageReaction(token: string, conversationId: strin
 }
 
 export function getDirectWebSocketUrl(token: string, conversationId: string) {
-  const backendUrl = new URL(apiBaseUrl);
-  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
-  backendUrl.pathname = `/api/ws/direct/${conversationId}`;
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
-  backendUrl.search = new URLSearchParams({ token }).toString();
-  return backendUrl.toString();
+  return buildWebSocketUrl(`/api/ws/direct/${conversationId}`, token);
 }
 
 export function getPersonalWebSocketUrl(token: string) {
-  const backendUrl = new URL(apiBaseUrl);
-  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
-  backendUrl.pathname = "/api/ws/me";
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
-  backendUrl.search = new URLSearchParams({ token }).toString();
-  return backendUrl.toString();
+  return buildWebSocketUrl("/api/ws/me", token);
 }
 
 export function createDiscussion(
@@ -1947,12 +1936,8 @@ export function removeDiscussionMember(token: string, discussionId: string, memb
 }
 
 export function getDiscussionWebSocketUrl(token: string, discussionId: string) {
-  const backendUrl = new URL(apiBaseUrl);
-  backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
-  backendUrl.pathname = `/api/ws/discussions/${discussionId}`;
   // TODO: Move production WebSocket auth away from query tokens to a stronger session mechanism.
-  backendUrl.search = new URLSearchParams({ token }).toString();
-  return backendUrl.toString();
+  return buildWebSocketUrl(`/api/ws/discussions/${discussionId}`, token);
 }
 
 export function buildAttachmentDownloadUrl(downloadUrl: string) {

@@ -1,0 +1,18 @@
+{$OFFICECHAT_HOSTNAME:officechat.example.local} {
+	tls internal
+	encode gzip zstd
+
+	request_body {
+		max_size 60MB
+	}
+
+	log {
+		output stdout
+		format console
+	}
+
+	@backend path /api /api/* /docs /docs/* /redoc /redoc/* /openapi.json /ready /health /healthz
+	reverse_proxy @backend backend:8000
+
+	reverse_proxy frontend:3000
+}

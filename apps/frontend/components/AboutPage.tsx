@@ -6,6 +6,7 @@ import Link from "next/link";
 import { BrandLogo } from "./Brand";
 import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { buildApiUrl } from "../lib/public-url";
 
 type AboutPageProps = {
   dictionary: Dictionary;
@@ -49,7 +50,6 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
   const [frontendHealth, setFrontendHealth] = useState<HealthStatus>(initialHealth);
   const [backendHealth, setBackendHealth] = useState<HealthStatus>(initialHealth);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100";
 
   const features = useMemo(
     () => [
@@ -86,7 +86,7 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
     }
 
     try {
-      const response = await fetch(`${backendUrl}/health`, { cache: "no-store" });
+      const response = await fetch(buildApiUrl("/health"), { cache: "no-store" });
       if (!response.ok) throw new Error("backend health unavailable");
       const data = (await response.json()) as Partial<HealthStatus>;
       setBackendHealth({
@@ -260,4 +260,3 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
     </main>
   );
 }
-

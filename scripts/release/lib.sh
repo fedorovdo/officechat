@@ -118,9 +118,16 @@ write_env_if_missing() {
     return
   fi
 
-  local postgres_password app_secret
+  local postgres_password app_secret public_frontend_url public_backend_url
   postgres_password="$(generate_secret)"
   app_secret="$(generate_secret)"
+  if [[ -n "${OFFICECHAT_HOSTNAME:-}" ]]; then
+    public_frontend_url="https://${OFFICECHAT_HOSTNAME}"
+    public_backend_url="https://${OFFICECHAT_HOSTNAME}"
+  else
+    public_frontend_url="${PUBLIC_FRONTEND_URL:-http://localhost:3100}"
+    public_backend_url="${PUBLIC_BACKEND_URL:-http://localhost:8100}"
+  fi
   umask 077
   cat >"$env_file" <<EOF_ENV
 OFFICECHAT_VERSION=${OFFICECHAT_RELEASE_VERSION}
@@ -130,11 +137,14 @@ POSTGRES_DB=officechat
 POSTGRES_USER=officechat
 POSTGRES_PASSWORD=${postgres_password}
 DATABASE_URL=postgresql://officechat:${postgres_password}@postgres:5432/officechat
-PUBLIC_FRONTEND_URL=${PUBLIC_FRONTEND_URL:-http://localhost:3100}
-PUBLIC_BACKEND_URL=${PUBLIC_BACKEND_URL:-http://localhost:8100}
-BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:3100}
-NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL:-http://localhost:3100}
-NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8100}
+OFFICECHAT_HOSTNAME=${OFFICECHAT_HOSTNAME:-}
+PUBLIC_FRONTEND_URL=${public_frontend_url}
+PUBLIC_BACKEND_URL=${public_backend_url}
+BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-${public_frontend_url}}
+NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL:-${public_frontend_url}}
+NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${public_backend_url}}
+FRONTEND_BIND_ADDRESS=127.0.0.1
+BACKEND_BIND_ADDRESS=127.0.0.1
 FRONTEND_HOST_PORT=${FRONTEND_HOST_PORT:-3100}
 BACKEND_HOST_PORT=${BACKEND_HOST_PORT:-8100}
 OFFICECHAT_DATA_DIR=${OFFICECHAT_DATA_DIR}

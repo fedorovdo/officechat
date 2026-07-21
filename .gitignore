@@ -1,4 +1,7 @@
 .env
+.env.bak
+.env.*.bak
+.env.production.local
 .venv/
 __pycache__/
 *.py[cod]
@@ -20,3 +23,14 @@ apps/frontend/playwright-report/
 apps/frontend/blob-report/
 /dist/
 /release/
+
+# Local Caddy PKI and production overrides. Public examples remain tracked.
+/deploy/caddy/*.crt
+/deploy/caddy/*.key
+/deploy/caddy/*.pem
+/deploy/caddy/*.p12
+/deploy/caddy/*.pfx
+/deploy/caddy/*ca-backup*.tar*
+/deploy/caddy/ca-backups/
+/deploy/caddy/Caddyfile.local
+/deploy/caddy/docker-compose.caddy.override.yml

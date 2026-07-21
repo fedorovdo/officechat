@@ -7,26 +7,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SHOW_HELP=0
 INSTALL_DOCKER=0
+OFFICECHAT_HOSTNAME="${OFFICECHAT_HOSTNAME:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) SHOW_HELP=1; shift ;;
     --dry-run) set_dry_run; shift ;;
     --install-docker) INSTALL_DOCKER=1; shift ;;
+    --hostname)
+      [[ $# -ge 2 ]] || fail "--hostname requires a value"
+      OFFICECHAT_HOSTNAME="$2"
+      shift 2
+      ;;
     *) fail "Unknown argument: $1" ;;
   esac
 done
 
 if [[ "$SHOW_HELP" == "1" ]]; then
   cat <<'EOF_HELP'
-Usage: install-linux.sh [--dry-run] [--install-docker]
+Usage: install-linux.sh [--dry-run] [--install-docker] [--hostname HOSTNAME]
 
 Installs OfficeChat into /opt/officechat and data into /var/lib/officechat.
-Set PUBLIC_FRONTEND_URL, PUBLIC_BACKEND_URL and BACKEND_CORS_ORIGINS for real deployments.
+Production requires HTTPS. --hostname configures the public HTTPS origin for a new install.
 EOF_HELP
   exit 0
 fi
 
 validate_version "$OFFICECHAT_RELEASE_VERSION"
+if [[ -n "$OFFICECHAT_HOSTNAME" && ! "$OFFICECHAT_HOSTNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+  fail "Invalid OfficeChat hostname"
+fi
 require_safe_path "$OFFICECHAT_INSTALL_DIR"
 require_safe_path "$OFFICECHAT_DATA_DIR"
 require_safe_path "$OFFICECHAT_BACKUP_DIR"
@@ -66,6 +75,15 @@ for release_tool in lib.sh install-linux.sh update-linux.sh rollback-linux.sh un
     as_root cp "${SCRIPT_DIR}/${release_tool}" "${OFFICECHAT_INSTALL_DIR}/${release_tool}"
   fi
 done
+if [[ -d "${SCRIPT_DIR}/../../deploy/caddy" ]]; then
+  as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
+  as_root cp "${SCRIPT_DIR}/../../deploy/caddy/Caddyfile.example" "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
+  as_root cp "${SCRIPT_DIR}/../../deploy/caddy/docker-compose.caddy.yml" "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
+elif [[ -d "${SCRIPT_DIR}/caddy" ]]; then
+  as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
+  as_root cp "${SCRIPT_DIR}/caddy/Caddyfile.example" "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
+  as_root cp "${SCRIPT_DIR}/caddy/docker-compose.caddy.yml" "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
+fi
 as_root chmod +x "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl"
 as_root chmod 755 "$OFFICECHAT_INSTALL_DIR"
 write_env_if_missing "$OFFICECHAT_ENV_FILE"
@@ -90,3 +108,10 @@ if [[ -n "${OFFICECHAT_ADMIN_USERNAME:-}" && -n "${OFFICECHAT_ADMIN_DISPLAY_NAME
 fi
 
 pass "OfficeChat ${OFFICECHAT_RELEASE_VERSION} installed."
+warn "Production access requires HTTPS; do not expose ports 3100 or 8100 to the LAN."
+if [[ -n "$OFFICECHAT_HOSTNAME" ]]; then
+  log "Start internal HTTPS after DNS is ready:"
+  log "  docker compose --env-file ${OFFICECHAT_ENV_FILE} -f ${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml up -d"
+  log "Export only the public CA certificate:"
+  log "  docker compose --env-file ${OFFICECHAT_ENV_FILE} -f ${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./officechat-root.crt"
+fi

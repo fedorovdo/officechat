@@ -30,6 +30,10 @@ Key docs:
 - [docs/E2E_TESTS_RU.md](docs/E2E_TESTS_RU.md)
 - [docs/RELEASE_CHECKLIST_RU.md](docs/RELEASE_CHECKLIST_RU.md)
 
+## Production / Internal HTTPS
+
+Production deployment uses same-origin HTTP/WebSocket routing through a separate Caddy Compose project with `tls internal`. Frontend/backend diagnostic ports bind to `127.0.0.1`; LAN clients use only ports 80/443. Start with [production installation](docs/deployment/production-installation.md), then review [internal HTTPS](docs/deployment/internal-https.md), [Windows CA installation](docs/deployment/windows-certificate-installation.md), and [Caddy CA backup/restore](docs/deployment/caddy-ca-backup-restore.md). Never run `docker compose down -v` for Caddy.
+
 Production migrations are explicit:
 
 ```bash

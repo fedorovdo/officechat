@@ -68,6 +68,12 @@ bash "${SCRIPT_DIR}/install-linux.sh" --dry-run >/dev/null
 [[ ! -d "$DATA_DIR" ]] || { echo "install dry-run created data dir" >&2; exit 1; }
 grep -q 'preserve-this-secret' "$ENV_FILE" || { echo "install dry-run did not preserve existing env" >&2; exit 1; }
 
+bash "${SCRIPT_DIR}/install-linux.sh" --dry-run --hostname officechat.example.local >/dev/null
+if bash "${SCRIPT_DIR}/install-linux.sh" --dry-run --hostname 'https://invalid.example.local' >/dev/null 2>&1; then
+  echo "install-linux.sh accepted an invalid hostname" >&2
+  exit 1
+fi
+
 before_version="$(cat "$VERSION_FILE")"
 bash "${SCRIPT_DIR}/rollback-linux.sh" --dry-run 0.1.0-rc1 >/dev/null
 after_version="$(cat "$VERSION_FILE")"

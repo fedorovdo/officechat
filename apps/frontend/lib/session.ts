@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from "./public-url";
+
 export const ACCESS_TOKEN_KEY = "officechat.access_token";
 export const AUTHENTICATION_EXPIRED_EVENT = "officechat:authentication-expired";
 
@@ -104,7 +106,7 @@ export function onAuthenticationExpired(listener: (reason: AuthenticationEndReas
   return () => window.removeEventListener(AUTHENTICATION_EXPIRED_EVENT, handler);
 }
 
-export async function logoutSession(locale: "ru" | "en", backendUrl: string) {
+export async function logoutSession(locale: "ru" | "en", backendUrl = getApiBaseUrl()) {
   const token = localStorage.getItem(ACCESS_TOKEN_KEY);
   if (token) {
     void fetch(`${backendUrl}/api/auth/logout`, {

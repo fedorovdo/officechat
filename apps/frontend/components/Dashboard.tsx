@@ -42,7 +42,7 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
   }, [dictionary.dashboard.loadError, locale]);
 
   async function logout() {
-    await logoutSession(locale, process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8100");
+    await logoutSession(locale);
   }
 
   return (

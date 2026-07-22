@@ -33,25 +33,51 @@ export function formatUnreadCount(count: number) {
   return count > 99 ? "99+" : String(count);
 }
 
-export function useUnreadStore(token: string | null, currentUserId: string | null) {
+export function useUnreadStore(
+  token: string | null,
+  currentUserId: string | null,
+  onReadState?: (state: OfficeChatReadState) => void
+) {
   const [summary, setSummary] = useState<OfficeChatUnreadSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState("");
   const requestRef = useRef<Promise<void> | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const markReadVersionsRef = useRef(new Map<string, number>());
+  const authoritativeVersionRef = useRef(0);
+  const onReadStateRef = useRef(onReadState);
+  onReadStateRef.current = onReadState;
 
   const reload = useCallback(async () => {
     if (!token) return;
     if (requestRef.current) return requestRef.current;
-    const request = (async () => {
+    const generation = sessionGenerationRef.current;
+    const authoritativeVersion = authoritativeVersionRef.current;
+    let request!: Promise<void>;
+    request = (async () => {
+      let shouldRetry = false;
       setIsLoading(true);
       try {
-        setSummary(await getUnreadSummary(token));
-        setError("");
+        const nextSummary = await getUnreadSummary(token);
+        if (sessionGenerationRef.current !== generation) return;
+        if (authoritativeVersionRef.current !== authoritativeVersion) {
+          shouldRetry = true;
+        } else {
+          setSummary(nextSummary);
+          setIsReady(true);
+          authoritativeVersionRef.current += 1;
+          setError("");
+        }
       } catch (caughtError) {
+        if (sessionGenerationRef.current !== generation) return;
         setError(caughtError instanceof Error ? caughtError.message : "Unread state unavailable");
       } finally {
-        setIsLoading(false);
-        requestRef.current = null;
+        if (sessionGenerationRef.current === generation) setIsLoading(false);
+        if (requestRef.current === request) requestRef.current = null;
+        if (shouldRetry && sessionGenerationRef.current === generation) {
+          queueMicrotask(() => void reload());
+        }
       }
     })();
     requestRef.current = request;
@@ -59,17 +85,26 @@ export function useUnreadStore(token: string | null, currentUserId: string | nul
   }, [token]);
 
   useEffect(() => {
+    sessionGenerationRef.current += 1;
+    requestRef.current = null;
     setSummary(emptySummary);
+    setIsLoading(false);
+    setIsReady(false);
     setError("");
     if (token && currentUserId) void reload();
     return onAuthenticationExpired(() => {
+      sessionGenerationRef.current += 1;
       requestRef.current = null;
+      markReadVersionsRef.current.clear();
+      authoritativeVersionRef.current += 1;
       setSummary(emptySummary);
+      setIsReady(false);
       setError("");
     });
   }, [currentUserId, reload, token]);
 
   const applyUnreadEvent = useCallback((event: UnreadEvent) => {
+    authoritativeVersionRef.current += 1;
     setSummary((current) => {
       const currentIndex = current.chats.findIndex(
         (chat) => chat.chat_type === event.chat_type && chat.chat_id === event.chat_id
@@ -115,20 +150,24 @@ export function useUnreadStore(token: string | null, currentUserId: string | nul
   }, [applyUnreadEvent]);
 
   const markRead = useCallback(async (chatType: ChatType, chatId: string, messageId: string) => {
-    if (!token) return;
-    applyUnreadEvent({
-      type: "unread.updated",
-      chat_type: chatType,
-      chat_id: chatId,
-      unread_count: 0,
-      mention_count: 0,
-      total_unread: null,
-      last_read_message_id: messageId
-    });
+    if (!token) return false;
+    const key = chatKey(chatType, chatId);
+    const version = (markReadVersionsRef.current.get(key) ?? 0) + 1;
+    const authoritativeVersion = authoritativeVersionRef.current;
+    markReadVersionsRef.current.set(key, version);
     try {
-      reconcileReadState(await markChatRead(token, chatType, chatId, messageId));
+      const state = await markChatRead(token, chatType, chatId, messageId);
+      if (markReadVersionsRef.current.get(key) !== version) return true;
+      if (authoritativeVersionRef.current !== authoritativeVersion) {
+        await reload();
+        return true;
+      }
+      reconcileReadState(state);
+      onReadStateRef.current?.(state);
+      return true;
     } catch {
-      await reload();
+      if (markReadVersionsRef.current.get(key) === version) await reload();
+      return false;
     }
   }, [applyUnreadEvent, reconcileReadState, reload, token]);
 
@@ -142,5 +181,5 @@ export function useUnreadStore(token: string | null, currentUserId: string | nul
     [chatsByKey]
   );
 
-  return { applyUnreadEvent, error, getChat, isLoading, markRead, reload, summary };
+  return { applyUnreadEvent, error, getChat, isLoading, isReady, markRead, reload, summary };
 }

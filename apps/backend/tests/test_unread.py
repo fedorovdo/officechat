@@ -46,6 +46,16 @@ class InitSession:
         self.commits += 1
 
 
+class ReturningSession:
+    def __init__(self, ids):
+        self.ids = ids
+        self.statement = None
+
+    async def execute(self, statement):
+        self.statement = statement
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: self.ids))
+
+
 class UnreadSummaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_summary_aggregates_three_categories_and_mentions(self):
         user = SimpleNamespace(id=uuid4(), role="user")
@@ -90,6 +100,23 @@ class UnreadSummaryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MarkReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_notification_batch_only_targets_message_category_in_selected_chat(self):
+        user_id, chat_id, message_id, notification_id = uuid4(), uuid4(), uuid4(), uuid4()
+        session = ReturningSession([notification_id])
+        message = SimpleNamespace(id=message_id, created_at=NOW)
+
+        result = await unread.mark_message_notifications_read_through(
+            session, user_id, "group", chat_id, message
+        )
+
+        self.assertEqual(result, [notification_id])
+        compiled = session.statement.compile()
+        values = set(compiled.params.values())
+        self.assertIn("messages", values)
+        self.assertIn("group", values)
+        self.assertIn(chat_id, values)
+        self.assertNotIn("calendar", values)
+
     async def test_marker_never_moves_backwards_and_call_is_idempotent(self):
         current_marker_id = uuid4()
         state = SimpleNamespace(
@@ -105,6 +132,8 @@ class MarkReadTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.services.unread._load_authorized_message", AsyncMock(return_value=older_message)),
+            patch("app.services.unread.mark_message_notifications_read_through", AsyncMock(return_value=[])),
+            patch("app.services.unread.notification_unread_count", AsyncMock(return_value=0)),
             patch("app.services.unread.get_unread_summary", AsyncMock(return_value=summary)),
             patch("app.services.unread.user_websocket_manager.broadcast_to_user", AsyncMock()) as broadcast,
             patch("app.services.unread.direct_websocket_manager.broadcast_to_conversation", AsyncMock()) as direct,
@@ -130,6 +159,8 @@ class MarkReadTests(unittest.IsolatedAsyncioTestCase):
         summary = UnreadSummaryPublic(total=0, groups=0, direct=0, discussions=0, chats=[])
         with (
             patch("app.services.unread._load_authorized_message", AsyncMock(return_value=message)),
+            patch("app.services.unread.mark_message_notifications_read_through", AsyncMock(return_value=[])),
+            patch("app.services.unread.notification_unread_count", AsyncMock(return_value=0)),
             patch("app.services.unread.get_unread_summary", AsyncMock(return_value=summary)),
             patch("app.services.unread.user_websocket_manager.broadcast_to_user", AsyncMock()),
             patch("app.services.unread.direct_websocket_manager.broadcast_to_conversation", AsyncMock()) as direct,
@@ -139,6 +170,51 @@ class MarkReadTests(unittest.IsolatedAsyncioTestCase):
         event = direct.await_args.args[1]
         self.assertEqual(event["type"], "direct.read")
         self.assertEqual(event["reader_user_id"], str(user.id))
+
+    async def test_message_notification_sync_is_batched_and_broadcast(self):
+        state = SimpleNamespace(
+            last_read_message_id=None,
+            last_read_message_created_at=None,
+            last_read_at=None,
+        )
+        session = StateSession(state)
+        user = SimpleNamespace(id=uuid4())
+        payload = MarkReadRequest(chat_type="discussion", chat_id=uuid4(), message_id=uuid4())
+        message = SimpleNamespace(id=payload.message_id, created_at=NOW)
+        notification_ids = [uuid4(), uuid4()]
+        summary = UnreadSummaryPublic(total=0, groups=0, direct=0, discussions=0, chats=[])
+        with (
+            patch("app.services.unread._load_authorized_message", AsyncMock(return_value=message)),
+            patch(
+                "app.services.unread.mark_message_notifications_read_through",
+                AsyncMock(return_value=notification_ids),
+            ) as mark_notifications,
+            patch("app.services.unread.notification_unread_count", AsyncMock(return_value=3)),
+            patch("app.services.unread.get_unread_summary", AsyncMock(return_value=summary)),
+            patch("app.services.unread.user_websocket_manager.broadcast_to_user", AsyncMock()) as broadcast,
+            patch("app.services.unread.direct_websocket_manager.broadcast_to_conversation", AsyncMock()),
+        ):
+            result = await unread.mark_chat_read(session, user, payload)
+
+        mark_notifications.assert_awaited_once_with(
+            session, user.id, "discussion", payload.chat_id, message
+        )
+        self.assertEqual(result.notification_unread_count, 3)
+        self.assertEqual(result.read_notification_ids, notification_ids)
+        notification_event = broadcast.await_args_list[1].args[1]
+        self.assertEqual(notification_event["type"], "notifications.messages_read")
+        self.assertEqual(notification_event["unread_count"], 3)
+
+    async def test_unrelated_user_cannot_mark_direct_conversation_read(self):
+        user = SimpleNamespace(id=uuid4())
+        payload = MarkReadRequest(chat_type="direct", chat_id=uuid4(), message_id=uuid4())
+        conversation = SimpleNamespace(id=payload.chat_id)
+        with (
+            patch("app.services.unread.get_direct_conversation", AsyncMock(return_value=conversation)),
+            patch("app.services.unread.ensure_direct_conversation_access", side_effect=PermissionError("denied")),
+        ):
+            with self.assertRaises(PermissionError):
+                await unread._load_authorized_message(AsyncMock(), user, payload)
 
 
 class UnreadBroadcastTests(unittest.IsolatedAsyncioTestCase):

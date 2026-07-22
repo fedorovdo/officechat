@@ -64,6 +64,15 @@ import { connectResilientWebSocket } from "../lib/resilientWebSocket";
 import { formatUnreadCount, useUnreadStore } from "../lib/useUnreadStore";
 import { useMessageSearchShortcut } from "../lib/useMessageSearchShortcut";
 import { logoutSession, onAuthenticationExpired } from "../lib/session";
+import { clearAppBadge } from "../lib/appBadge";
+import { useAppBadge } from "../lib/useAppBadge";
+import {
+  notificationDedupeKey,
+  shouldShowOpenAppNotification,
+  showOpenAppNotification
+} from "../lib/openAppNotification";
+import { readWindowActivity, useWindowActivity } from "../lib/useWindowActivity";
+import { markNotificationsReadByIds } from "../lib/notificationState";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
@@ -154,6 +163,8 @@ type BrowserNotificationAttempt = {
   senderUserId: string;
   body: string;
   selectedChatId: string;
+  conversationType: "group" | "direct" | "discussion" | "other";
+  conversationId: string;
   onClick: () => void;
 };
 
@@ -245,20 +256,6 @@ function readNotificationPreferenceRaw() {
   return localStorage.getItem(notificationPreferenceKey) ?? "false";
 }
 
-function getCurrentVisibilityState(): DocumentVisibilityState | "unknown" {
-  if (typeof document === "undefined") {
-    return "unknown";
-  }
-  return document.visibilityState;
-}
-
-function getCurrentWindowFocusState() {
-  if (typeof document === "undefined") {
-    return false;
-  }
-  return document.hasFocus();
-}
-
 function createEmptyNotificationDebug(): BrowserNotificationDebug {
   return {
     eventType: "-",
@@ -290,9 +287,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const deepLinkHandledRef = useRef(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const browserNotificationsEnabledRef = useRef(false);
-  const notificationPermissionRef = useRef<BrowserNotificationPermission>("default");
-  const windowFocusedRef = useRef(false);
-  const visibilityStateRef = useRef<DocumentVisibilityState | "unknown">("unknown");
+  const notificationCenterOpenRef = useRef(false);
+  const notificationCenterFilterRef = useRef<NotificationCenterFilter>("all");
+  const notificationReloadVersionRef = useRef(0);
+  const notificationStateVersionRef = useRef(0);
   const selectedRef = useRef<AppSelection>({ type: "empty" });
   const [currentUser, setCurrentUser] = useState<OfficeChatUser | null>(null);
   const [groups, setGroups] = useState<OfficeChatGroup[]>([]);
@@ -306,9 +304,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [notificationPermission, setNotificationPermission] =
     useState<BrowserNotificationPermission>("default");
   const [notificationPreferenceRaw, setNotificationPreferenceRaw] = useState("false");
-  const [documentVisibilityState, setDocumentVisibilityState] =
-    useState<DocumentVisibilityState | "unknown">("unknown");
-  const [isWindowFocused, setIsWindowFocused] = useState(false);
+  const windowActivity = useWindowActivity();
   const [testNotificationStatus, setTestNotificationStatus] = useState("");
   const [notificationDebug, setNotificationDebug] = useState<BrowserNotificationDebug>(() =>
     createEmptyNotificationDebug()
@@ -347,7 +343,19 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [sidebarPreferencesLoaded, setSidebarPreferencesLoaded] = useState(false);
   const [error, setError] = useState("");
   const unreadToken = currentUser ? getStoredAccessToken() : null;
-  const unreadStore = useUnreadStore(unreadToken, currentUser?.id ?? null);
+  const unreadStore = useUnreadStore(unreadToken, currentUser?.id ?? null, (state) => {
+    if (Number.isInteger(state.notification_unread_count) && state.notification_unread_count >= 0) {
+      setNotificationUnreadCount(state.notification_unread_count);
+    }
+    const readNotificationIds = state.read_notification_ids ?? [];
+    if (readNotificationIds.length > 0) {
+      setNotificationItems((items) => markNotificationsReadByIds(items, readNotificationIds));
+    }
+  });
+  useAppBadge(
+    unreadStore.summary.total,
+    isLoading || (Boolean(currentUser) && !unreadStore.isReady) ? null : Boolean(currentUser)
+  );
   useMessageSearchShortcut(() => setIsMessageSearchOpen(true));
 
   const selectedGroup = selected.type === "group" ? groups.find((group) => group.id === selected.groupId) : null;
@@ -548,17 +556,12 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     return dictionary.sidebarActivity.noRecentMessages;
   }
 
-  function getNotificationMessagePreview(message: OfficeChatDirectMessage | OfficeChatDiscussionMessage) {
+  function getNotificationMessagePreview(
+    message: OfficeChatMessage | OfficeChatDirectMessage | OfficeChatDiscussionMessage
+  ) {
     const body = message.body.trim();
     if (body) return body;
-    if (message.attachments.length > 1) {
-      return dictionary.sidebarActivity.attachmentsCount.replace("{count}", String(message.attachments.length));
-    }
-    if (message.attachments.length === 1) {
-      return dictionary.sidebarActivity.attachmentWithFilename.replace(
-        "{filename}", message.attachments[0].original_filename
-      );
-    }
+    if (message.attachments.length > 0) return dictionary.sidebarActivity.attachment;
     return dictionary.sidebarActivity.attachment;
   }
 
@@ -592,12 +595,15 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     senderUserId,
     body,
     selectedChatId,
+    conversationType,
+    conversationId,
     onClick
   }: BrowserNotificationAttempt) {
     const permission = getBrowserNotificationPermission();
     const enabledValue = readNotificationPreferenceRaw();
-    const visibilityState = getCurrentVisibilityState();
-    const windowFocused = getCurrentWindowFocusState();
+    const activity = readWindowActivity();
+    const notificationData = { locale, conversationType, conversationId, messageId };
+    const dedupeKey = notificationDedupeKey(notificationData);
     const baseDebug: BrowserNotificationDebug = {
       eventType,
       messageId,
@@ -606,8 +612,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       selectedChatId,
       permission,
       enabledValue,
-      visibilityState,
-      windowFocused,
+      visibilityState: activity.visibilityState,
+      windowFocused: activity.hasFocus,
       attempted: false,
       result: "skipped",
       skipReason: "none",
@@ -615,41 +621,29 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       timestamp: new Date().toISOString()
     };
 
-    if (!currentUser || senderUserId === currentUser.id) {
-      recordNotificationDebug({ ...baseDebug, skipReason: "senderIsCurrentUser" });
-      return;
-    }
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      recordNotificationDebug({ ...baseDebug, skipReason: "unsupported" });
-      return;
-    }
-    if (!browserNotificationsEnabledRef.current || enabledValue !== "true") {
-      recordNotificationDebug({ ...baseDebug, skipReason: "notificationsDisabled" });
-      return;
-    }
-    if (permission !== "granted") {
-      recordNotificationDebug({ ...baseDebug, skipReason: "permissionNotGranted" });
-      return;
-    }
-    if (visibilityState === "visible" && windowFocused) {
-      recordNotificationDebug({ ...baseDebug, skipReason: "tabActive" });
-      return;
-    }
-    if (notifiedMessageIdsRef.current.includes(messageId)) {
-      recordNotificationDebug({ ...baseDebug, skipReason: "duplicate" });
+    if (!currentUser) return;
+    const skipReason = shouldShowOpenAppNotification({
+      activity,
+      currentUserId: currentUser.id,
+      duplicate: notifiedMessageIdsRef.current.includes(dedupeKey),
+      enabled: browserNotificationsEnabledRef.current && enabledValue === "true",
+      permission,
+      senderUserId
+    });
+    if (skipReason) {
+      recordNotificationDebug({ ...baseDebug, skipReason });
       return;
     }
 
     try {
-      const notification = new Notification("OfficeChat", {
-        body: truncateNotificationPreview(body)
+      const notification = showOpenAppNotification({
+        body: truncateNotificationPreview(body),
+        data: notificationData,
+        onClick,
+        tag: `officechat-${conversationType}-${messageId}`
       });
-      notifiedMessageIdsRef.current = [messageId, ...notifiedMessageIdsRef.current].slice(0, 80);
-      notification.onclick = () => {
-        window.focus();
-        onClick();
-        notification.close();
-      };
+      if (!notification) throw new Error("Notifications API unavailable");
+      notifiedMessageIdsRef.current = [dedupeKey, ...notifiedMessageIdsRef.current].slice(0, 80);
       recordNotificationDebug({
         ...baseDebug,
         attempted: true,
@@ -769,19 +763,30 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   async function reloadNotifications(filter = notificationCenterFilter) {
     const token = getStoredAccessToken();
     if (!token) return;
+    const requestVersion = notificationReloadVersionRef.current + 1;
+    notificationReloadVersionRef.current = requestVersion;
+    const stateVersion = notificationStateVersionRef.current;
     setIsNotificationCenterLoading(true);
     try {
       const [page, unread] = await Promise.all([
         getNotifications(token, { limit: 30, ...notificationQueryForFilter(filter) }),
         getNotificationUnreadCount(token)
       ]);
+      if (
+        notificationReloadVersionRef.current !== requestVersion ||
+        notificationStateVersionRef.current !== stateVersion
+      ) return;
       setNotificationItems(page.items);
       setNotificationCursor(page.next_cursor);
       setNotificationUnreadCount(unread.unread_count);
     } catch {
-      setError(dictionary.notifications.loadError);
+      if (notificationReloadVersionRef.current === requestVersion) {
+        setError(dictionary.notifications.loadError);
+      }
     } finally {
-      setIsNotificationCenterLoading(false);
+      if (notificationReloadVersionRef.current === requestVersion) {
+        setIsNotificationCenterLoading(false);
+      }
     }
   }
 
@@ -945,23 +950,19 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     selectedRef.current = selected;
   }, [selected]);
 
+  notificationCenterOpenRef.current = isNotificationCenterOpen;
+  notificationCenterFilterRef.current = notificationCenterFilter;
+
   useEffect(() => {
     const loadedSettings = readSettings(locale);
     const loadedNotificationPreference = readNotificationPreference();
     const loadedNotificationPreferenceRaw = readNotificationPreferenceRaw();
     const loadedNotificationPermission = getBrowserNotificationPermission();
-    const loadedVisibilityState = getCurrentVisibilityState();
-    const loadedWindowFocusState = getCurrentWindowFocusState();
     setSettings({ ...loadedSettings, language: locale });
     browserNotificationsEnabledRef.current = loadedNotificationPreference;
-    notificationPermissionRef.current = loadedNotificationPermission;
-    visibilityStateRef.current = loadedVisibilityState;
-    windowFocusedRef.current = loadedWindowFocusState;
     setBrowserNotificationsEnabled(loadedNotificationPreference);
     setNotificationPreferenceRaw(loadedNotificationPreferenceRaw);
     setNotificationPermission(loadedNotificationPermission);
-    setDocumentVisibilityState(loadedVisibilityState);
-    setIsWindowFocused(loadedWindowFocusState);
   }, [locale]);
 
   useEffect(() => {
@@ -985,27 +986,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     localStorage.setItem(sidebarCollapsedKey, String(isSidebarCollapsed));
     localStorage.setItem(sidebarTabKey, sidebarTab);
   }, [isSidebarCollapsed, sidebarPreferencesLoaded, sidebarTab, sidebarWidth]);
-
-  useEffect(() => {
-    function updateBrowserAttentionState() {
-      const nextVisibilityState = getCurrentVisibilityState();
-      const nextWindowFocusState = getCurrentWindowFocusState();
-      visibilityStateRef.current = nextVisibilityState;
-      windowFocusedRef.current = nextWindowFocusState;
-      setDocumentVisibilityState(nextVisibilityState);
-      setIsWindowFocused(nextWindowFocusState);
-    }
-
-    updateBrowserAttentionState();
-    window.addEventListener("focus", updateBrowserAttentionState);
-    window.addEventListener("blur", updateBrowserAttentionState);
-    document.addEventListener("visibilitychange", updateBrowserAttentionState);
-    return () => {
-      window.removeEventListener("focus", updateBrowserAttentionState);
-      window.removeEventListener("blur", updateBrowserAttentionState);
-      document.removeEventListener("visibilitychange", updateBrowserAttentionState);
-    };
-  }, []);
 
   useEffect(() => {
     if (!currentUser) {
@@ -1209,7 +1189,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         isMentioned && !isSelectedGroup && !isOwnMessage
       );
 
-      const preview = getGroupMessagePreview(payload.message);
+      const preview = getNotificationMessagePreview(payload.message);
       attemptBrowserNotification({
         eventType: payload.type,
         messageId: payload.message.id,
@@ -1220,10 +1200,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               .replace("{preview}", preview)
           : `${payload.group.name} - ${payload.message.sender.display_name}: ${preview}`,
         selectedChatId: getSelectionDebugId(currentSelection),
+        conversationType: "group",
+        conversationId: payload.group_id,
         onClick: () => {
-          setSelected({ type: "group", groupId: payload.group_id });
-          setActiveDiscussionId(null);
-          markGroupRead(payload.group_id);
+          void openMessageContext("group", payload.group_id, payload.message.id).catch(() => {
+            setSelected({ type: "group", groupId: payload.group_id });
+            setActiveDiscussionId(null);
+          });
         }
       });
     }
@@ -1243,10 +1226,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         senderUserId: payload.message.sender_user_id,
         body: `${payload.message.sender.display_name}: ${preview}`,
         selectedChatId: getSelectionDebugId(currentSelection),
+        conversationType: "direct",
+        conversationId: payload.conversation_id,
         onClick: () => {
-          setSelected({ type: "direct", conversationId: payload.conversation_id });
-          setActiveDiscussionId(null);
-          markDirectUserRead(payload.other_user.id);
+          void openMessageContext("direct", payload.conversation_id, payload.message.id).catch(() => {
+            setSelected({ type: "direct", conversationId: payload.conversation_id });
+            setActiveDiscussionId(null);
+          });
         }
       });
     }
@@ -1262,11 +1248,20 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         eventType: payload.type,
         messageId: payload.message.id,
         senderUserId: payload.message.sender_user_id,
-        body: dictionary.discussions.newMessageNotification.replace("{preview}", preview),
+        body: `${payload.message.sender.display_name}: ${dictionary.discussions.newMessageNotification.replace("{preview}", preview)}`,
         selectedChatId: getSelectionDebugId(currentSelection),
+        conversationType: "discussion",
+        conversationId: payload.discussion_id,
         onClick: () => {
-          setSelected({ type: "group", groupId: payload.discussion.source_group_id });
-          setActiveDiscussionId(payload.discussion_id);
+          void openMessageContext(
+            "discussion",
+            payload.discussion_id,
+            payload.message.id,
+            payload.discussion.source_group_id
+          ).catch(() => {
+            setSelected({ type: "group", groupId: payload.discussion.source_group_id });
+            setActiveDiscussionId(payload.discussion_id);
+          });
         }
       });
     }
@@ -1280,6 +1275,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         senderUserId: payload.announcement.sender_user_id ?? "-",
         body: `${payload.announcement.sender_display_name}: ${payload.announcement.title}`,
         selectedChatId: getSelectionDebugId(selectedRef.current),
+        conversationType: "other",
+        conversationId: payload.announcement.id,
         onClick: () => {
           setSelected({ type: "announcements" });
           setActiveDiscussionId(null);
@@ -1298,6 +1295,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         senderUserId: payload.event.created_by.id ?? "-",
         body,
         selectedChatId: getSelectionDebugId(selectedRef.current),
+        conversationType: "other",
+        conversationId: payload.event.id,
         onClick: () => {
           setSelected({ type: "calendar" });
           setActiveDiscussionId(null);
@@ -1311,7 +1310,21 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       heartbeatIntervalMs: presenceHeartbeatIntervalMs,
       onStatusChange: (status) => {
         setPersonalSocketStatus(status);
-        if (status === "connected") void unreadStore.reload();
+        if (status === "connected") {
+          void unreadStore.reload();
+          if (notificationCenterOpenRef.current) {
+            void reloadNotifications(notificationCenterFilterRef.current);
+          } else {
+            const stateVersion = notificationStateVersionRef.current;
+            void getNotificationUnreadCount(accessToken)
+              .then((unread) => {
+                if (notificationStateVersionRef.current === stateVersion) {
+                  setNotificationUnreadCount(unread.unread_count);
+                }
+              })
+              .catch(() => undefined);
+          }
+        }
       },
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
@@ -1359,24 +1372,31 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             return;
           }
           if (payload.type === "notification.created") {
+            notificationStateVersionRef.current += 1;
             upsertNotification(payload.notification);
             setNotificationUnreadCount(payload.unread_count);
-            attemptBrowserNotification({
-              eventType: payload.type,
-              messageId: payload.notification.message_id ?? payload.notification.id,
-              senderUserId: payload.notification.actor.id ?? "-",
-              body: `${payload.notification.actor.display_name ?? dictionary.notifications.title}: ${
-                dictionary.notifications.desktopGeneric
-              }`,
-              selectedChatId: getSelectionDebugId(selectedRef.current),
-              onClick: () => {
-                setIsNotificationCenterOpen(true);
-                void openCenterNotification(payload.notification);
-              }
-            });
+            // Message notifications are followed by the richer personal message event.
+            if (payload.notification.category !== "messages") {
+              attemptBrowserNotification({
+                eventType: payload.type,
+                messageId: payload.notification.message_id ?? payload.notification.id,
+                senderUserId: payload.notification.actor.id ?? "-",
+                body: `${payload.notification.actor.display_name ?? dictionary.notifications.title}: ${
+                  dictionary.notifications.desktopGeneric
+                }`,
+                selectedChatId: getSelectionDebugId(selectedRef.current),
+                conversationType: "other",
+                conversationId: payload.notification.chat_id ?? payload.notification.id,
+                onClick: () => {
+                  setIsNotificationCenterOpen(true);
+                  void openCenterNotification(payload.notification);
+                }
+              });
+            }
             return;
           }
           if (payload.type === "notification.read") {
+            notificationStateVersionRef.current += 1;
             setNotificationUnreadCount(payload.unread_count);
             setNotificationItems((current) =>
               current.map((item) =>
@@ -1387,7 +1407,16 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             );
             return;
           }
+          if (payload.type === "notifications.messages_read") {
+            notificationStateVersionRef.current += 1;
+            setNotificationUnreadCount(payload.unread_count);
+            setNotificationItems((current) =>
+              markNotificationsReadByIds(current, payload.notification_ids)
+            );
+            return;
+          }
           if (payload.type === "notifications.read_all") {
+            notificationStateVersionRef.current += 1;
             setNotificationUnreadCount(payload.unread_count);
             setNotificationItems((current) =>
               current.map((item) =>
@@ -1399,6 +1428,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             return;
           }
           if (payload.type === "notification.dismissed") {
+            notificationStateVersionRef.current += 1;
             setNotificationUnreadCount(payload.unread_count);
             removeNotification(payload.notification_id);
             return;
@@ -1438,6 +1468,12 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     unreadStore.applyUnreadEvent,
     unreadStore.reload
   ]);
+
+  useEffect(() => onAuthenticationExpired(() => void clearAppBadge()), []);
+
+  useEffect(() => {
+    setNotificationPermission(getBrowserNotificationPermission());
+  }, [windowActivity.hasFocus, windowActivity.visibilityState]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -1623,7 +1659,6 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     }
 
     const permission = await Notification.requestPermission();
-    notificationPermissionRef.current = permission;
     setNotificationPermission(permission);
     updateBrowserNotificationsEnabled(permission === "granted");
   }
@@ -1631,15 +1666,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   function sendTestBrowserNotification() {
     const permission = getBrowserNotificationPermission();
     const enabledValue = readNotificationPreferenceRaw();
-    const visibilityState = getCurrentVisibilityState();
-    const windowFocused = getCurrentWindowFocusState();
-    notificationPermissionRef.current = permission;
+    const activity = readWindowActivity();
     setNotificationPermission(permission);
     setNotificationPreferenceRaw(enabledValue);
-    visibilityStateRef.current = visibilityState;
-    windowFocusedRef.current = windowFocused;
-    setDocumentVisibilityState(visibilityState);
-    setIsWindowFocused(windowFocused);
 
     const baseDebug: BrowserNotificationDebug = {
       eventType: "test.notification",
@@ -1649,8 +1678,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       selectedChatId: getSelectedChatDebugId(),
       permission,
       enabledValue,
-      visibilityState,
-      windowFocused,
+      visibilityState: activity.visibilityState,
+      windowFocused: activity.hasFocus,
       attempted: false,
       result: "skipped",
       skipReason: "none",
@@ -1786,6 +1815,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   }
 
   async function logout() {
+    await clearAppBadge();
     await logoutSession(locale);
   }
 
@@ -2633,11 +2663,11 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     {dictionary.appShell.notificationDebugEnabled}: {notificationPreferenceRaw}
                   </p>
                   <p className="note">
-                    {dictionary.appShell.notificationDebugVisibility}: {documentVisibilityState}
+                    {dictionary.appShell.notificationDebugVisibility}: {windowActivity.visibilityState}
                   </p>
                   <p className="note">
                     {dictionary.appShell.notificationDebugFocused}:{" "}
-                    {isWindowFocused ? dictionary.appShell.yes : dictionary.appShell.no}
+                    {windowActivity.hasFocus ? dictionary.appShell.yes : dictionary.appShell.no}
                   </p>
                   <p className="note">
                     {dictionary.appShell.personalSocketStatus}:{" "}

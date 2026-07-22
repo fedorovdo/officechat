@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import and_, case, exists, false, func, literal, or_, select
+from sqlalchemy import and_, case, exists, false, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import aggregate_order_by, insert as pg_insert
 from sqlalchemy.orm import aliased
@@ -11,6 +11,7 @@ from app.models.discussion import Discussion, DiscussionMember, DiscussionMessag
 from app.models.group import Group, GroupMember
 from app.models.mention import MessageMention
 from app.models.message import Message
+from app.models.notification import Notification
 from app.models.read_state import ChatReadState
 from app.models.user import User
 from app.schemas.unread import DirectReadReceiptPublic, MarkReadRequest, ReadStatePublic, UnreadChatPublic, UnreadSummaryPublic
@@ -18,6 +19,7 @@ from app.services.direct import ensure_direct_conversation_access, get_direct_co
 from app.services.discussions import ensure_discussion_access, get_discussion
 from app.services.groups import is_global_group_admin
 from app.services.messages import ensure_group_message_access
+from app.services.notifications import unread_count as notification_unread_count
 from app.services.websocket_manager import direct_websocket_manager, user_websocket_manager
 
 MESSAGE_MODELS = {
@@ -250,6 +252,38 @@ def _position(created_at: datetime | None, message_id: UUID | None) -> tuple[dat
     return created_at, str(message_id)
 
 
+async def mark_message_notifications_read_through(
+    session: AsyncSession,
+    user_id: UUID,
+    chat_type: str,
+    chat_id: UUID,
+    message,
+) -> list[UUID]:
+    model, chat_column = MESSAGE_MODELS[chat_type]
+    visible_message_ids = select(model.id).where(
+        chat_column == chat_id,
+        or_(
+            model.created_at < message.created_at,
+            and_(model.created_at == message.created_at, model.id <= message.id),
+        ),
+    )
+    result = await session.execute(
+        update(Notification)
+        .where(
+            Notification.user_id == user_id,
+            Notification.category == "messages",
+            Notification.chat_type == chat_type,
+            Notification.chat_id == chat_id,
+            Notification.message_id.in_(visible_message_ids),
+            Notification.is_read.is_(False),
+            Notification.is_dismissed.is_(False),
+        )
+        .values(is_read=True, read_at=datetime.now(timezone.utc))
+        .returning(Notification.id)
+    )
+    return list(result.scalars().all())
+
+
 async def mark_chat_read(
     session: AsyncSession, current_user: User, payload: MarkReadRequest
 ) -> ReadStatePublic:
@@ -278,6 +312,9 @@ async def mark_chat_read(
         state.last_read_message_id = message.id
         state.last_read_message_created_at = message.created_at
         state.last_read_at = now
+    read_notification_ids = await mark_message_notifications_read_through(
+        session, current_user.id, payload.chat_type, payload.chat_id, message
+    )
     await session.commit()
     await session.refresh(state)
 
@@ -298,6 +335,16 @@ async def mark_chat_read(
         "newest_unread_message_id": str(chat.newest_unread_message_id) if chat and chat.newest_unread_message_id else None,
     }
     await user_websocket_manager.broadcast_to_user(current_user.id, event)
+    current_notification_unread = await notification_unread_count(session, current_user.id)
+    if read_notification_ids:
+        await user_websocket_manager.broadcast_to_user(
+            current_user.id,
+            {
+                "type": "notifications.messages_read",
+                "notification_ids": [str(notification_id) for notification_id in read_notification_ids],
+                "unread_count": current_notification_unread,
+            },
+        )
     if payload.chat_type == "direct":
         await direct_websocket_manager.broadcast_to_conversation(
             payload.chat_id,
@@ -321,6 +368,8 @@ async def mark_chat_read(
         unread_count=chat.unread_count if chat else 0,
         mention_count=chat.mention_count if chat else 0,
         total_unread=summary.total,
+        notification_unread_count=current_notification_unread,
+        read_notification_ids=read_notification_ids,
     )
 
 

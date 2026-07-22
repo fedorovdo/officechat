@@ -397,7 +397,7 @@
     "accentPurple": "Фиолетовый",
     "accentForest": "Лесной",
     "browserNotifications": "Уведомления браузера",
-    "enableNotifications": "Разрешить уведомления",
+    "enableNotifications": "Разрешить уведомления Windows",
     "testNotification": "Тест уведомления",
     "notificationTestSent": "Тестовое уведомление отправлено",
     "notificationTestPermissionRequired": "Сначала разрешите уведомления в браузере.",
@@ -405,7 +405,7 @@
     "notificationsPreference": "Показывать уведомления о новых сообщениях",
     "notificationsEnabled": "Включены",
     "notificationsDisabled": "Выключены",
-    "notificationsNote": "Уведомления работают, когда OfficeChat открыт в браузере.",
+    "notificationsNote": "Уведомления появляются, когда OfficeChat свёрнут или находится за другими окнами. Полностью закрытое приложение пока не получает уведомления.",
     "notificationsDeniedHint": "Доступ запрещен. Разрешение нужно изменить вручную в настройках браузера.",
     "notificationPermission": "Разрешение",
     "notificationDebugTitle": "Диагностика уведомлений",
@@ -426,10 +426,10 @@
     "yes": "да",
     "no": "нет",
     "notificationPermissions": {
-      "granted": "granted",
-      "denied": "denied",
-      "default": "default",
-      "unsupported": "unsupported"
+      "granted": "Разрешены",
+      "denied": "Заблокированы браузером",
+      "default": "Не настроены",
+      "unsupported": "Не поддерживаются"
     },
     "notificationGuide": {
       "howToEnable": "Как включить уведомления",

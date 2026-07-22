@@ -8,6 +8,7 @@ import {
 } from "../components/NotificationCenter";
 import en from "../dictionaries/en.json";
 import type { OfficeChatNotification } from "../lib/api";
+import { markNotificationsReadByIds } from "../lib/notificationState";
 
 function notification(overrides: Partial<OfficeChatNotification> = {}): OfficeChatNotification {
   return {
@@ -63,6 +64,20 @@ function renderCenter(props: Partial<Parameters<typeof NotificationCenter>[0]> =
 }
 
 describe("notification center", () => {
+  it("marks linked message notifications without touching calendar or announcements", () => {
+    const message = notification({ id: "message-notification", category: "messages" });
+    const calendar = notification({ id: "calendar-notification", category: "calendar", type: "calendar_reminder" });
+    const announcement = notification({ id: "announcement-notification", category: "announcements", type: "announcement" });
+    const result = markNotificationsReadByIds(
+      [message, calendar, announcement],
+      [message.id],
+      "2026-07-22T10:00:00Z"
+    );
+    expect(result[0]).toMatchObject({ is_read: true, read_at: "2026-07-22T10:00:00Z" });
+    expect(result[1].is_read).toBe(false);
+    expect(result[2].is_read).toBe(false);
+  });
+
   it("renders bell badge and hides it at zero", () => {
     const { rerender } = render(<NotificationBell dictionary={en} onClick={vi.fn()} unreadCount={120} />);
     expect(screen.getByRole("button", { name: "120 unread notifications" })).toHaveTextContent("99+");

@@ -41,7 +41,7 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Локальные настройки интерфейса: язык, сторона sidebar, размер шрифта, accent color.
 - Базовые direct messages между пользователями: REST API, WebSocket updates, UI в `/ru/app`.
 - Локальные sidebar notifications: unread indicators, last message previews, recent activity ordering через frontend `localStorage`.
-- Базовые browser notifications во frontend: разрешение браузера, тестовая кнопка, диагностика, setup guide, настройка в `localStorage`, уведомления при неактивной вкладке.
+- Browser notifications для открытого/свёрнутого PWA: явное разрешение, диагностика, App Badge, personal WebSocket и дедупликация message events.
 - Персональный WebSocket канал `WS /api/ws/me` для событий новых групповых и личных сообщений текущего пользователя.
 - Reply-to-message для групповых и личных сообщений: компактная цитата исходного сообщения без thread/discussion view.
 - Базовые `@username` mentions в групповых сообщениях: определение активных участников группы, подсветка и mention-aware browser notifications.
@@ -65,7 +65,7 @@ Retention and Storage Management v0.1 реализует disabled-by-default arc
 - Доставка и статусы сообщений.
 - Server-side unread counters, multi-tab read-state sync и direct read receipts реализованы в v0.1.
 - Базовые уведомления в интерфейсе.
-- Service worker и server push notifications для уведомлений без открытой вкладки.
+- Service Worker, Web Push/VAPID и backend subscriptions для уведомлений при полностью закрытом приложении.
 - Custom reactions, стикеры и GIF.
 - Расширение discussions: отдельный sidebar список, direct-message discussions и более развитое представление цепочек.
 - Autocomplete и profile links для mentions, поддержка mentions в direct messages.

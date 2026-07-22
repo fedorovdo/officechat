@@ -55,7 +55,7 @@ type DirectChatPanelProps = {
   currentUser: OfficeChatUser;
   dictionary: Dictionary;
   locale: Locale;
-  onMarkRead?: (messageId: string) => void | Promise<void>;
+  onMarkRead?: (messageId: string) => boolean | void | Promise<boolean | void>;
   unread?: OfficeChatUnreadChat;
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
@@ -104,7 +104,13 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     currentUser.id,
     conversation.id
   );
-  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread: historicalTargetId ? undefined : unread });
+  useVisibleReadMarker({
+    currentUserId: currentUser.id,
+    messages,
+    onMarkRead,
+    scrollContainerRef: messagesListRef,
+    unread: historicalTargetId ? undefined : unread
+  });
   const {
     appendFiles,
     attachments,

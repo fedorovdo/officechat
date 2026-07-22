@@ -61,7 +61,7 @@ type DiscussionPanelProps = {
   locale: Locale;
   onClose: () => void;
   presenceByUserId?: Record<string, OfficeChatPresence>;
-  onMarkRead?: (messageId: string) => void | Promise<void>;
+  onMarkRead?: (messageId: string) => boolean | void | Promise<boolean | void>;
   unread?: OfficeChatUnreadChat;
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
@@ -120,7 +120,13 @@ export function DiscussionPanel({
     currentUser.id,
     discussionId
   );
-  useVisibleReadMarker({ messages, onMarkRead, panelRef, unread: historicalTargetId ? undefined : unread });
+  useVisibleReadMarker({
+    currentUserId: currentUser.id,
+    messages,
+    onMarkRead,
+    scrollContainerRef: panelRef,
+    unread: historicalTargetId ? undefined : unread
+  });
   const {
     appendFiles,
     attachments,

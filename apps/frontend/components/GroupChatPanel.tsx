@@ -54,7 +54,7 @@ type GroupChatPanelProps = {
   groupId: string;
   locale: Locale;
   onDiscuss?: (message: OfficeChatMessage) => void;
-  onMarkRead?: (messageId: string) => void | Promise<void>;
+  onMarkRead?: (messageId: string) => boolean | void | Promise<boolean | void>;
   unread?: OfficeChatUnreadChat;
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
@@ -116,9 +116,10 @@ export function GroupChatPanel({
     groupId
   );
   useVisibleReadMarker({
+    currentUserId: currentUser.id,
     messages,
     onMarkRead,
-    panelRef,
+    scrollContainerRef: messagesListRef,
     unread: historicalTargetId ? undefined : unread
   });
   const {

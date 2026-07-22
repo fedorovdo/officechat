@@ -397,7 +397,7 @@
     "accentPurple": "Purple",
     "accentForest": "Forest",
     "browserNotifications": "Browser notifications",
-    "enableNotifications": "Enable notifications",
+    "enableNotifications": "Enable Windows notifications",
     "testNotification": "Test notification",
     "notificationTestSent": "Test notification sent",
     "notificationTestPermissionRequired": "Allow notifications in the browser first.",
@@ -405,7 +405,7 @@
     "notificationsPreference": "Show notifications for new messages",
     "notificationsEnabled": "Enabled",
     "notificationsDisabled": "Disabled",
-    "notificationsNote": "Notifications work while OfficeChat is open in the browser.",
+    "notificationsNote": "Notifications appear while OfficeChat is minimized or behind other windows. A fully closed app does not receive notifications yet.",
     "notificationsDeniedHint": "Permission is denied. Change it manually in browser settings.",
     "notificationPermission": "Permission",
     "notificationDebugTitle": "Notification diagnostics",
@@ -426,10 +426,10 @@
     "yes": "yes",
     "no": "no",
     "notificationPermissions": {
-      "granted": "granted",
-      "denied": "denied",
-      "default": "default",
-      "unsupported": "unsupported"
+      "granted": "Allowed",
+      "denied": "Blocked by browser",
+      "default": "Not configured",
+      "unsupported": "Not supported"
     },
     "notificationGuide": {
       "howToEnable": "How to enable notifications",

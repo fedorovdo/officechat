@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ChatType = Literal["group", "direct", "discussion"]
 
@@ -39,6 +39,8 @@ class ReadStatePublic(BaseModel):
     unread_count: int
     mention_count: int
     total_unread: int
+    notification_unread_count: int
+    read_notification_ids: list[UUID] = Field(default_factory=list)
 
 
 class DirectReadReceiptPublic(BaseModel):

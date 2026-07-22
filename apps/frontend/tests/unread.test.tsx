@@ -44,6 +44,7 @@ describe("unread store", () => {
   it("loads the initial authoritative snapshot and individual counters", async () => {
     const { result } = renderHook(() => useUnreadStore("token", "user-1"));
     await waitFor(() => expect(result.current.summary.total).toBe(5));
+    expect(result.current.isReady).toBe(true);
     expect(result.current.summary.groups).toBe(2);
     expect(result.current.summary.direct).toBe(3);
     expect(result.current.getChat("group", "group-1")?.unread_count).toBe(2);
@@ -74,7 +75,7 @@ describe("unread store", () => {
     expect(result.current.getChat("group", "group-1")?.mention_count).toBe(2);
   });
 
-  it("clears a chat optimistically and reconciles the server result", async () => {
+  it("reconciles a chat from the server result", async () => {
     const { result } = renderHook(() => useUnreadStore("token", "user-1"));
     await waitFor(() => expect(result.current.summary.total).toBe(5));
     await act(async () => result.current.markRead("group", "group-1", "message-2"));
@@ -90,6 +91,26 @@ describe("unread store", () => {
     act(() => mocks.authenticationListener?.());
     expect(result.current.summary.total).toBe(0);
     expect(result.current.summary.chats).toEqual([]);
+    expect(result.current.isReady).toBe(false);
+  });
+
+  it("ignores an unread snapshot that resolves after authentication expiry", async () => {
+    let resolveSnapshot!: (value: ReturnType<typeof unreadFactory>) => void;
+    mocks.getUnreadSummary.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveSnapshot = resolve; })
+    );
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(1));
+    act(() => mocks.authenticationListener?.());
+    resolveSnapshot(unreadFactory({ total: 11, groups: 8, direct: 3 }));
+    await act(async () => Promise.resolve());
+    expect(result.current.summary).toEqual({
+      total: 0,
+      groups: 0,
+      direct: 0,
+      discussions: 0,
+      chats: []
+    });
   });
 
   it("reloads authoritative state after reconnect", async () => {
@@ -100,47 +121,269 @@ describe("unread store", () => {
     expect(result.current.summary.total).toBe(9);
     expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(2);
   });
+
+  it("ignores an older mark-read response that arrives last", async () => {
+    let resolveOlder!: (value: unknown) => void;
+    let resolveNewer!: (value: unknown) => void;
+    mocks.markChatRead
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOlder = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNewer = resolve; }));
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+    let olderRequest!: Promise<boolean>;
+    let newerRequest!: Promise<boolean>;
+    act(() => {
+      olderRequest = result.current.markRead("group", "group-1", "message-1");
+      newerRequest = result.current.markRead("group", "group-1", "message-2");
+    });
+    resolveNewer({
+      chat_type: "group", chat_id: "group-1", last_read_message_id: "message-2",
+      last_read_message_created_at: "2026-07-04T10:00:00Z", last_read_at: "2026-07-04T10:00:00Z",
+      unread_count: 0, mention_count: 0, total_unread: 3,
+      notification_unread_count: 0, read_notification_ids: []
+    });
+    await act(async () => newerRequest);
+    resolveOlder({
+      chat_type: "group", chat_id: "group-1", last_read_message_id: "message-1",
+      last_read_message_created_at: "2026-07-04T09:59:00Z", last_read_at: "2026-07-04T09:59:00Z",
+      unread_count: 1, mention_count: 0, total_unread: 4,
+      notification_unread_count: 1, read_notification_ids: []
+    });
+    await act(async () => olderRequest);
+    expect(result.current.summary.total).toBe(3);
+    expect(result.current.getChat("group", "group-1")).toBeUndefined();
+  });
+
+  it("reloads instead of applying a response older than a websocket event", async () => {
+    let resolveRead!: (value: unknown) => void;
+    mocks.markChatRead.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+    let request!: Promise<boolean>;
+    act(() => {
+      request = result.current.markRead("group", "group-1", "message-2");
+      result.current.applyUnreadEvent({
+        type: "unread.updated", chat_type: "direct", chat_id: "direct-1",
+        unread_count: 4, mention_count: 0, total_unread: 6,
+        last_read_message_id: null, first_unread_message_id: "direct-message-1",
+        newest_unread_message_id: "direct-message-4"
+      });
+    });
+    mocks.getUnreadSummary.mockResolvedValueOnce(unreadFactory({ total: 6, groups: 2, direct: 4 }));
+    resolveRead({
+      chat_type: "group", chat_id: "group-1", last_read_message_id: "message-2",
+      last_read_message_created_at: "2026-07-04T10:00:00Z", last_read_at: "2026-07-04T10:00:00Z",
+      unread_count: 0, mention_count: 0, total_unread: 3,
+      notification_unread_count: 0, read_notification_ids: []
+    });
+    await act(async () => request);
+    expect(result.current.summary.total).toBe(6);
+    expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards a snapshot older than a websocket event and reloads it", async () => {
+    let resolveInitial!: (value: ReturnType<typeof unreadFactory>) => void;
+    mocks.getUnreadSummary
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockResolvedValueOnce(unreadFactory({ total: 6, groups: 3, direct: 3 }));
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(1));
+    act(() => result.current.applyUnreadEvent({
+      type: "unread.updated", chat_type: "group", chat_id: "group-1",
+      unread_count: 3, mention_count: 0, total_unread: 6,
+      last_read_message_id: null, first_unread_message_id: "message-1",
+      newest_unread_message_id: "message-3"
+    }));
+    resolveInitial(unreadFactory({ total: 5 }));
+    await waitFor(() => expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.summary.total).toBe(6));
+    expect(result.current.summary.groups).toBe(3);
+  });
 });
 
 describe("visible read marker", () => {
-  beforeEach(() => vi.useFakeTimers());
+  class TestIntersectionObserver {
+    static instances: TestIntersectionObserver[] = [];
+    readonly callback: IntersectionObserverCallback;
+    readonly options?: IntersectionObserverInit;
+    readonly observed: Element[] = [];
 
-  function renderMarker(visibility: "visible" | "hidden", unread = true) {
+    constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+      this.callback = callback;
+      this.options = options;
+      TestIntersectionObserver.instances.push(this);
+    }
+
+    observe(element: Element) { this.observed.push(element); }
+    disconnect() { this.observed.length = 0; }
+    unobserve(element: Element) { this.observed.splice(this.observed.indexOf(element), 1); }
+    takeRecords() { return []; }
+
+    emit(element: Element, ratio: number, dimensions?: { intersectionHeight: number; messageHeight: number; rootHeight: number }) {
+      this.callback([
+        {
+          target: element,
+          isIntersecting: ratio > 0,
+          intersectionRatio: ratio,
+          boundingClientRect: { height: dimensions?.messageHeight ?? 100 },
+          intersectionRect: { height: dimensions?.intersectionHeight ?? ratio * 100 },
+          rootBounds: { height: dimensions?.rootHeight ?? 100 }
+        } as IntersectionObserverEntry
+      ], this as unknown as IntersectionObserver);
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestIntersectionObserver.instances = [];
+    Object.defineProperty(globalThis, "IntersectionObserver", {
+      configurable: true,
+      value: TestIntersectionObserver
+    });
+  });
+
+  function renderMarker(
+    visibility: "visible" | "hidden",
+    unread = true,
+    focused = true,
+    firstUnreadMessageId = "old",
+    onMarkRead = vi.fn()
+  ) {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: visibility });
-    const panel = document.createElement("section");
-    panel.getClientRects = () => [{ width: 100, height: 100 } as DOMRect] as unknown as DOMRectList;
-    const onMarkRead = vi.fn();
-    renderHook(() => useVisibleReadMarker({
-      messages: [{ id: "old" }, { id: "newest" }],
+    Object.defineProperty(document, "hidden", { configurable: true, value: visibility === "hidden" });
+    Object.defineProperty(document, "hasFocus", { configurable: true, value: () => focused });
+    const container = document.createElement("section");
+    const oldMessage = document.createElement("article");
+    oldMessage.dataset.messageId = "old";
+    const newestMessage = document.createElement("article");
+    newestMessage.dataset.messageId = "newest";
+    container.append(oldMessage, newestMessage);
+    const hook = renderHook(() => useVisibleReadMarker({
+      currentUserId: "me",
+      messages: [
+        { id: "old", sender_user_id: "other", is_deleted: false, is_archived: false },
+        { id: "newest", sender_user_id: "other", is_deleted: false, is_archived: false }
+      ],
       onMarkRead,
-      panelRef: { current: panel },
+      scrollContainerRef: { current: container },
       unread: unread ? {
         chat_type: "group",
         chat_id: "group-1",
         unread_count: 2,
         mention_count: 0,
-        first_unread_message_id: "old",
+        first_unread_message_id: firstUnreadMessageId,
         newest_unread_message_id: "newest"
       } : undefined
     }));
-    return onMarkRead;
+    return { container, newestMessage, oldMessage, onMarkRead, unmount: hook.unmount };
   }
 
-  it("marks the newest message after the visibility debounce", () => {
-    const onMarkRead = renderMarker("visible");
-    act(() => vi.advanceTimersByTime(500));
+  it("observes the real scroll container at 60 percent and waits 500ms", () => {
+    const { newestMessage, oldMessage, onMarkRead } = renderMarker("visible");
+    const observer = TestIntersectionObserver.instances[0];
+    expect(observer.options?.threshold).toEqual([0, 0.6]);
+    observer.emit(oldMessage, 0.6);
+    observer.emit(newestMessage, 0.6);
+    act(() => vi.advanceTimersByTime(499));
+    expect(onMarkRead).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+      vi.runOnlyPendingTimers();
+    });
     expect(onMarkRead).toHaveBeenCalledWith("newest");
   });
 
+  it("can confirm an oversized message that fills most of the scroll container", () => {
+    const { oldMessage, onMarkRead } = renderMarker("visible", true, true, "old");
+    const observer = TestIntersectionObserver.instances[0];
+    observer.emit(oldMessage, 0.3, { intersectionHeight: 70, messageHeight: 300, rootHeight: 100 });
+    act(() => {
+      vi.advanceTimersByTime(500);
+      vi.runOnlyPendingTimers();
+    });
+    expect(onMarkRead).toHaveBeenCalledWith("old");
+  });
+
   it("does not mark read while the document is hidden", () => {
-    const onMarkRead = renderMarker("hidden");
+    const { newestMessage, oldMessage, onMarkRead } = renderMarker("hidden");
+    TestIntersectionObserver.instances[0].emit(oldMessage, 1);
+    TestIntersectionObserver.instances[0].emit(newestMessage, 1);
     act(() => vi.advanceTimersByTime(1000));
+    expect(onMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("waits another 500ms after focus is restored", () => {
+    let focused = false;
+    Object.defineProperty(document, "hasFocus", { configurable: true, value: () => focused });
+    const { newestMessage, oldMessage, onMarkRead } = renderMarker("visible", true, false);
+    Object.defineProperty(document, "hasFocus", { configurable: true, value: () => focused });
+    TestIntersectionObserver.instances[0].emit(oldMessage, 1);
+    TestIntersectionObserver.instances[0].emit(newestMessage, 1);
+    act(() => vi.advanceTimersByTime(1000));
+    focused = true;
+    act(() => window.dispatchEvent(new Event("focus")));
+    act(() => vi.advanceTimersByTime(499));
+    expect(onMarkRead).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+      vi.runOnlyPendingTimers();
+    });
+    expect(onMarkRead).toHaveBeenCalledWith("newest");
+  });
+
+  it("does not mark a message during rapid scrolling", () => {
+    const { newestMessage, oldMessage, onMarkRead } = renderMarker("visible");
+    const observer = TestIntersectionObserver.instances[0];
+    observer.emit(oldMessage, 0.8);
+    observer.emit(newestMessage, 0.8);
+    act(() => vi.advanceTimersByTime(200));
+    observer.emit(oldMessage, 0.2);
+    observer.emit(newestMessage, 0.2);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(onMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("disconnects the observer and cancels timers on unmount", () => {
+    const { oldMessage, onMarkRead, unmount } = renderMarker("visible");
+    const observer = TestIntersectionObserver.instances[0];
+    observer.emit(oldMessage, 1);
+    unmount();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(observer.observed).toEqual([]);
     expect(onMarkRead).not.toHaveBeenCalled();
   });
 
   it("does not advance the marker for an old search context", () => {
-    const onMarkRead = renderMarker("visible", false);
+    const { onMarkRead } = renderMarker("visible", false);
     act(() => vi.advanceTimersByTime(1000));
     expect(onMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("does not skip an earlier unread message that was not visible", () => {
+    const { newestMessage, onMarkRead } = renderMarker("visible");
+    TestIntersectionObserver.instances[0].emit(newestMessage, 1);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(onMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when pagination omitted the first unread message", () => {
+    const { newestMessage, oldMessage, onMarkRead } = renderMarker("visible", true, true, "not-loaded");
+    expect(TestIntersectionObserver.instances).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(onMarkRead).not.toHaveBeenCalled();
+    expect(oldMessage).toBeDefined();
+    expect(newestMessage).toBeDefined();
+  });
+
+  it("retries after a failed mark-read request", async () => {
+    const onMarkRead = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { newestMessage, oldMessage } = renderMarker("visible", true, true, "old", onMarkRead);
+    const observer = TestIntersectionObserver.instances[0];
+    observer.emit(oldMessage, 1);
+    observer.emit(newestMessage, 1);
+    await act(async () => vi.advanceTimersByTimeAsync(501));
+    expect(onMarkRead).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(501));
+    expect(onMarkRead).toHaveBeenCalledTimes(2);
   });
 });

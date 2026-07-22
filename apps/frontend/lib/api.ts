@@ -137,6 +137,8 @@ export type OfficeChatReadState = {
   unread_count: number;
   mention_count: number;
   total_unread: number;
+  notification_unread_count: number;
+  read_notification_ids: string[];
 };
 
 export type OfficeChatDirectReadReceipt = {
@@ -601,6 +603,11 @@ export type PersonalNotificationEvent =
   | {
       type: "notifications.read_all";
       category: string | null;
+      unread_count: number;
+    }
+  | {
+      type: "notifications.messages_read";
+      notification_ids: string[];
       unread_count: number;
     }
   | {

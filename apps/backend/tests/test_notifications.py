@@ -1,9 +1,30 @@
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from app.services.notifications import build_dedupe_key, preferences_allow, sanitize_metadata, sanitize_preview, serialize_notification
+from app.services.notifications import (
+    build_dedupe_key,
+    mark_all_notifications_read,
+    preferences_allow,
+    sanitize_metadata,
+    sanitize_preview,
+    serialize_notification,
+)
+
+
+class NotificationSession:
+    def __init__(self, notifications):
+        self.notifications = notifications
+        self.commits = 0
+
+    async def execute(self, statement):
+        unread = [item for item in self.notifications if not item.is_read]
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: unread))
+
+    async def commit(self):
+        self.commits += 1
 
 
 class NotificationServiceTests(unittest.TestCase):
@@ -68,6 +89,34 @@ class NotificationServiceTests(unittest.TestCase):
         self.assertEqual(public.actor.id, actor_id)
         self.assertEqual(public.actor.username, "admin")
         self.assertEqual(public.updated_at, timestamp)
+
+
+class NotificationMarkAllTests(unittest.IsolatedAsyncioTestCase):
+    async def test_global_mark_all_is_idempotent_across_notification_categories(self):
+        notifications = [
+            SimpleNamespace(category="messages", is_read=False, read_at=None),
+            SimpleNamespace(category="calendar", is_read=False, read_at=None),
+            SimpleNamespace(category="system", is_read=True, read_at=datetime.now(timezone.utc)),
+        ]
+        session = NotificationSession(notifications)
+        user_id = uuid4()
+
+        with patch(
+            "app.services.notifications.safe_broadcast_notification_event",
+            AsyncMock(),
+        ) as broadcast:
+            first = await mark_all_notifications_read(session, user_id)
+            second = await mark_all_notifications_read(session, user_id)
+
+        self.assertEqual(first, 2)
+        self.assertEqual(second, 0)
+        self.assertTrue(all(item.is_read for item in notifications))
+        self.assertEqual(session.commits, 2)
+        self.assertEqual(broadcast.await_count, 2)
+        self.assertEqual(broadcast.await_args_list[0].args[2], {
+            "type": "notifications.read_all",
+            "category": None,
+        })
 
 
 if __name__ == "__main__":

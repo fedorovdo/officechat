@@ -13,6 +13,19 @@ type VisibleReadMarkerOptions = {
   unread?: OfficeChatUnreadChat;
 };
 
+export function scrollUnreadMessageIntoView(
+  scrollContainer: HTMLElement | null,
+  messageId: string | null | undefined
+) {
+  if (!scrollContainer || !messageId) return false;
+  const message = Array.from(
+    scrollContainer.querySelectorAll<HTMLElement>("[data-message-id]")
+  ).find((element) => element.dataset.messageId === messageId);
+  if (!message) return false;
+  message.scrollIntoView({ block: "center" });
+  return true;
+}
+
 function isSufficientlyVisible(entry: IntersectionObserverEntry) {
   if (!entry.isIntersecting) return false;
   if (entry.intersectionRatio >= 0.6) return true;

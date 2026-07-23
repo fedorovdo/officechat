@@ -56,6 +56,18 @@ class ReturningSession:
         return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: self.ids))
 
 
+class GroupMessageSession:
+    def __init__(self, group, message):
+        self.group = group
+        self.message = message
+
+    async def get(self, model, object_id):
+        return self.group
+
+    async def execute(self, statement):
+        return ScalarResult(self.message)
+
+
 class UnreadSummaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_summary_aggregates_three_categories_and_mentions(self):
         user = SimpleNamespace(id=uuid4(), role="user")
@@ -100,6 +112,45 @@ class UnreadSummaryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MarkReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_group_bot_message_uses_normal_group_authorization_and_can_be_marked_read(self):
+        group_id, message_id = uuid4(), uuid4()
+        user = SimpleNamespace(id=uuid4(), role="user")
+        group = SimpleNamespace(id=group_id, is_active=True)
+        bot_message = SimpleNamespace(
+            id=message_id,
+            group_id=group_id,
+            sender_user_id=uuid4(),
+            sender=SimpleNamespace(role="bot", auth_provider="bot"),
+            created_at=NOW,
+            is_archived=False,
+        )
+        payload = MarkReadRequest(chat_type="group", chat_id=group_id, message_id=message_id)
+        session = GroupMessageSession(group, bot_message)
+
+        with patch(
+            "app.services.unread.ensure_group_message_access",
+            AsyncMock(),
+        ) as ensure_access:
+            result = await unread._load_authorized_message(session, user, payload)
+
+        self.assertIs(result, bot_message)
+        ensure_access.assert_awaited_once_with(session, group, user)
+
+    async def test_user_without_group_access_cannot_mark_group_message_read(self):
+        group_id, message_id = uuid4(), uuid4()
+        user = SimpleNamespace(id=uuid4(), role="user")
+        group = SimpleNamespace(id=group_id, is_active=True)
+        message = SimpleNamespace(id=message_id, group_id=group_id, is_archived=False)
+        payload = MarkReadRequest(chat_type="group", chat_id=group_id, message_id=message_id)
+        session = GroupMessageSession(group, message)
+
+        with patch(
+            "app.services.unread.ensure_group_message_access",
+            AsyncMock(side_effect=PermissionError("denied")),
+        ):
+            with self.assertRaises(PermissionError):
+                await unread._load_authorized_message(session, user, payload)
+
     async def test_notification_batch_only_targets_message_category_in_selected_chat(self):
         user_id, chat_id, message_id, notification_id = uuid4(), uuid4(), uuid4(), uuid4()
         session = ReturningSession([notification_id])
@@ -204,6 +255,40 @@ class MarkReadTests(unittest.IsolatedAsyncioTestCase):
         notification_event = broadcast.await_args_list[1].args[1]
         self.assertEqual(notification_event["type"], "notifications.messages_read")
         self.assertEqual(notification_event["unread_count"], 3)
+
+    async def test_group_read_broadcasts_authoritative_unread_and_message_notification_state(self):
+        state = SimpleNamespace(
+            last_read_message_id=None,
+            last_read_message_created_at=None,
+            last_read_at=None,
+        )
+        session = StateSession(state)
+        user = SimpleNamespace(id=uuid4())
+        payload = MarkReadRequest(chat_type="group", chat_id=uuid4(), message_id=uuid4())
+        message = SimpleNamespace(id=payload.message_id, created_at=NOW)
+        notification_id = uuid4()
+        summary = UnreadSummaryPublic(total=2, groups=0, direct=2, discussions=0, chats=[])
+        with (
+            patch("app.services.unread._load_authorized_message", AsyncMock(return_value=message)),
+            patch(
+                "app.services.unread.mark_message_notifications_read_through",
+                AsyncMock(return_value=[notification_id]),
+            ),
+            patch("app.services.unread.notification_unread_count", AsyncMock(return_value=4)),
+            patch("app.services.unread.get_unread_summary", AsyncMock(return_value=summary)),
+            patch("app.services.unread.user_websocket_manager.broadcast_to_user", AsyncMock()) as broadcast,
+            patch("app.services.unread.direct_websocket_manager.broadcast_to_conversation", AsyncMock()),
+        ):
+            result = await unread.mark_chat_read(session, user, payload)
+
+        self.assertEqual(result.total_unread, 2)
+        self.assertEqual(result.notification_unread_count, 4)
+        unread_event = broadcast.await_args_list[0].args[1]
+        notification_event = broadcast.await_args_list[1].args[1]
+        self.assertEqual(unread_event["type"], "unread.updated")
+        self.assertEqual(unread_event["chat_type"], "group")
+        self.assertEqual(notification_event["type"], "notifications.messages_read")
+        self.assertEqual(notification_event["notification_ids"], [str(notification_id)])
 
     async def test_unrelated_user_cannot_mark_direct_conversation_read(self):
         user = SimpleNamespace(id=uuid4())

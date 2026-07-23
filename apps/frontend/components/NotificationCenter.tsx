@@ -9,6 +9,7 @@ export type NotificationCenterFilter = "all" | "unread" | "mentions" | "replies"
 
 type NotificationCenterProps = {
   dictionary: Dictionary;
+  feedback?: string;
   filter: NotificationCenterFilter;
   isOpen: boolean;
   items: OfficeChatNotification[];
@@ -85,6 +86,7 @@ export function NotificationBell({
 
 export function NotificationCenter({
   dictionary,
+  feedback,
   filter,
   hasMore,
   isLoading,
@@ -131,10 +133,17 @@ export function NotificationCenter({
             </button>
           ))}
         </div>
-        <div className="notification-center-actions">
-          <button className="secondary-link" onClick={onMarkAllRead} type="button">
-            {dictionary.notifications.markAllRead}
-          </button>
+        <div className="notification-center-action-block">
+          <div className="notification-center-actions">
+            <button className="secondary-link" onClick={onMarkAllRead} type="button">
+              {dictionary.notifications.markAllRead}
+            </button>
+          </div>
+          {feedback ? (
+            <p className="notification-center-feedback" role="status">
+              {feedback}
+            </p>
+          ) : null}
         </div>
         <div className="notification-list">
           {items.length === 0 && !isLoading ? (

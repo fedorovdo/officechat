@@ -247,7 +247,9 @@ describe("visible read marker", () => {
     unread = true,
     focused = true,
     firstUnreadMessageId = "old",
-    onMarkRead = vi.fn()
+    onMarkRead = vi.fn(),
+    chatType: "group" | "direct" | "discussion" = "group",
+    senderUserId = "other"
   ) {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: visibility });
     Object.defineProperty(document, "hidden", { configurable: true, value: visibility === "hidden" });
@@ -261,14 +263,14 @@ describe("visible read marker", () => {
     const hook = renderHook(() => useVisibleReadMarker({
       currentUserId: "me",
       messages: [
-        { id: "old", sender_user_id: "other", is_deleted: false, is_archived: false },
-        { id: "newest", sender_user_id: "other", is_deleted: false, is_archived: false }
+        { id: "old", sender_user_id: senderUserId, is_deleted: false, is_archived: false },
+        { id: "newest", sender_user_id: senderUserId, is_deleted: false, is_archived: false }
       ],
       onMarkRead,
       scrollContainerRef: { current: container },
       unread: unread ? {
-        chat_type: "group",
-        chat_id: "group-1",
+        chat_type: chatType,
+        chat_id: `${chatType}-1`,
         unread_count: 2,
         mention_count: 0,
         first_unread_message_id: firstUnreadMessageId,
@@ -291,6 +293,56 @@ describe("visible read marker", () => {
       vi.runOnlyPendingTimers();
     });
     expect(onMarkRead).toHaveBeenCalledWith("newest");
+  });
+
+  it("marks a bot-sent group message after the same 500ms visibility window", () => {
+    const { oldMessage, onMarkRead } = renderMarker(
+      "visible",
+      true,
+      true,
+      "old",
+      vi.fn(),
+      "group",
+      "zabbix-bot-user"
+    );
+    TestIntersectionObserver.instances[0].emit(oldMessage, 1);
+    act(() => {
+      vi.advanceTimersByTime(500);
+      vi.runOnlyPendingTimers();
+    });
+    expect(onMarkRead).toHaveBeenCalledWith("old");
+  });
+
+  it.each(["direct", "discussion"] as const)(
+    "keeps the %s visible-read regression passing",
+    (chatType) => {
+      const { oldMessage, onMarkRead } = renderMarker(
+        "visible",
+        true,
+        true,
+        "old",
+        vi.fn(),
+        chatType
+      );
+      TestIntersectionObserver.instances[0].emit(oldMessage, 1);
+      act(() => {
+        vi.advanceTimersByTime(500);
+        vi.runOnlyPendingTimers();
+      });
+      expect(onMarkRead).toHaveBeenCalledWith("old");
+    }
+  );
+
+  it("advances only through a continuously confirmed unread prefix", async () => {
+    const { newestMessage, oldMessage, onMarkRead } = renderMarker("visible");
+    const observer = TestIntersectionObserver.instances[0];
+    observer.emit(oldMessage, 1);
+    await act(async () => vi.advanceTimersByTimeAsync(501));
+    expect(onMarkRead).toHaveBeenLastCalledWith("old");
+
+    observer.emit(newestMessage, 1);
+    await act(async () => vi.advanceTimersByTimeAsync(501));
+    expect(onMarkRead).toHaveBeenLastCalledWith("newest");
   });
 
   it("can confirm an oversized message that fills most of the scroll container", () => {
@@ -351,6 +403,54 @@ describe("visible read marker", () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(observer.observed).toEqual([]);
     expect(onMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("cancels the old visibility timer when switching from group A to group B", () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    Object.defineProperty(document, "hasFocus", { configurable: true, value: () => true });
+    const container = document.createElement("section");
+    const groupAMessage = document.createElement("article");
+    groupAMessage.dataset.messageId = "group-a-message";
+    const groupBMessage = document.createElement("article");
+    groupBMessage.dataset.messageId = "group-b-message";
+    container.append(groupAMessage, groupBMessage);
+    const onMarkRead = vi.fn();
+    const { rerender } = renderHook(
+      ({ chatId, messageId }: { chatId: string; messageId: string }) =>
+        useVisibleReadMarker({
+          currentUserId: "me",
+          messages: [
+            { id: messageId, sender_user_id: "other", is_deleted: false, is_archived: false }
+          ],
+          onMarkRead,
+          scrollContainerRef: { current: container },
+          unread: {
+            chat_type: "group",
+            chat_id: chatId,
+            unread_count: 1,
+            mention_count: 0,
+            first_unread_message_id: messageId,
+            newest_unread_message_id: messageId
+          }
+        }),
+      { initialProps: { chatId: "group-a", messageId: "group-a-message" } }
+    );
+
+    const groupAObserver = TestIntersectionObserver.instances[0];
+    groupAObserver.emit(groupAMessage, 1);
+    act(() => vi.advanceTimersByTime(200));
+    rerender({ chatId: "group-b", messageId: "group-b-message" });
+    act(() => vi.advanceTimersByTime(1000));
+    expect(onMarkRead).not.toHaveBeenCalled();
+
+    const groupBObserver = TestIntersectionObserver.instances[1];
+    groupBObserver.emit(groupBMessage, 1);
+    act(() => {
+      vi.advanceTimersByTime(500);
+      vi.runOnlyPendingTimers();
+    });
+    expect(onMarkRead).toHaveBeenCalledWith("group-b-message");
   });
 
   it("does not advance the marker for an old search context", () => {

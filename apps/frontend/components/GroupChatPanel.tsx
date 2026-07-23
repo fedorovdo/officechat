@@ -32,7 +32,7 @@ import type { Dictionary, Locale } from "../lib/i18n";
 import { applyDeletedMessageEvent } from "../lib/message-privacy";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
-import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
+import { scrollUnreadMessageIntoView, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -277,9 +277,9 @@ export function GroupChatPanel({
     if (!hasInitialMessageScrollRef.current) {
       hasInitialMessageScrollRef.current = true;
       requestAnimationFrame(() => {
-        const separator = messagesListRef.current?.querySelector("[data-unread-separator]");
-        if (separator) separator.scrollIntoView({ block: "center" });
-        else scrollToLatestMessage("auto");
+        if (!scrollUnreadMessageIntoView(messagesListRef.current, unread?.first_unread_message_id)) {
+          scrollToLatestMessage("auto");
+        }
       });
       return;
     }

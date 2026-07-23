@@ -2753,6 +2753,18 @@ a {
   gap: 8px;
 }
 
+.notification-center-action-block {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-center-feedback {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .notification-filter {
   min-height: 34px;
   padding: 6px 10px;
@@ -3601,7 +3613,7 @@ a {
   min-width: 0;
   min-height: 62px;
   padding: 8px;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) minmax(44px, auto);
   align-items: center;
   gap: 10px;
   border: 0;
@@ -3643,6 +3655,44 @@ a {
   gap: 2px;
 }
 
+.sidebar-item-avatar {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+}
+
+.sidebar-item-right-meta {
+  min-width: 44px;
+  max-width: 72px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.sidebar-item-badges {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.sidebar-item-right-meta .sidebar-unread-badge {
+  margin-left: 0;
+}
+
+.sidebar-item-right-meta .sidebar-unread-badge-mention {
+  margin-left: 0;
+}
+
+.sidebar-item-top {
+  padding-right: 0;
+}
+
 .sidebar-item-time,
 .sidebar-item-meta,
 .sidebar-item-preview {
@@ -3676,12 +3726,18 @@ a {
 }
 
 .messenger-sidebar-account {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   border-top: 1px solid rgb(255 255 255 / 9%);
   border-bottom: 0;
 }
 
 .sidebar-account-button {
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -3692,7 +3748,46 @@ a {
 
 .sidebar-account-actions {
   display: flex;
+  align-items: center;
   gap: 5px;
+}
+
+.sidebar-admin-menu-wrap {
+  position: relative;
+}
+
+.sidebar-admin-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: min(240px, calc(100vw - 24px));
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 8px;
+  background: var(--sidebar-panel);
+  box-shadow: 0 14px 32px rgb(0 0 0 / 28%);
+}
+
+.sidebar-admin-menu a {
+  min-width: 0;
+  padding: 9px 10px;
+  overflow: hidden;
+  border-radius: 5px;
+  color: var(--sidebar-text);
+  font-size: 13px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-admin-menu a:hover,
+.sidebar-admin-menu a:focus-visible {
+  background: rgb(255 255 255 / 9%);
+  outline: none;
 }
 
 .sidebar-resize-handle {
@@ -3725,6 +3820,7 @@ a {
 .user-app-sidebar-collapsed .messenger-brand-copy,
 .user-app-sidebar-collapsed .messenger-sidebar-tools,
 .user-app-sidebar-collapsed .sidebar-item-content,
+.user-app-sidebar-collapsed .sidebar-item-right-meta .sidebar-item-time,
 .user-app-sidebar-collapsed .sidebar-account-button .sidebar-item-content {
   display: none;
 }
@@ -3739,6 +3835,11 @@ a {
   flex-direction: column;
 }
 
+.user-app-sidebar-collapsed .messenger-sidebar-account {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+
 .user-app-sidebar-collapsed .user-app-nav-list {
   padding: 8px 6px;
 }
@@ -3748,6 +3849,28 @@ a {
   padding: 6px;
   grid-template-columns: 40px;
   justify-content: center;
+}
+
+.user-app-sidebar-collapsed .sidebar-item-right-meta {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 0;
+  max-width: 34px;
+  height: auto;
+}
+
+.user-app-sidebar-collapsed .sidebar-item-badges {
+  min-height: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-app-sidebar-collapsed .sidebar-item-right-meta .sidebar-unread-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
 }
 
 .user-app-sidebar-collapsed .user-app-nav-item-announcements {
@@ -3767,6 +3890,12 @@ a {
 
 .user-app-sidebar-collapsed .sidebar-account-actions {
   display: grid;
+}
+
+.user-app-sidebar-collapsed .sidebar-admin-menu {
+  right: auto;
+  left: calc(100% + 8px);
+  bottom: 0;
 }
 
 .user-app-main {

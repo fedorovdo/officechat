@@ -72,7 +72,10 @@ import {
   showOpenAppNotification
 } from "../lib/openAppNotification";
 import { readWindowActivity, useWindowActivity } from "../lib/useWindowActivity";
-import { markNotificationsReadByIds } from "../lib/notificationState";
+import {
+  markAllNotificationItemsRead,
+  markNotificationsReadByIds
+} from "../lib/notificationState";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
@@ -83,10 +86,11 @@ import { CalendarPanel } from "./CalendarPanel";
 import { UserAvatar } from "./UserAvatar";
 import { PresenceStatus } from "./PresenceStatus";
 import {
-  NotificationBell,
   NotificationCenter,
   type NotificationCenterFilter
 } from "./NotificationCenter";
+import { SidebarAccountFooter } from "./SidebarAccountFooter";
+import { SidebarConversationRow } from "./SidebarConversationRow";
 
 type UserAppShellProps = {
   dictionary: Dictionary;
@@ -311,6 +315,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   );
   const [notificationItems, setNotificationItems] = useState<OfficeChatNotification[]>([]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [notificationCenterFeedback, setNotificationCenterFeedback] = useState("");
   const [notificationCursor, setNotificationCursor] = useState<string | null>(null);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [notificationCenterFilter, setNotificationCenterFilter] =
@@ -847,20 +852,13 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   async function markAllCenterNotificationsRead() {
     const token = getStoredAccessToken();
     if (!token) return;
+    notificationStateVersionRef.current += 1;
+    setNotificationCenterFeedback("");
     try {
-      const category =
-        notificationCenterFilter === "announcements"
-          ? "announcements"
-          : notificationCenterFilter === "system"
-            ? "system"
-            : notificationCenterFilter === "calendar"
-              ? "calendar"
-            : undefined;
-      const result = await markAllNotificationsRead(token, category);
-      setNotificationItems((current) =>
-        current.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() }))
-      );
+      const result = await markAllNotificationsRead(token);
+      setNotificationItems((current) => markAllNotificationItemsRead(current));
       setNotificationUnreadCount(result.unread_count);
+      setNotificationCenterFeedback(dictionary.notifications.markAllReadNotice);
     } catch {
       setError(dictionary.notifications.actionError);
     }
@@ -2085,32 +2083,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 isGroup ? "group" : "direct",
                 isGroup ? item.group.id : directConversation?.id ?? ""
               );
-              const itemClassName = [
-                "user-app-nav-item",
-                isSelected ? "user-app-nav-item-active" : "",
-                serverUnread?.unread_count ? "user-app-nav-item-unread" : "",
-                serverUnread?.mention_count ? "user-app-nav-item-mentioned" : ""
-              ].filter(Boolean).join(" ");
               return (
-                <button
-                  aria-label={`${name}, ${secondary}`}
-                  className={itemClassName}
-                  disabled={!isGroup && pendingDirectUsername === item.user.username}
-                  key={`${item.kind}-${item.id}`}
-                  onClick={() => {
-                    if (isGroup) {
-                      setSelected({ type: "group", groupId: item.group.id });
-                      setActiveDiscussionId(null);
-                      clearMessageContext();
-                      markGroupRead(item.group.id);
-                    } else {
-                      void handleOpenDirectUser(item.user);
-                    }
-                  }}
-                  title={isSidebarCollapsed ? name : undefined}
-                  type="button"
-                >
-                  {isGroup ? (
+                <SidebarConversationRow
+                  avatar={isGroup ? (
                     <span className="chat-avatar chat-avatar-group" aria-hidden="true">{getInitials(name)}</span>
                   ) : (
                     <span className="presence-avatar-wrap">
@@ -2123,29 +2098,30 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                       />
                     </span>
                   )}
-                  <span className="sidebar-item-content">
-                    <span className="sidebar-item-top">
-                      <strong>{name}</strong>
-                      {activity?.timestamp ? <span className="sidebar-item-time">{formatActivityTime(activity.timestamp)}</span> : null}
-                    </span>
-                    <span className="sidebar-item-preview">{activity?.preview || dictionary.sidebarActivity.noRecentMessages}</span>
-                    <span className="sidebar-item-meta">{secondary}</span>
-                  </span>
-                  {serverUnread?.unread_count ? (
-                    <span
-                      aria-label={dictionary.unread.counterLabel.replace("{count}", String(serverUnread.unread_count))}
-                      className="sidebar-unread-badge"
-                      title={dictionary.unread.counterLabel.replace("{count}", String(serverUnread.unread_count))}
-                    >{formatUnreadCount(serverUnread.unread_count)}</span>
-                  ) : null}
-                  {serverUnread?.mention_count ? (
-                    <span
-                      aria-label={dictionary.unread.mentionLabel.replace("{count}", String(serverUnread.mention_count))}
-                      className="sidebar-unread-badge sidebar-unread-badge-mention"
-                      title={dictionary.unread.mentionLabel.replace("{count}", String(serverUnread.mention_count))}
-                    >@{formatUnreadCount(serverUnread.mention_count)}</span>
-                  ) : null}
-                </button>
+                  dictionary={dictionary}
+                  disabled={!isGroup && pendingDirectUsername === item.user.username}
+                  isCollapsed={isSidebarCollapsed}
+                  isMentioned={Boolean(serverUnread?.mention_count)}
+                  isSelected={isSelected}
+                  isUnread={Boolean(serverUnread?.unread_count)}
+                  key={`${item.kind}-${item.id}`}
+                  mentionCount={serverUnread?.mention_count ?? 0}
+                  name={name}
+                  onClick={() => {
+                    if (isGroup) {
+                      setSelected({ type: "group", groupId: item.group.id });
+                      setActiveDiscussionId(null);
+                      clearMessageContext();
+                      markGroupRead(item.group.id);
+                    } else {
+                      void handleOpenDirectUser(item.user);
+                    }
+                  }}
+                  preview={activity?.preview || dictionary.sidebarActivity.noRecentMessages}
+                  secondary={secondary}
+                  timestamp={activity?.timestamp ? formatActivityTime(activity.timestamp) : undefined}
+                  unreadCount={serverUnread?.unread_count ?? 0}
+                />
               );
             })}
             {!isLoading && !normalizedSidebarSearch && sidebarChatItems.length === 0 ? (
@@ -2155,70 +2131,19 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
             ) : null}
           </div>
 
-          <div className="messenger-sidebar-account">
-            {currentUser ? (
-              <button className="sidebar-account-button" onClick={openProfile} title={dictionary.appShell.profile.open} type="button">
-                <UserAvatar user={currentUser} size={40} />
-                <span className="sidebar-item-content">
-                  <strong>{currentUser.display_name}</strong>
-                  <small>@{currentUser.username}</small>
-                </span>
-              </button>
-            ) : null}
-            <div className="sidebar-account-actions">
-              <NotificationBell
-                dictionary={dictionary}
-                onClick={() => setIsNotificationCenterOpen(true)}
-                unreadCount={notificationUnreadCount}
-              />
-              <button
-                aria-label={dictionary.appShell.settings}
-                className="sidebar-icon-button"
-                onClick={() => setIsSettingsOpen(true)}
-                title={dictionary.appShell.settings}
-                type="button"
-              >
-                ⚙
-              </button>
-              {currentUser && isAdminRole(currentUser.role) ? (
-                <>
-                  <Link
-                    aria-label={dictionary.appShell.admin}
-                    className="sidebar-icon-button"
-                    href={`/${locale}/admin/users`}
-                    title={dictionary.appShell.admin}
-                  >
-                    A
-                  </Link>
-                  <Link
-                    aria-label={dictionary.retention.title}
-                    className="sidebar-icon-button"
-                    href={`/${locale}/admin/storage`}
-                    title={dictionary.retention.title}
-                  >
-                    S
-                  </Link>
-                  <Link
-                    aria-label={dictionary.audit.title}
-                    className="sidebar-icon-button"
-                    href={`/${locale}/admin/audit`}
-                    title={dictionary.audit.title}
-                  >
-                    L
-                  </Link>
-                </>
-              ) : null}
-              <button
-                aria-label={dictionary.dashboard.logout}
-                className="sidebar-icon-button"
-                onClick={logout}
-                title={dictionary.dashboard.logout}
-                type="button"
-              >
-                ↪
-              </button>
-            </div>
-          </div>
+          <SidebarAccountFooter
+            currentUser={currentUser}
+            dictionary={dictionary}
+            locale={locale}
+            notificationUnreadCount={notificationUnreadCount}
+            onLogout={logout}
+            onOpenNotifications={() => {
+              setNotificationCenterFeedback("");
+              setIsNotificationCenterOpen(true);
+            }}
+            onOpenProfile={openProfile}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
         </aside>
 
         <div
@@ -2376,15 +2301,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
 
       <NotificationCenter
         dictionary={dictionary}
+        feedback={notificationCenterFeedback}
         filter={notificationCenterFilter}
         hasMore={Boolean(notificationCursor)}
         isLoading={isNotificationCenterLoading}
         isOpen={isNotificationCenterOpen}
         items={notificationItems}
         locale={locale}
-        onClose={() => setIsNotificationCenterOpen(false)}
+        onClose={() => {
+          setIsNotificationCenterOpen(false);
+          setNotificationCenterFeedback("");
+        }}
         onDismiss={(notification) => void dismissCenterNotification(notification)}
-        onFilterChange={setNotificationCenterFilter}
+        onFilterChange={(filter) => {
+          setNotificationCenterFeedback("");
+          setNotificationCenterFilter(filter);
+        }}
         onLoadMore={() => void loadMoreNotifications()}
         onMarkAllRead={() => void markAllCenterNotificationsRead()}
         onMarkRead={(notification) => void markCenterNotificationRead(notification)}

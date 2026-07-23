@@ -8,7 +8,10 @@ import {
 } from "../components/NotificationCenter";
 import en from "../dictionaries/en.json";
 import type { OfficeChatNotification } from "../lib/api";
-import { markNotificationsReadByIds } from "../lib/notificationState";
+import {
+  markAllNotificationItemsRead,
+  markNotificationsReadByIds
+} from "../lib/notificationState";
 
 function notification(overrides: Partial<OfficeChatNotification> = {}): OfficeChatNotification {
   return {
@@ -115,5 +118,26 @@ describe("notification center", () => {
 
     expect(onFilterChange).toHaveBeenCalledWith("unread");
     expect(onMarkAllRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks all notification records without changing conversation unread state", () => {
+    const notifications = [
+      notification({ id: "message-notification", category: "messages" }),
+      notification({ id: "calendar-notification", category: "calendar", type: "calendar_reminder" })
+    ];
+    const conversationUnread = { groupId: "group-1", unreadCount: 8 };
+
+    expect(markAllNotificationItemsRead(notifications, "2026-07-23T10:00:00Z")).toEqual([
+      expect.objectContaining({ id: "message-notification", is_read: true }),
+      expect.objectContaining({ id: "calendar-notification", is_read: true })
+    ]);
+    expect(conversationUnread).toEqual({ groupId: "group-1", unreadCount: 8 });
+  });
+
+  it("explains mark-all semantics after a successful action", () => {
+    renderCenter({ feedback: en.notifications.markAllReadNotice, unreadCount: 0 });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Notifications marked as read. Unseen chat messages remain unread."
+    );
   });
 });

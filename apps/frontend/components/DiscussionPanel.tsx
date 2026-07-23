@@ -38,7 +38,7 @@ import type { Dictionary, Locale } from "../lib/i18n";
 import { applyDeletedMessageEvent } from "../lib/message-privacy";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
-import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
+import { scrollUnreadMessageIntoView, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -230,7 +230,7 @@ export function DiscussionPanel({
   useEffect(() => {
     if (!unread?.first_unread_message_id || messages.length === 0) return;
     requestAnimationFrame(() => {
-      messagesListRef.current?.querySelector("[data-unread-separator]")?.scrollIntoView({ block: "center" });
+      scrollUnreadMessageIntoView(messagesListRef.current, unread.first_unread_message_id);
     });
   }, [messages, unread?.first_unread_message_id]);
 

@@ -11,3 +11,14 @@ export function markNotificationsReadByIds(
     ids.has(item.id) ? { ...item, is_read: true, read_at: item.read_at ?? readAt } : item
   );
 }
+
+export function markAllNotificationItemsRead(
+  items: OfficeChatNotification[],
+  readAt = new Date().toISOString()
+) {
+  return items.map((item) => ({
+    ...item,
+    is_read: true,
+    read_at: item.read_at ?? readAt
+  }));
+}

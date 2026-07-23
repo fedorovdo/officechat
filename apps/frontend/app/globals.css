@@ -3307,6 +3307,21 @@ a {
   justify-content: space-between;
 }
 
+.legacy-unread-repair {
+  margin-top: 8px;
+  padding-top: 12px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.legacy-unread-repair .note,
+.legacy-unread-repair .form-success,
+.legacy-unread-repair .form-error {
+  margin: 0;
+}
+
 @media (max-width: 760px) {
   .page {
     padding: 18px;
@@ -3432,7 +3447,7 @@ a {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0;
-  overflow: hidden;
+  overflow: visible;
   border-right: 1px solid rgb(255 255 255 / 8%);
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
@@ -3727,13 +3742,21 @@ a {
 
 .messenger-sidebar-account {
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: stretch;
+  gap: 8px;
   border-top: 1px solid rgb(255 255 255 / 9%);
   border-bottom: 0;
 }
 
 .sidebar-account-button {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3747,8 +3770,11 @@ a {
 }
 
 .sidebar-account-actions {
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 5px;
 }
 
@@ -3836,8 +3862,13 @@ a {
 }
 
 .user-app-sidebar-collapsed .messenger-sidebar-account {
+  padding: 8px 2px;
   grid-template-columns: 1fr;
   justify-items: center;
+}
+
+.user-app-sidebar-collapsed .sidebar-account-button {
+  justify-content: center;
 }
 
 .user-app-sidebar-collapsed .user-app-nav-list {
@@ -3890,12 +3921,35 @@ a {
 
 .user-app-sidebar-collapsed .sidebar-account-actions {
   display: grid;
+  grid-template-columns: repeat(2, 32px);
+  gap: 4px;
+  justify-content: center;
+}
+
+.user-app-sidebar-collapsed .sidebar-account-actions .sidebar-icon-button {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+}
+
+.user-app-sidebar-collapsed .sidebar-account-actions .notification-bell-badge {
+  top: -3px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  font-size: 10px;
 }
 
 .user-app-sidebar-collapsed .sidebar-admin-menu {
   right: auto;
   left: calc(100% + 8px);
   bottom: 0;
+}
+
+.user-app-shell-sidebar-right.user-app-sidebar-collapsed .sidebar-admin-menu {
+  right: calc(100% + 8px);
+  left: auto;
 }
 
 .user-app-main {

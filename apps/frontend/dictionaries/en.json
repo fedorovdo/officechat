@@ -296,7 +296,14 @@
     "counterLabel": "{count} unread messages",
     "mentionLabel": "{count} mentions",
     "loading": "Loading unread messages",
-    "error": "Unread counters are temporarily unavailable"
+    "error": "Unread counters are temporarily unavailable",
+    "legacyRepairTitle": "Legacy unread messages",
+    "legacyRepairDescription": "Use this only to clear counters left by older OfficeChat versions.",
+    "legacyRepairAction": "Clear legacy unread messages",
+    "legacyRepairPending": "Clearing legacy unread messages...",
+    "legacyRepairConfirmation": "All messages that currently exist in chats available to you will be marked as read. New messages are not affected. Calendar, announcement, and system notifications will remain.",
+    "legacyRepairSuccess": "Legacy unread cleared: {messages} messages in {chats} chats.",
+    "legacyRepairError": "Could not clear legacy unread messages."
   },
   "appShell": {
     "title": "Chat",

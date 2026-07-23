@@ -86,6 +86,22 @@ describe("PWA app badge", () => {
     expect(setAppBadge).toHaveBeenNthCalledWith(2, 2);
     expect(clearAppBadgeMock).toHaveBeenCalledTimes(1);
   });
+
+  it("clears the app badge when an authenticated unread total becomes zero", () => {
+    const setAppBadge = vi.fn().mockResolvedValue(undefined);
+    const clearAppBadgeMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperties(navigator, {
+      setAppBadge: { configurable: true, value: setAppBadge },
+      clearAppBadge: { configurable: true, value: clearAppBadgeMock }
+    });
+    const { rerender } = renderHook(
+      ({ total }) => useAppBadge(total, true),
+      { initialProps: { total: 5 } }
+    );
+    rerender({ total: 0 });
+    expect(setAppBadge).toHaveBeenCalledWith(5);
+    expect(clearAppBadgeMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("open app notifications", () => {

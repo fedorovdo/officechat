@@ -49,3 +49,11 @@ class DirectReadReceiptPublic(BaseModel):
     last_read_message_id: UUID | None
     last_read_message_created_at: datetime | None
     read_at: datetime | None
+
+
+class LegacyUnreadRepairPublic(BaseModel):
+    cleared_messages: int
+    cleared_chats: int
+    unread: UnreadSummaryPublic
+    notification_unread_count: int
+    read_notifications: int

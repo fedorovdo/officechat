@@ -79,6 +79,7 @@ import {
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
 import { GroupChatPanel } from "./GroupChatPanel";
+import { LegacyUnreadRepairControl } from "./LegacyUnreadRepairControl";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { AnnouncementUnreadBadge } from "./AnnouncementUnreadBadge";
@@ -1407,10 +1408,21 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           }
           if (payload.type === "notifications.messages_read") {
             notificationStateVersionRef.current += 1;
-            setNotificationUnreadCount(payload.unread_count);
             setNotificationItems((current) =>
               markNotificationsReadByIds(current, payload.notification_ids)
             );
+            if (payload.refresh && notificationCenterOpenRef.current) {
+              void reloadNotifications(notificationCenterFilterRef.current);
+              return;
+            }
+            const stateVersion = notificationStateVersionRef.current;
+            void getNotificationUnreadCount(accessToken)
+              .then((unread) => {
+                if (notificationStateVersionRef.current === stateVersion) {
+                  setNotificationUnreadCount(unread.unread_count);
+                }
+              })
+              .catch(() => undefined);
             return;
           }
           if (payload.type === "notifications.read_all") {
@@ -1647,6 +1659,25 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       if (previousPreferences) setNotificationPreferences(previousPreferences);
       setError(dictionary.notifications.preferencesError);
     }
+  }
+
+  async function repairLegacyUnread() {
+    const notificationVersion = notificationStateVersionRef.current;
+    const outcome = await unreadStore.repairLegacyUnread();
+    if (!outcome) {
+      throw new Error("Authentication required");
+    }
+    if (
+      outcome.applied &&
+      notificationStateVersionRef.current === notificationVersion
+    ) {
+      notificationStateVersionRef.current += 1;
+      setNotificationUnreadCount(outcome.result.notification_unread_count);
+      if (notificationCenterOpenRef.current) {
+        void reloadNotifications(notificationCenterFilterRef.current);
+      }
+    }
+    return outcome.result;
   }
 
   async function requestBrowserNotificationPermission() {
@@ -2539,6 +2570,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   </label>
                 ))}
                 <p className="note">{dictionary.notifications.preferencesPolicy}</p>
+                <LegacyUnreadRepairControl
+                  dictionary={dictionary}
+                  onRepair={repairLegacyUnread}
+                />
               </div>
               <div className="field">
                 <span className="field-label">{dictionary.appShell.browserNotifications}</span>

@@ -17,6 +17,7 @@ Read marker содержит `last_read_message_created_at` и `last_read_messag
 ```text
 GET  /api/unread
 POST /api/read-state
+POST /api/read-state/mark-all-current-read
 GET  /api/read-state/direct/{conversation_id}/receipt
 ```
 
@@ -25,6 +26,22 @@ GET  /api/read-state/direct/{conversation_id}/receipt
 `POST /api/read-state` проверяет доступ и принадлежность сообщения чату, не двигает marker назад и является idempotent. Обычные действия чтения не записываются в Audit Log.
 
 Mention count строится только по структурированным `MessageMention` для групповых сообщений. Текст сообщения повторно не парсится; mentions в direct/discussion остаются будущим расширением.
+
+## Исправление исторических счётчиков
+
+В настройках уведомлений доступно явное действие `Исправить старые непрочитанные`. Оно предназначено только для исторически зависших счётчиков, созданных старыми версиями OfficeChat, и не требуется для обычной ежедневной работы. Перед запуском пользователь подтверждает операцию.
+
+`POST /api/read-state/mark-all-current-read` не принимает `user_id` и работает только для текущего активного пользователя. В одной транзакции backend:
+
+- заново определяет доступные пользователю активные группы, direct conversations и discussions;
+- выбирает последнее существующее сообщение каждого доступного чата по канонической паре `(created_at, id)`;
+- двигает high-water marker только вперёд;
+- помечает прочитанными только связанные записи Notification Center с `category="messages"`;
+- оставляет calendar, announcement, system, moderation и другие немесседжевые уведомления без изменений.
+
+Ответ содержит authoritative total, отдельные group/direct/discussion counts, Notification Center unread count и число обработанных сообщений/чатов. После commit персональный `WS /api/ws/me` получает `unread.refresh` и, при необходимости, `notifications.messages_read`, поэтому открытые вкладки и PWA повторно загружают серверное состояние. App Badge следует общему authoritative total и очищается при нуле.
+
+Граница операции задаётся конкретными последними message IDs и timestamps, выбранными внутри транзакции. Сообщение, появившееся после этой границы, остаётся непрочитанным. Повторный запуск идемпотентен и возвращает ноль обработанных сообщений, если новых зависших счётчиков нет. Автоматически при обновлении OfficeChat эта операция не запускается.
 
 ## Видимость и несколько устройств
 

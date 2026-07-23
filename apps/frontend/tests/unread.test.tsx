@@ -5,12 +5,14 @@ import { unreadFactory } from "./factories";
 
 const mocks = vi.hoisted(() => ({
   getUnreadSummary: vi.fn(),
+  markAllCurrentRead: vi.fn(),
   markChatRead: vi.fn(),
   authenticationListener: null as null | (() => void)
 }));
 
 vi.mock("../lib/api", () => ({
   getUnreadSummary: mocks.getUnreadSummary,
+  markAllCurrentRead: mocks.markAllCurrentRead,
   markChatRead: mocks.markChatRead
 }));
 
@@ -38,6 +40,19 @@ describe("unread store", () => {
       unread_count: 0,
       mention_count: 0,
       total_unread: 3
+    });
+    mocks.markAllCurrentRead.mockResolvedValue({
+      cleared_messages: 5,
+      cleared_chats: 2,
+      unread: unreadFactory({
+        total: 0,
+        groups: 0,
+        direct: 0,
+        discussions: 0,
+        chats: []
+      }),
+      notification_unread_count: 2,
+      read_notifications: 1
     });
   });
 
@@ -198,6 +213,137 @@ describe("unread store", () => {
     await waitFor(() => expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(result.current.summary.total).toBe(6));
     expect(result.current.summary.groups).toBe(3);
+  });
+
+  it("replaces unread state with a fresh repair snapshot", async () => {
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.repairLegacyUnread();
+    });
+
+    expect(mocks.markAllCurrentRead).toHaveBeenCalledWith("token");
+    expect(outcome).toMatchObject({
+      applied: true,
+      result: {
+        cleared_messages: 5,
+        cleared_chats: 2,
+        notification_unread_count: 2
+      }
+    });
+    expect(result.current.summary.total).toBe(0);
+    expect(result.current.summary.chats).toEqual([]);
+  });
+
+  it("does not let a stale repair response replace a newer websocket state", async () => {
+    let resolveRepair!: (value: unknown) => void;
+    mocks.markAllCurrentRead.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRepair = resolve; })
+    );
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+    let repairRequest!: ReturnType<typeof result.current.repairLegacyUnread>;
+    act(() => {
+      repairRequest = result.current.repairLegacyUnread();
+    });
+    act(() => result.current.applyUnreadEvent({
+      type: "unread.updated",
+      chat_type: "group",
+      chat_id: "group-1",
+      unread_count: 3,
+      mention_count: 0,
+      total_unread: 6,
+      last_read_message_id: null,
+      first_unread_message_id: "message-1",
+      newest_unread_message_id: "message-new"
+    }));
+    resolveRepair({
+      cleared_messages: 5,
+      cleared_chats: 2,
+      unread: unreadFactory({
+        total: 0,
+        groups: 0,
+        direct: 0,
+        discussions: 0,
+        chats: []
+      }),
+      notification_unread_count: 0,
+      read_notifications: 1
+    });
+
+    let outcome;
+    await act(async () => {
+      outcome = await repairRequest;
+    });
+    expect(outcome).toMatchObject({ applied: false });
+    expect(result.current.summary.total).toBe(6);
+    expect(result.current.getChat("group", "group-1")?.unread_count).toBe(3);
+  });
+
+  it("does not apply a pending repair to the next authenticated user", async () => {
+    let resolveRepair!: (value: unknown) => void;
+    mocks.markAllCurrentRead.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRepair = resolve; })
+    );
+    const { result, rerender } = renderHook(
+      ({ token, userId }) => useUnreadStore(token, userId),
+      { initialProps: { token: "token-a", userId: "user-a" } }
+    );
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+
+    let repairRequest!: ReturnType<typeof result.current.repairLegacyUnread>;
+    act(() => {
+      repairRequest = result.current.repairLegacyUnread();
+    });
+    act(() => mocks.authenticationListener?.());
+
+    mocks.getUnreadSummary.mockResolvedValueOnce(
+      unreadFactory({ total: 2, groups: 0, direct: 2 })
+    );
+    rerender({ token: "token-b", userId: "user-b" });
+    await waitFor(() => expect(result.current.summary.total).toBe(2));
+
+    resolveRepair({
+      cleared_messages: 5,
+      cleared_chats: 2,
+      unread: unreadFactory({
+        total: 0,
+        groups: 0,
+        direct: 0,
+        discussions: 0,
+        chats: []
+      }),
+      notification_unread_count: 0,
+      read_notifications: 1
+    });
+
+    let outcome;
+    await act(async () => {
+      outcome = await repairRequest;
+    });
+    expect(outcome).toMatchObject({ applied: false });
+    expect(result.current.summary.total).toBe(2);
+    expect(result.current.summary.direct).toBe(2);
+  });
+
+  it("preserves existing badges when the repair request fails", async () => {
+    mocks.markAllCurrentRead.mockRejectedValueOnce(new Error("Unavailable"));
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+
+    let caughtError: unknown;
+    await act(async () => {
+      try {
+        await result.current.repairLegacyUnread();
+      } catch (error) {
+        caughtError = error;
+      }
+    });
+    expect(caughtError).toBeInstanceOf(Error);
+    expect(result.current.summary.total).toBe(5);
+    expect(result.current.getChat("group", "group-1")?.unread_count).toBe(2);
   });
 });
 

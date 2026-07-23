@@ -55,9 +55,10 @@ export function SidebarAccountFooter({
   }, [isAdminMenuOpen]);
 
   return (
-    <div className="messenger-sidebar-account">
+    <footer className="messenger-sidebar-account">
       {currentUser ? (
         <button
+          aria-label={dictionary.appShell.profile.open}
           className="sidebar-account-button"
           onClick={onOpenProfile}
           title={dictionary.appShell.profile.open}
@@ -134,6 +135,6 @@ export function SidebarAccountFooter({
           <span aria-hidden="true">↪</span>
         </button>
       </div>
-    </div>
+    </footer>
   );
 }

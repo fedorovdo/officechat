@@ -108,7 +108,11 @@ describe("broadcast announcements panel", () => {
         user_ids: []
       })
     );
-    expect(screen.getByText(en.announcements.recipients.replace("{count}", "2"))).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        en.announcements.recipients.replace("{count}", "2")
+      )
+    ).toBeInTheDocument();
   });
 
   it("does not render raw backend internals after draft save failure", async () => {

@@ -14,7 +14,14 @@ from app.models.message import Message
 from app.models.notification import Notification
 from app.models.read_state import ChatReadState
 from app.models.user import User
-from app.schemas.unread import DirectReadReceiptPublic, MarkReadRequest, ReadStatePublic, UnreadChatPublic, UnreadSummaryPublic
+from app.schemas.unread import (
+    DirectReadReceiptPublic,
+    LegacyUnreadRepairPublic,
+    MarkReadRequest,
+    ReadStatePublic,
+    UnreadChatPublic,
+    UnreadSummaryPublic,
+)
 from app.services.direct import ensure_direct_conversation_access, get_direct_conversation
 from app.services.discussions import ensure_discussion_access, get_discussion
 from app.services.groups import is_global_group_admin
@@ -87,6 +94,100 @@ async def _latest_messages_for_chats(
         .order_by(chat_column, model.created_at.desc(), model.id.desc())
     )
     return {chat_id: (message_id, created_at) for chat_id, message_id, created_at in result.all()}
+
+
+async def _repair_boundaries_for_chats(
+    session: AsyncSession,
+    current_user: User,
+    chat_type: str,
+    chat_ids: set[UUID],
+) -> dict[UUID, tuple[UUID, datetime, int]]:
+    if not chat_ids:
+        return {}
+    model, chat_column = MESSAGE_MODELS[chat_type]
+    state = aliased(ChatReadState)
+    latest = (
+        select(
+            chat_column.label("chat_id"),
+            model.id.label("message_id"),
+            model.created_at.label("created_at"),
+        )
+        .where(chat_column.in_(chat_ids))
+        .distinct(chat_column)
+        .order_by(chat_column, model.created_at.desc(), model.id.desc())
+        .cte(f"{chat_type}_repair_latest")
+    )
+    unread_counts = (
+        select(
+            chat_column.label("chat_id"),
+            func.count(model.id).label("unread_count"),
+        )
+        .select_from(model)
+        .join(
+            state,
+            and_(
+                state.user_id == current_user.id,
+                state.chat_type == chat_type,
+                state.chat_id == chat_column,
+            ),
+        )
+        .join(latest, latest.c.chat_id == chat_column)
+        .where(
+            model.sender_user_id != current_user.id,
+            model.is_deleted.is_(False),
+            model.is_archived.is_(False),
+            _after_marker(model, state),
+            or_(
+                model.created_at < latest.c.created_at,
+                and_(
+                    model.created_at == latest.c.created_at,
+                    model.id <= latest.c.message_id,
+                ),
+            ),
+        )
+        .group_by(chat_column)
+        .cte(f"{chat_type}_repair_unread_counts")
+    )
+    result = await session.execute(
+        select(
+            latest.c.chat_id,
+            latest.c.message_id,
+            latest.c.created_at,
+            func.coalesce(unread_counts.c.unread_count, 0),
+        ).outerjoin(
+            unread_counts,
+            unread_counts.c.chat_id == latest.c.chat_id,
+        )
+    )
+    return {
+        chat_id: (message_id, created_at, int(unread_count))
+        for chat_id, message_id, created_at, unread_count in result.all()
+    }
+
+
+async def _lock_accessible_read_states(
+    session: AsyncSession,
+    current_user: User,
+    accessible: dict[str, set[UUID]],
+) -> None:
+    scopes = [
+        and_(
+            ChatReadState.chat_type == chat_type,
+            ChatReadState.chat_id.in_(chat_ids),
+        )
+        for chat_type, chat_ids in accessible.items()
+        if chat_ids
+    ]
+    if not scopes:
+        return
+    await session.execute(
+        select(ChatReadState.id)
+        .where(
+            ChatReadState.user_id == current_user.id,
+            or_(*scopes),
+        )
+        .with_for_update()
+    )
 
 
 async def initialize_missing_read_states(
@@ -252,6 +353,39 @@ def _position(created_at: datetime | None, message_id: UUID | None) -> tuple[dat
     return created_at, str(message_id)
 
 
+def _notification_is_at_or_before_read_marker(
+    chat_type: str,
+    user_id: UUID,
+):
+    model, chat_column = MESSAGE_MODELS[chat_type]
+    state = aliased(ChatReadState)
+    return (
+        exists(
+            select(model.id)
+            .select_from(model)
+            .join(
+                state,
+                and_(
+                    state.user_id == user_id,
+                    state.chat_type == chat_type,
+                    state.chat_id == chat_column,
+                ),
+            )
+            .where(
+                model.id == Notification.message_id,
+                or_(
+                    model.created_at < state.last_read_message_created_at,
+                    and_(
+                        model.created_at == state.last_read_message_created_at,
+                        model.id <= state.last_read_message_id,
+                    ),
+                ),
+            )
+        )
+        .correlate(Notification)
+    )
+
+
 async def mark_message_notifications_read_through(
     session: AsyncSession,
     user_id: UUID,
@@ -370,6 +504,135 @@ async def mark_chat_read(
         total_unread=summary.total,
         notification_unread_count=current_notification_unread,
         read_notification_ids=read_notification_ids,
+    )
+
+
+async def mark_all_current_read(
+    session: AsyncSession,
+    current_user: User,
+) -> LegacyUnreadRepairPublic:
+    accessible = await accessible_chat_ids(session, current_user)
+    await _lock_accessible_read_states(session, current_user, accessible)
+    boundaries_by_type = {
+        chat_type: await _repair_boundaries_for_chats(
+            session,
+            current_user,
+            chat_type,
+            accessible[chat_type],
+        )
+        for chat_type in ("group", "direct", "discussion")
+    }
+    now = datetime.now(timezone.utc)
+    marker_rows: list[dict[str, object]] = []
+    for chat_type in ("group", "direct", "discussion"):
+        for chat_id in accessible[chat_type]:
+            boundary = boundaries_by_type[chat_type].get(chat_id)
+            marker_rows.append(
+                {
+                    "user_id": current_user.id,
+                    "chat_type": chat_type,
+                    "chat_id": chat_id,
+                    "last_read_message_id": boundary[0] if boundary else None,
+                    "last_read_message_created_at": boundary[1] if boundary else None,
+                    "last_read_at": now,
+                }
+            )
+
+    if marker_rows:
+        insert_state = pg_insert(ChatReadState).values(marker_rows)
+        excluded = insert_state.excluded
+        await session.execute(
+            insert_state.on_conflict_do_update(
+                index_elements=["user_id", "chat_type", "chat_id"],
+                set_={
+                    "last_read_message_id": excluded.last_read_message_id,
+                    "last_read_message_created_at": excluded.last_read_message_created_at,
+                    "last_read_at": excluded.last_read_at,
+                },
+                where=and_(
+                    excluded.last_read_message_created_at.is_not(None),
+                    or_(
+                        ChatReadState.last_read_message_created_at.is_(None),
+                        excluded.last_read_message_created_at
+                        > ChatReadState.last_read_message_created_at,
+                        and_(
+                            excluded.last_read_message_created_at
+                            == ChatReadState.last_read_message_created_at,
+                            or_(
+                                ChatReadState.last_read_message_id.is_(None),
+                                excluded.last_read_message_id
+                                > ChatReadState.last_read_message_id,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    notification_scopes = [
+        and_(
+            Notification.chat_type == chat_type,
+            Notification.chat_id.in_(chat_ids),
+            _notification_is_at_or_before_read_marker(
+                chat_type,
+                current_user.id,
+            ),
+        )
+        for chat_type, chat_ids in accessible.items()
+        if chat_ids
+    ]
+    read_notifications = 0
+    if notification_scopes:
+        notification_result = await session.execute(
+            update(Notification)
+            .where(
+                Notification.user_id == current_user.id,
+                Notification.category == "messages",
+                Notification.is_read.is_(False),
+                Notification.is_dismissed.is_(False),
+                or_(*notification_scopes),
+            )
+            .values(is_read=True, read_at=now)
+        )
+        read_notifications = int(notification_result.rowcount or 0)
+
+    cleared_messages = sum(
+        boundary[2]
+        for boundaries in boundaries_by_type.values()
+        for boundary in boundaries.values()
+    )
+    cleared_chats = sum(
+        int(boundary[2] > 0)
+        for boundaries in boundaries_by_type.values()
+        for boundary in boundaries.values()
+    )
+    await session.commit()
+
+    summary = await get_unread_summary(session, current_user)
+    current_notification_unread = await notification_unread_count(
+        session,
+        current_user.id,
+    )
+    await user_websocket_manager.broadcast_to_user(
+        current_user.id,
+        {"type": "unread.refresh", "reason": "legacy_repair"},
+    )
+    if read_notifications:
+        await user_websocket_manager.broadcast_to_user(
+            current_user.id,
+            {
+                "type": "notifications.messages_read",
+                "notification_ids": [],
+                "unread_count": current_notification_unread,
+                "refresh": True,
+            },
+        )
+    return LegacyUnreadRepairPublic(
+        cleared_messages=cleared_messages,
+        cleared_chats=cleared_chats,
+        unread=summary,
+        notification_unread_count=current_notification_unread,
+        read_notifications=read_notifications,
     )
 
 

@@ -6,8 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
-from app.schemas.unread import DirectReadReceiptPublic, MarkReadRequest, ReadStatePublic, UnreadSummaryPublic
-from app.services.unread import get_direct_read_receipt, get_unread_summary, mark_chat_read
+from app.schemas.unread import (
+    DirectReadReceiptPublic,
+    LegacyUnreadRepairPublic,
+    MarkReadRequest,
+    ReadStatePublic,
+    UnreadSummaryPublic,
+)
+from app.services.unread import (
+    get_direct_read_receipt,
+    get_unread_summary,
+    mark_all_current_read,
+    mark_chat_read,
+)
 
 router = APIRouter()
 
@@ -34,6 +45,14 @@ async def post_read_state(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.post("/read-state/mark-all-current-read", response_model=LegacyUnreadRepairPublic)
+async def post_mark_all_current_read(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> LegacyUnreadRepairPublic:
+    return await mark_all_current_read(session, current_user)
 
 
 @router.get(

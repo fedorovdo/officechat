@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getUnreadSummary,
+  markAllCurrentRead,
   markChatRead,
   type ChatType,
+  type LegacyUnreadRepairResult,
   type OfficeChatReadState,
   type OfficeChatUnreadChat,
   type OfficeChatUnreadSummary,
@@ -43,6 +45,9 @@ export function useUnreadStore(
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState("");
   const requestRef = useRef<Promise<void> | null>(null);
+  const repairRequestRef = useRef<
+    Promise<{ result: LegacyUnreadRepairResult; applied: boolean }> | null
+  >(null);
   const sessionGenerationRef = useRef(0);
   const markReadVersionsRef = useRef(new Map<string, number>());
   const authoritativeVersionRef = useRef(0);
@@ -87,6 +92,7 @@ export function useUnreadStore(
   useEffect(() => {
     sessionGenerationRef.current += 1;
     requestRef.current = null;
+    repairRequestRef.current = null;
     setSummary(emptySummary);
     setIsLoading(false);
     setIsReady(false);
@@ -95,6 +101,7 @@ export function useUnreadStore(
     return onAuthenticationExpired(() => {
       sessionGenerationRef.current += 1;
       requestRef.current = null;
+      repairRequestRef.current = null;
       markReadVersionsRef.current.clear();
       authoritativeVersionRef.current += 1;
       setSummary(emptySummary);
@@ -171,6 +178,38 @@ export function useUnreadStore(
     }
   }, [applyUnreadEvent, reconcileReadState, reload, token]);
 
+  const repairLegacyUnread = useCallback(async () => {
+    if (!token) return null;
+    if (repairRequestRef.current) return repairRequestRef.current;
+    const generation = sessionGenerationRef.current;
+    const authoritativeVersion = authoritativeVersionRef.current;
+    let request!: Promise<{
+      result: LegacyUnreadRepairResult;
+      applied: boolean;
+    }>;
+    request = markAllCurrentRead(token)
+      .then((result) => {
+        if (sessionGenerationRef.current !== generation) {
+          return { result, applied: false };
+        }
+        if (authoritativeVersionRef.current !== authoritativeVersion) {
+          return { result, applied: false };
+        }
+        setSummary(result.unread);
+        setIsReady(true);
+        setError("");
+        authoritativeVersionRef.current += 1;
+        return { result, applied: true };
+      })
+      .finally(() => {
+        if (repairRequestRef.current === request) {
+          repairRequestRef.current = null;
+        }
+      });
+    repairRequestRef.current = request;
+    return request;
+  }, [token]);
+
   const chatsByKey = useMemo(
     () => Object.fromEntries(summary.chats.map((chat) => [chatKey(chat.chat_type, chat.chat_id), chat])),
     [summary.chats]
@@ -181,5 +220,15 @@ export function useUnreadStore(
     [chatsByKey]
   );
 
-  return { applyUnreadEvent, error, getChat, isLoading, isReady, markRead, reload, summary };
+  return {
+    applyUnreadEvent,
+    error,
+    getChat,
+    isLoading,
+    isReady,
+    markRead,
+    reload,
+    repairLegacyUnread,
+    summary
+  };
 }

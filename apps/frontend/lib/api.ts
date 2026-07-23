@@ -141,6 +141,14 @@ export type OfficeChatReadState = {
   read_notification_ids: string[];
 };
 
+export type LegacyUnreadRepairResult = {
+  cleared_messages: number;
+  cleared_chats: number;
+  unread: OfficeChatUnreadSummary;
+  notification_unread_count: number;
+  read_notifications: number;
+};
+
 export type OfficeChatDirectReadReceipt = {
   conversation_id: string;
   reader_user_id: string;
@@ -609,6 +617,7 @@ export type PersonalNotificationEvent =
       type: "notifications.messages_read";
       notification_ids: string[];
       unread_count: number;
+      refresh?: boolean;
     }
   | {
       type: "notification.preferences_updated";
@@ -1457,6 +1466,14 @@ export function markChatRead(token: string, chatType: ChatType, chatId: string, 
     method: "POST",
     body: JSON.stringify({ chat_type: chatType, chat_id: chatId, message_id: messageId })
   });
+}
+
+export function markAllCurrentRead(token: string) {
+  return apiFetch<LegacyUnreadRepairResult>(
+    "/api/read-state/mark-all-current-read",
+    token,
+    { method: "POST" }
+  );
 }
 
 export function getDirectReadReceipt(token: string, conversationId: string) {

@@ -80,7 +80,7 @@ describe("sidebar account footer", () => {
   };
 
   it("keeps superadmin identity visible and exposes admin actions through overflow", () => {
-    render(
+    const { container } = render(
       <SidebarAccountFooter
         currentUser={userFactory({
           display_name: "OfficeChat Superadmin",
@@ -96,6 +96,25 @@ describe("sidebar account footer", () => {
 
     expect(screen.getByText("OfficeChat Superadmin")).toBeInTheDocument();
     expect(screen.getByText("@admin")).toBeInTheDocument();
+    const footer = container.querySelector(".messenger-sidebar-account");
+    const identity = container.querySelector(".sidebar-account-button");
+    const controls = container.querySelector(".sidebar-account-actions");
+    const avatar = identity?.querySelector(".user-avatar");
+    expect(footer?.children[0]).toBe(identity);
+    expect(footer?.children[1]).toBe(controls);
+    expect(identity).toContainElement(avatar as HTMLElement);
+    expect(avatar).toHaveStyle({ "--avatar-size": "40px" });
+    expect(
+      within(controls as HTMLElement).getByRole("button", {
+        name: "2 unread notifications"
+      })
+    ).toBeInTheDocument();
+    expect(
+      within(controls as HTMLElement).getByRole("button", { name: "Settings" })
+    ).toBeInTheDocument();
+    expect(
+      within(controls as HTMLElement).getByRole("button", { name: "Logout" })
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Administrative actions" }));
     const menu = screen.getByRole("menu", { name: "Administrative actions" });
     expect(within(menu).getByText("User management")).toBeInTheDocument();
@@ -142,4 +161,32 @@ describe("sidebar account footer", () => {
     expect(screen.getByRole("button", { name: ru.appShell.settings })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: ru.dashboard.logout })).toBeInTheDocument();
   });
+
+  it.each([320, 360, 400])(
+    "keeps stable two-row footer structure at %spx",
+    (width) => {
+      const { container } = render(
+        <div style={{ width }}>
+          <SidebarAccountFooter
+            currentUser={userFactory({
+              display_name: "A very long OfficeChat display name for layout testing",
+              role: "superadmin"
+            })}
+            dictionary={en}
+            locale="en"
+            notificationUnreadCount={120}
+            {...callbacks}
+          />
+        </div>
+      );
+      const footer = container.querySelector(".messenger-sidebar-account");
+      expect(footer).toContainElement(
+        container.querySelector(".sidebar-account-button")
+      );
+      expect(footer).toContainElement(
+        container.querySelector(".sidebar-account-actions")
+      );
+      expect(container.querySelector(".notification-bell-badge")).toHaveTextContent("99+");
+    }
+  );
 });

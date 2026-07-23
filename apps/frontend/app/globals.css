@@ -3447,7 +3447,7 @@ a {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0;
-  overflow: visible;
+  overflow: hidden;
   border-right: 1px solid rgb(255 255 255 / 8%);
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
@@ -3783,19 +3783,19 @@ a {
 }
 
 .sidebar-admin-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 30;
-  width: min(240px, calc(100vw - 24px));
+  position: fixed;
+  z-index: 900;
   padding: 6px;
   display: grid;
   gap: 2px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid rgb(255 255 255 / 14%);
   border-radius: 8px;
-  background: var(--sidebar-panel);
+  background: var(--sidebar-panel, #293a35);
+  color: var(--sidebar-text, #edf5f1);
   box-shadow: 0 14px 32px rgb(0 0 0 / 28%);
+  overscroll-behavior: contain;
 }
 
 .sidebar-admin-menu a {
@@ -3803,17 +3803,18 @@ a {
   padding: 9px 10px;
   overflow: hidden;
   border-radius: 5px;
-  color: var(--sidebar-text);
+  color: var(--sidebar-text, #edf5f1);
   font-size: 13px;
   text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .sidebar-admin-menu a:hover,
 .sidebar-admin-menu a:focus-visible {
   background: rgb(255 255 255 / 9%);
-  outline: none;
+  outline: 2px solid rgb(143 211 179 / 80%);
+  outline-offset: -2px;
 }
 
 .sidebar-resize-handle {
@@ -3939,17 +3940,6 @@ a {
   height: 16px;
   padding: 0 3px;
   font-size: 10px;
-}
-
-.user-app-sidebar-collapsed .sidebar-admin-menu {
-  right: auto;
-  left: calc(100% + 8px);
-  bottom: 0;
-}
-
-.user-app-shell-sidebar-right.user-app-sidebar-collapsed .sidebar-admin-menu {
-  right: calc(100% + 8px);
-  left: auto;
 }
 
 .user-app-main {

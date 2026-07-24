@@ -16,7 +16,9 @@ Commands:
   restart               Restart all services
   stop                  Stop all services
   start                 Start all services
-  backup                Create PostgreSQL and uploads backup
+  backup [ARGS]         Create verified production backup
+  verify-backup PATH    Verify an existing production backup
+  restore-drill PATH    Restore into an isolated temporary environment
   update VERSION        Update images to VERSION
   rollback VERSION      Roll back images to VERSION
   version               Show installed version
@@ -37,7 +39,15 @@ case "$command_name" in
   restart) compose restart ;;
   stop) compose stop ;;
   start) compose up -d ;;
-  backup) backup_now ;;
+  backup)
+    if [[ -x "${SCRIPT_DIR}/backup-production.sh" ]]; then
+      "${SCRIPT_DIR}/backup-production.sh" --config /etc/officechat/backup.conf "$@"
+    else
+      backup_now
+    fi
+    ;;
+  verify-backup) "${SCRIPT_DIR}/verify-backup.sh" --config /etc/officechat/backup.conf "$@" ;;
+  restore-drill) "${SCRIPT_DIR}/restore-production.sh" --config /etc/officechat/backup.conf --verify-only "$@" ;;
   update) "${SCRIPT_DIR}/update-linux.sh" "$@" ;;
   rollback) "${SCRIPT_DIR}/rollback-linux.sh" "$@" ;;
   version) read_installed_version ;;

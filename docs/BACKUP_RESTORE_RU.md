@@ -1,83 +1,338 @@
-# Backup and restore
+# Резервное копирование и восстановление OfficeChat
 
-OfficeChat хранит данные в PostgreSQL и файлы в uploads volume. Надежный backup должен включать оба слоя как один набор.
+## Архитектура
 
-## Backup
+Production backup состоит из независимых, проверяемых компонентов:
 
-Windows:
+- полный логический PostgreSQL dump в custom format (`pg_dump -Fc`);
+- архив uploads с правами, владельцами, ACL, xattrs и SELinux labels;
+- отдельные публичный и приватный архивы deployment-конфигурации;
+- best-effort RDB snapshot Valkey;
+- защищённый архив внутреннего Caddy CA;
+- дополнительные каталоги из `BACKUP_EXTRA_PATHS`;
+- metadata, SHA-256 checksums и атомарный `SUCCESS` marker;
+- опциональные frontend/backend images для release/pre-upgrade backup.
 
-```powershell
-.\scripts\backup-postgres.ps1 -Destination backups -RetentionDays 14
-```
+Скрипты не используют фиксированные container names, Compose-generated names или
+container IDs. Сервисы обнаруживаются через настроенные Compose-файлы и
+`docker compose ... ps -q SERVICE`.
 
-Linux:
+## Критичные данные
+
+Обязательны для полноценного восстановления:
+
+1. PostgreSQL: пользователи, сообщения, группы, обсуждения, уведомления, календарь,
+   аудит, metadata вложений и Alembic revision.
+2. Uploads: вложения и аватары.
+
+Дополнительные критичные для конкретной установки данные:
+
+- приватный deployment archive содержит `.env` и `backup.conf`;
+- Caddy CA сохраняет доверие уже настроенных LAN-клиентов;
+- внешние каталоги, явно перечисленные в `BACKUP_EXTRA_PATHS`.
+
+Valkey сейчас не является authoritative source. Presence, typing, rate limits и
+временные состояния восстанавливаются после запуска; durable calendar state
+находится в PostgreSQL. RDB snapshot сохраняется best-effort и его сбой отмечается
+warning в manifest. Не копируйте live Valkey/PostgreSQL data directories вслепую.
+
+PostgreSQL dump имеет согласованный snapshot внутри БД, но dump и uploads
+создаются последовательно и не являются общей транзакцией. По умолчанию это
+`best_effort_live`, отражённый в manifest. Для строгой согласованности настройте
+root-owned pre/post hooks, которые ставят запись вложений на паузу и гарантированно
+снимают её. Регулярный restore drill должен дополнительно проверять выборку
+вложений приложения.
+
+`pg_dump` одной базы не сохраняет cluster roles. На новой VM application role и
+database создаются installer/Compose из private `.env`; restore использует
+`--no-owner --no-privileges`, поэтому восстановленные объекты принадлежат
+настроенному `POSTGRES_USER`. Password hashes ролей в backup не включаются.
+Valkey snapshot не восстанавливается production-скриптом автоматически:
+authoritative данные находятся в PostgreSQL, а ephemeral state безопасно
+перестраивается после запуска.
+
+## Установка
+
+Release installer:
+
+- устанавливает скрипты в `/opt/officechat`;
+- создаёт `/etc/officechat/backup.conf` с mode `0600`, только если файла ещё нет;
+- никогда не перезаписывает существующий `backup.conf` при update;
+- устанавливает `officechat-backup.service` и `.timer`;
+- включает ежедневный timer только при явном флаге installer
+  `--enable-backup-timer`; сначала проверьте конфигурацию вручную;
+- сохраняет обратную совместимость конфигурации: неизвестные ключи отвергаются,
+  новые ключи получают безопасные defaults.
+
+Ручная установка:
 
 ```bash
-DESTINATION=backups RETENTION_DAYS=14 ./scripts/backup-postgres.sh
+sudo install -d -m 0755 /etc/officechat
+sudo install -m 0600 deploy/backup/officechat-backup.conf.example /etc/officechat/backup.conf
+sudo install -m 0755 scripts/backup-production.sh scripts/verify-backup.sh scripts/restore-production.sh /opt/officechat/
+sudo install -d -m 0755 /opt/officechat/backup
+sudo install -m 0644 scripts/backup/lib.sh /opt/officechat/backup/lib.sh
+sudo install -m 0644 deploy/systemd/officechat-backup.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now officechat-backup.timer
 ```
 
-Backup создает каталог вида:
+Проверьте Compose paths в `backup.conf`. Для установки с HTTPS override:
 
-```text
-backups/officechat_2026-07-11_190000/
-  officechat_2026-07-11_190000.dump
-  officechat_uploads_2026-07-11_190000.tar.gz
-  metadata.json
+```ini
+COMPOSE_FILES=/opt/officechat/docker-compose.yml:/opt/officechat/docker-compose.https-override.yml
 ```
 
-`metadata.json` содержит дату создания, имя dump, имя uploads archive и текущую Alembic revision.
+## Конфигурация
 
-## Restore
+Основные параметры:
 
-Restore является destructive operation. Перед restore backend должен быть остановлен. Скрипты требуют явное подтверждение:
-
-```text
-RESTORE OFFICECHAT
+```ini
+OFFICECHAT_DIR=/opt/officechat
+OFFICECHAT_DATA_DIR=/var/lib/officechat
+BACKUP_ROOT=/var/backups/officechat/production
+OFFSITE_ROOT=
+REQUIRE_OFFSITE=no
+KEEP_DAILY=14
+KEEP_WEEKLY=8
+KEEP_MONTHLY=12
+BACKUP_VALKEY=auto
+VALKEY_DATA_PATH=/data/dump.rdb
+BACKUP_CADDY_CA=yes
+BACKUP_DEPLOYMENT_CONFIG=yes
+BACKUP_PRIVATE_CONFIG=yes
+REQUIRE_ENCRYPTED_PRIVATE=no
+ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no
+AGE_RECIPIENT=
+VERIFY_AFTER_BACKUP=yes
+BACKUP_EXTRA_PATHS=
 ```
 
-Windows:
+`BACKUP_EXTRA_PATHS` — colon-separated список абсолютных путей. Не включайте
+`BACKUP_ROOT`, иначе скрипт остановится.
 
-```powershell
-.\scripts\restore-postgres.ps1 -BackupDir backups\officechat_2026-07-11_190000
+Lifecycle hooks выключены:
+
+```ini
+PRE_BACKUP_HOOK=
+POST_BACKUP_HOOK=
+POST_RESTORE_HOOK=
 ```
 
-Linux:
+Hook должен быть абсолютным путём к executable wrapper. Аргументы и shell fragments
+не принимаются; `eval` не используется. Файл должен принадлежать root, не быть
+symlink или group/world-writable. Hook запускается с минимальным environment и
+таймаутом `HOOK_TIMEOUT_SECONDS`. После выполненного pre-hook post-hook вызывается
+также при аварийном завершении backup.
+
+## Создание backup
 
 ```bash
-./scripts/restore-postgres.sh backups/officechat_2026-07-11_190000
+sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf --dry-run
+sudo /opt/officechat/officechatctl backup
 ```
 
-После restore:
+Перед upgrade:
 
 ```bash
-docker compose exec backend alembic current
-curl http://localhost:8100/ready
+sudo /opt/officechat/backup-production.sh \
+  --config /etc/officechat/backup.conf \
+  --pre-upgrade
 ```
 
-## Recovery test
+`--pre-upgrade` включает текущие images из `IMAGE_SERVICES` и создаёт `PROTECTED`,
+поэтому GFS rotation не удаляет backup автоматически. Обычный `--include-images`
+сохраняет те же dynamically discovered images без защиты от rotation.
 
-Backup нельзя считать проверенным только потому, что `pg_dump` завершился успешно.
-
-Периодически выполняйте recovery test:
-
-1. создать тестовые сообщения, вложения, pins и broadcast;
-2. создать database + uploads backup;
-3. восстановить backup в отдельную test environment;
-4. запустить сервисы;
-5. проверить login;
-6. проверить group/direct/discussion messages;
-7. скачать attachment;
-8. проверить pins;
-9. проверить broadcasts;
-10. проверить Alembic revision и `/ready`.
-
-## Release bundle backup/update/rollback
-
-В release install `officechatctl backup` создает PostgreSQL dump, архив uploads и metadata в `/var/backups/officechat`.
-Перед `update-linux.sh` backup выполняется по умолчанию. Флаг `--no-backup` разрешен только с явным предупреждением.
-
-`rollback-linux.sh VERSION` выполняет только image rollback и не откатывает базу. Полное восстановление из backup доступно через `rollback-linux.sh --full-restore BACKUP_DIR` и требует точного подтверждения:
+Backup создаётся как `.partial`, проверяется и только затем атомарно переименовывается:
 
 ```text
-RESTORE OFFICECHAT
+officechat-backup-YYYYMMDD-HHMMSSZ/
+  database/officechat.dump
+  uploads/uploads.tar.gz
+  config/deployment-public.tar.gz
+  config/deployment-private.tar.gz
+  valkey/valkey.rdb
+  caddy/caddy-ca.tar.gz
+  extra/*.tar.gz
+  images/*.tar
+  metadata/manifest.json
+  metadata/SHA256SUMS
+  metadata/versions.txt
+  metadata/image-digests.txt
+  metadata/compose-config.txt
+  metadata/database-info.txt
+  SUCCESS
 ```
+
+Private config и Caddy CA содержат секреты и имеют mode `0600`. Их нельзя
+публиковать или прикладывать к публичным issue. Plaintext private config,
+Caddy CA и `BACKUP_EXTRA_PATHS` по умолчанию никогда не копируются off-site.
+Чтобы перенести их, задайте публичный `AGE_RECIPIENT`: рядом будет создан
+зашифрованный файл `.age`, а ключ расшифрования должен храниться отдельно.
+`REQUIRE_ENCRYPTED_PRIVATE=yes` делает отсутствие recipient или утилиты `age`
+ошибкой. Опция `ALLOW_PLAINTEXT_PRIVATE_OFFSITE=yes` является явным небезопасным
+исключением и отражается warning в manifest.
+
+Manifest v1 содержит format/script version, OfficeChat version, build SHA,
+Alembic/PostgreSQL revision, Compose project, discovered/required/optional
+components, images, timestamp, размеры, warnings и способ получения off-site
+status. Фактический результат копирования хранится в
+`metadata/offsite-receipt.json` и status-файле. Эти metadata не содержат пароли,
+токены, `.env` или webhook URLs.
+
+## Проверка
+
+```bash
+sudo /opt/officechat/verify-backup.sh \
+  --config /etc/officechat/backup.conf \
+  /path/officechat-backup-YYYYMMDD-HHMMSSZ
+```
+
+Проверяются schema/version manifest, `SUCCESS`, SHA256, `pg_restore --list`,
+tar structure и path traversal. Не выводится содержимое private archive.
+
+Полный restore drill:
+
+```bash
+sudo /opt/officechat/restore-production.sh \
+  --config /etc/officechat/backup.conf \
+  --verify-only \
+  /path/officechat-backup-YYYYMMDD-HHMMSSZ
+```
+
+Drill создаёт случайные temporary network/container/volume с ownership labels, не публикует ports,
+не подключает production volumes и удаляет всё через trap. Проверяются полный dump,
+число public tables/relations, Alembic revision, PostgreSQL major compatibility,
+owners/extensions и безопасная распаковка uploads. Архивы с traversal, links,
+special files, setuid/setgid, duplicate names или превышением настроенных лимитов
+отклоняются до extraction.
+Содержимое сообщений и персональные данные не печатаются.
+
+## GFS rotation
+
+По умолчанию сохраняются 14 daily, 8 weekly и 12 monthly точек. Rotation:
+
+- рассматривает только каталоги ожидаемого имени с `SUCCESS`;
+- не следует symlink;
+- не удаляет последний успешный backup;
+- не удаляет `PROTECTED`;
+- не затрагивает посторонние каталоги и активные `.partial`;
+- журналирует каждый удаляемый каталог.
+
+## Off-site / OMV2
+
+Локальный backup на одном filesystem с production не защищает от потери сервера.
+Смонтируйте OMV2 и настройте:
+
+```ini
+OFFSITE_ROOT=/mnt/omv2/officechat
+REQUIRE_OFFSITE=yes
+```
+
+Любой настроенный `OFFSITE_ROOT` должен уже существовать и быть реальным mountpoint
+на другом filesystem; скрипт не создаёт его. Проверяется свободное место. При
+`REQUIRE_OFFSITE=yes` отсутствие mount блокирует общий результат, а при `no`
+off-site копирование пропускается без записи на системный диск. Копирование идёт сначала
+в `.partial`, затем checksums проверяются и каталог атомарно переименовывается.
+Ошибка off-site не удаляет локальный backup. До подключения OMV2 PostgreSQL,
+uploads, private config и CA всё ещё не защищены от потери локального диска.
+PostgreSQL dump и uploads содержат корпоративные данные и остаются обычными
+файлами внутри off-site backup. Размещайте `OFFSITE_ROOT` только на хранилище с
+контролем доступа и шифрованием at rest/зашифрованным транспортом. Встроенный
+`age`-режим защищает private config, Caddy CA и extra archives, но не заменяет
+шифрование всего backup volume.
+
+## Production restore
+
+Production restore по умолчанию запрещён. Требуются одновременно:
+
+```bash
+sudo /opt/officechat/restore-production.sh \
+  --config /etc/officechat/backup.conf \
+  --production \
+  --confirm-hostname "$(hostname)" \
+  --confirm-backup officechat-backup-YYYYMMDD-HHMMSSZ \
+  --yes \
+  /path/officechat-backup-YYYYMMDD-HHMMSSZ
+```
+
+Для автоматизации без TTY требуется дополнительный явный `--non-interactive`;
+он не заменяет `--production`, hostname/backup confirmations и `--yes`.
+
+Скрипт сначала создаёт и проверяет защищённый pre-restore backup. PostgreSQL dump
+восстанавливается в новую временную database без изменения рабочей базы, после
+чего проверяются tables, Alembic revision и owners. Только затем application
+services останавливаются, а базы переключаются через controlled rename. Исходная
+database сохраняется под rollback-именем. Uploads распаковываются в отдельный
+staging directory, проверяются и меняются местами; старый каталог также сохраняется.
+После migrations сервисы считаются восстановленными только после backend `/ready`
+и frontend `/api/health`. При ошибке после переключения приложение остаётся
+остановленным, а rollback database/uploads и pre-restore backup не удаляются.
+
+При несовпадении OfficeChat version выводится warning. Неизвестный
+`backup_format_version` блокирует restore. Custom dump старой поддерживаемой версии
+PostgreSQL разрешается восстанавливать в совместимую новую версию.
+
+После disaster recovery на новой VM:
+
+1. установить Docker Engine/Compose;
+2. восстановить Compose и private config;
+3. получить images или выполнить `docker load` из pre-upgrade backup;
+4. выполнить restore;
+5. восстановить Caddy CA вручную до запуска Caddy;
+6. выполнить `restorecon -RFv /var/lib/officechat` при SELinux;
+7. проверить `/ready`, `/api/health`, login и скачивание вложения;
+8. сменить secrets, если backup мог быть скомпрометирован.
+
+## Caddy CA
+
+`caddy/caddy-ca.tar.gz` содержит private CA key. Восстанавливайте его только в
+настроенный Caddy data volume, при остановленном Caddy, согласно
+`docs/deployment/caddy-ca-backup-restore.md`. Никогда не используйте
+`docker compose down -v` для Caddy.
+
+## systemd и мониторинг
+
+Timer запускается ежедневно около 02:30 с random delay до 15 минут:
+
+```bash
+systemctl list-timers officechat-backup.timer
+journalctl -u officechat-backup.service
+systemctl start officechat-backup.service
+```
+
+Статус для будущего Zabbix:
+
+```text
+/var/backups/officechat/status/latest.json
+```
+
+Проверяйте `current_result`, `last_run`, отдельный `last_success`, duration,
+verification/off-site status, возраст backup и свободное место. Ошибка нового
+запуска не стирает timestamp последнего успешного backup. Zabbix integration в
+этот toolkit не входит.
+
+Проводите isolated restore drill регулярно, например ежемесячно и перед крупными
+обновлениями. Backup без успешного restore drill нельзя считать проверенным.
+
+## Очистка и troubleshooting
+
+GFS rotation выполняется после успешного backup. Она не удаляет `.partial`,
+`PROTECTED`, symlink и посторонние каталоги. Собственный `.partial` аварийно
+завершившегося процесса удаляется trap-ом; неизвестный старый `.partial` сначала
+проверьте по journald и наличию активного процесса, затем удалите вручную.
+
+При ошибке:
+
+1. проверьте `systemctl status officechat-backup.service` и
+   `journalctl -u officechat-backup.service`;
+2. прочитайте `status/latest.json`, не публикуя private archives;
+3. проверьте настроенные Compose files командой `docker compose ... config`;
+4. убедитесь, что `postgres` и `backend` обнаруживаются через `compose ps -q`;
+5. при off-site ошибке проверьте mountpoint и свободное место OMV2;
+6. повторно запустите `verify-backup.sh` для последней копии с `SUCCESS`.
+
+Не удаляйте локальный backup только потому, что off-site копирование завершилось
+ошибкой. Сначала устраните причину и повторите backup.

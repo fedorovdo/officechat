@@ -38,8 +38,29 @@ fi
 
 if [[ "$NO_BACKUP" == "1" ]]; then
   warn "Proceeding without backup by user request."
+elif [[ -x "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" && -f /etc/officechat/backup.conf ]]; then
+  run_cmd "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" --config /etc/officechat/backup.conf --pre-upgrade
 else
   backup_now
+fi
+
+# Refresh versioned backup tooling from a release bundle, but never replace the
+# administrator-owned /etc/officechat/backup.conf.
+for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
+  if [[ -f "${SCRIPT_DIR}/${backup_tool}" && "${SCRIPT_DIR}/${backup_tool}" != "${OFFICECHAT_INSTALL_DIR}/${backup_tool}" ]]; then
+    as_root install -m 0755 "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
+  fi
+done
+if [[ -f "${SCRIPT_DIR}/backup/lib.sh" && "${SCRIPT_DIR}/backup/lib.sh" != "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" ]]; then
+  as_root install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/backup"
+  as_root install -m 0644 "${SCRIPT_DIR}/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
+fi
+if [[ -d "${SCRIPT_DIR}/systemd" ]] && command -v systemctl >/dev/null 2>&1; then
+  as_root install -m 0644 "${SCRIPT_DIR}/systemd/officechat-backup.service" \
+    /etc/systemd/system/officechat-backup.service
+  as_root install -m 0644 "${SCRIPT_DIR}/systemd/officechat-backup.timer" \
+    /etc/systemd/system/officechat-backup.timer
+  as_root systemctl daemon-reload
 fi
 
 if is_dry_run; then

@@ -41,6 +41,9 @@ sudo ./install-linux.sh --hostname officechat.example.local
 ```
 
 Installer не запускает Caddy автоматически, поэтому offline-установка основного приложения не зависит от загрузки proxy image.
+Backup timer также не включается автоматически. После проверки
+`/etc/officechat/backup.conf` включите его вручную либо передайте installer
+`--enable-backup-timer`.
 
 ## 3. DNS и Caddy
 
@@ -84,6 +87,14 @@ curl --fail https://officechat.example.local/ready
 - Никогда не выполняйте `docker compose down -v` для Caddy: volume содержит private CA.
 - Не публикуйте 3100/8100 на LAN; они предназначены только для локальной диагностики.
 - Frontend использует browser same-origin для API и WebSocket и не требует пересборки при смене hostname.
-- Перед обновлением создавайте backup PostgreSQL, uploads и Caddy CA.
+- Release installer устанавливает backup/verify/restore-скрипты, создаёт
+  `/etc/officechat/backup.conf` только при первом запуске и включает
+  `officechat-backup.timer` только по явному `--enable-backup-timer`. При
+  обновлении существующий `backup.conf` не
+  перезаписывается, поэтому добавленные в новых версиях параметры получают
+  безопасные значения по умолчанию из общей библиотеки.
+- Стандартный backup перед обновлением запускается с `--pre-upgrade`: такой
+  набор защищён от автоматической ротации и включает текущие frontend/backend
+  images.
 
-См. [internal-https.md](internal-https.md), [windows-certificate-installation.md](windows-certificate-installation.md) и [caddy-ca-backup-restore.md](caddy-ca-backup-restore.md).
+См. [BACKUP_RESTORE_RU.md](../BACKUP_RESTORE_RU.md), [internal-https.md](internal-https.md), [windows-certificate-installation.md](windows-certificate-installation.md) и [caddy-ca-backup-restore.md](caddy-ca-backup-restore.md).

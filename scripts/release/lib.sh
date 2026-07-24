@@ -65,8 +65,23 @@ as_root() {
 
 require_safe_path() {
   local path="$1"
+  local resolved lexical
   [[ -n "$path" ]] || fail "Path must not be empty"
-  [[ "$path" != "/" ]] || fail "Refusing to use / as a target path"
+  [[ "$path" == /* ]] || fail "Path must be absolute: $path"
+  [[ "$path" != *$'\n'* && "$path" != *$'\r'* && "$path" != *$'\t'* ]] ||
+    fail "Path contains control characters"
+  [[ "$path" != *$'\\'* && "$path" != *'*'* && "$path" != *'?'* &&
+    "$path" != *'['* && "$path" != *']'* && "$path" != *'|'* && "$path" != *'&'* ]] ||
+    fail "Path contains unsupported shell or wildcard characters"
+  require_command realpath
+  resolved="$(realpath -m -- "$path")"
+  lexical="$(realpath -ms -- "$path")"
+  [[ "$resolved" == "$lexical" ]] || fail "Path contains a symlink component: $path"
+  case "$resolved" in
+    /|/var|/var/lib|/opt|/home|/root)
+      fail "Refusing broad or root path: $resolved"
+      ;;
+  esac
 }
 
 require_command() {

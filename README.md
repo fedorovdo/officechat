@@ -29,6 +29,15 @@ Key docs:
 - [docs/BACKUP_RESTORE_RU.md](docs/BACKUP_RESTORE_RU.md)
 - [docs/E2E_TESTS_RU.md](docs/E2E_TESTS_RU.md)
 - [docs/RELEASE_CHECKLIST_RU.md](docs/RELEASE_CHECKLIST_RU.md)
+- [Production backup and restore (RU)](docs/BACKUP_RESTORE_RU.md)
+- [Production backup and restore (EN)](docs/BACKUP_RESTORE.md)
+
+Production backups use PostgreSQL custom dumps, validated uploads archives,
+strict checksums, GFS retention, isolated restore drills, and staged production
+restore with retained rollback database/uploads. Plaintext private configuration,
+Caddy CA, and extra-path archives stay out of off-site copies by default; use an
+`age` recipient for encrypted off-site private data. The systemd timer is
+installed disabled unless the administrator explicitly opts in.
 
 ## Production / Internal HTTPS
 

@@ -40,7 +40,9 @@ run() {
 
 run mkdir -p "$RELEASE_DIR" "$DIST_DIR"
 run mkdir -p "${RELEASE_DIR}/caddy"
+run mkdir -p "${RELEASE_DIR}/backup"
 run mkdir -p "${RELEASE_DIR}/deployment"
+run mkdir -p "${RELEASE_DIR}/systemd"
 run cp "${ROOT_DIR}/deploy/docker-compose.release.yml" "${RELEASE_DIR}/docker-compose.yml"
 run cp "${ROOT_DIR}/.env.production.example" "${RELEASE_DIR}/.env.example"
 run cp "${ROOT_DIR}/scripts/release/install-linux.sh" "${RELEASE_DIR}/install-linux.sh"
@@ -51,6 +53,15 @@ run cp "${ROOT_DIR}/scripts/release/verify-install.sh" "${RELEASE_DIR}/verify-in
 run cp "${ROOT_DIR}/scripts/release/officechatctl" "${RELEASE_DIR}/officechatctl"
 run cp "${ROOT_DIR}/scripts/release/lib.sh" "${RELEASE_DIR}/lib.sh"
 run cp "${ROOT_DIR}/scripts/release/collect-diagnostics.sh" "${RELEASE_DIR}/collect-diagnostics.sh"
+run cp "${ROOT_DIR}/scripts/backup-production.sh" "${RELEASE_DIR}/backup-production.sh"
+run cp "${ROOT_DIR}/scripts/verify-backup.sh" "${RELEASE_DIR}/verify-backup.sh"
+run cp "${ROOT_DIR}/scripts/restore-production.sh" "${RELEASE_DIR}/restore-production.sh"
+run cp "${ROOT_DIR}/scripts/backup/lib.sh" "${RELEASE_DIR}/backup/lib.sh"
+run cp "${ROOT_DIR}/deploy/backup/officechat-backup.conf.example" "${RELEASE_DIR}/backup/officechat-backup.conf.example"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "${RELEASE_DIR}/systemd/officechat-backup.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.timer" "${RELEASE_DIR}/systemd/officechat-backup.timer"
+run cp "${ROOT_DIR}/docs/BACKUP_RESTORE_RU.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE_RU.md"
+run cp "${ROOT_DIR}/docs/BACKUP_RESTORE.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE.md"
 run cp "${ROOT_DIR}/deploy/caddy/Caddyfile.example" "${RELEASE_DIR}/caddy/Caddyfile.example"
 run cp "${ROOT_DIR}/deploy/caddy/docker-compose.caddy.yml" "${RELEASE_DIR}/caddy/docker-compose.caddy.yml"
 for deployment_doc in production-installation.md internal-https.md windows-certificate-installation.md caddy-ca-backup-restore.md; do
@@ -64,17 +75,36 @@ if [[ "$DRY_RUN" == "1" ]]; then
 else
   printf '%s\n' "$VERSION" >"${RELEASE_DIR}/VERSION"
 fi
-run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh"
+run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh" "${RELEASE_DIR}/backup-production.sh" "${RELEASE_DIR}/verify-backup.sh" "${RELEASE_DIR}/restore-production.sh"
+run chmod 0644 \
+  "${RELEASE_DIR}/backup/lib.sh" \
+  "${RELEASE_DIR}/backup/officechat-backup.conf.example" \
+  "${RELEASE_DIR}/systemd/officechat-backup.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup.timer"
 
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh VERSION README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh VERSION README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
-    cd "$ROOT_DIR"
-    tar --exclude='.env' --exclude='.git' --exclude='node_modules' --exclude='.venv' --exclude='test-results' --exclude='playwright-report' \
-      -czf "${DIST_DIR}/${ARCHIVE_NAME}" release
+    archive_stage="$(mktemp -d)"
+    trap 'rm -rf -- "$archive_stage"' EXIT
+    cp -a "$RELEASE_DIR" "${archive_stage}/release"
+    find "${archive_stage}/release" -type d -exec chmod 0755 {} +
+    find "${archive_stage}/release" -type f -exec chmod 0644 {} +
+    chmod 0755 \
+      "${archive_stage}/release/install-linux.sh" \
+      "${archive_stage}/release/update-linux.sh" \
+      "${archive_stage}/release/rollback-linux.sh" \
+      "${archive_stage}/release/uninstall-linux.sh" \
+      "${archive_stage}/release/verify-install.sh" \
+      "${archive_stage}/release/officechatctl" \
+      "${archive_stage}/release/collect-diagnostics.sh" \
+      "${archive_stage}/release/backup-production.sh" \
+      "${archive_stage}/release/verify-backup.sh" \
+      "${archive_stage}/release/restore-production.sh"
+    tar -C "$archive_stage" -czf "${DIST_DIR}/${ARCHIVE_NAME}" release
     sha256sum "${DIST_DIR}/${ARCHIVE_NAME}" >"${DIST_DIR}/${ARCHIVE_NAME}.sha256"
   )
 fi

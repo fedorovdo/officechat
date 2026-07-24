@@ -1,0 +1,58 @@
+# OfficeChat production backup configuration.
+# Install as /etc/officechat/backup.conf with mode 0600.
+BACKUP_FORMAT_VERSION=1
+OFFICECHAT_DIR=/opt/officechat
+OFFICECHAT_DATA_DIR=/var/lib/officechat
+BACKUP_ROOT=/var/backups/officechat/production
+OFFSITE_ROOT=
+REQUIRE_OFFSITE=no
+
+COMPOSE_ENV_FILE=/opt/officechat/.env
+COMPOSE_FILES=/opt/officechat/docker-compose.yml:/opt/officechat/docker-compose.https-override.yml
+COMPOSE_PROJECT_NAME=officechat
+POSTGRES_SERVICE=postgres
+BACKEND_SERVICE=backend
+FRONTEND_SERVICE=frontend
+WORKER_SERVICES=calendar-worker
+VALKEY_SERVICE=valkey
+VALKEY_DATA_PATH=/data/dump.rdb
+
+UPLOADS_DIR=/var/lib/officechat/uploads
+BACKUP_EXTRA_PATHS=
+PUBLIC_CONFIG_PATHS=docker-compose.yml:docker-compose.https-override.yml:caddy/docker-compose.caddy.yml:caddy/Caddyfile.example
+
+BACKUP_VALKEY=auto
+BACKUP_CADDY_CA=yes
+BACKUP_DEPLOYMENT_CONFIG=yes
+BACKUP_PRIVATE_CONFIG=yes
+VERIFY_AFTER_BACKUP=yes
+KEEP_DAILY=14
+KEEP_WEEKLY=8
+KEEP_MONTHLY=12
+
+CADDY_COMPOSE_ENV_FILE=/opt/officechat/.env
+CADDY_COMPOSE_FILES=/opt/officechat/caddy/docker-compose.caddy.yml
+CADDY_COMPOSE_PROJECT_NAME=officechat-caddy
+CADDY_SERVICE=caddy
+CADDY_DATA_PATH=/data/caddy/pki
+
+POSTGRES_VERIFY_IMAGE=postgres:16-alpine
+IMAGE_SERVICES=frontend:backend
+LOCK_FILE=/run/lock/officechat/backup.lock
+STATUS_FILE=/var/backups/officechat/status/latest.json
+
+# Hooks must be absolute executable paths. Arguments and shell fragments are not accepted.
+HOOK_TIMEOUT_SECONDS=300
+PRE_BACKUP_HOOK=
+POST_BACKUP_HOOK=
+POST_RESTORE_HOOK=
+
+# Plaintext private archives stay local and are excluded from off-site copies by default.
+# age uses a public recipient only; never place the private identity in this file or backup.
+REQUIRE_ENCRYPTED_PRIVATE=no
+ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no
+AGE_RECIPIENT=
+
+# Archive validation limits protect verify/restore from resource-exhaustion payloads.
+MAX_ARCHIVE_MEMBERS=2000000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES=1099511627776

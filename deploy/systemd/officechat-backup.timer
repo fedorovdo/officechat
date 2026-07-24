@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily OfficeChat production backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=officechat-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -75,6 +75,35 @@ grep -Fq 'Caddyfile.example' "${SCRIPT_DIR}/install-linux.sh" || {
   echo "Installer does not copy the Caddy template" >&2
   exit 1
 }
+for backup_asset in \
+  scripts/backup-production.sh \
+  scripts/verify-backup.sh \
+  scripts/restore-production.sh \
+  deploy/backup/officechat-backup.conf.example \
+  deploy/systemd/officechat-backup.service \
+  deploy/systemd/officechat-backup.timer; do
+  grep -Fq "$backup_asset" "${SCRIPT_DIR}/create-release-bundle.sh" || {
+    echo "Release bundle does not include ${backup_asset}" >&2
+    exit 1
+  }
+done
+grep -Fq '[[ ! -f /etc/officechat/backup.conf ]]' "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not preserve an existing backup.conf" >&2
+  exit 1
+}
+grep -Fq 'ENABLE_BACKUP_TIMER' "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not require explicit backup timer opt-in" >&2
+  exit 1
+}
+if grep -Eq 'systemctl enable --now officechat-backup.timer' "${SCRIPT_DIR}/install-linux.sh" &&
+  ! grep -Fq 'ENABLE_BACKUP_TIMER" == "1' "${SCRIPT_DIR}/install-linux.sh"; then
+  echo "Installer enables the backup timer without explicit opt-in" >&2
+  exit 1
+fi
+grep -Fq -- '--pre-upgrade' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not create a protected pre-upgrade backup" >&2
+  exit 1
+}
 
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
@@ -94,6 +123,7 @@ bash "${SCRIPT_DIR}/install-linux.sh" --dry-run >/dev/null
 grep -q 'preserve-this-secret' "$ENV_FILE" || { echo "install dry-run did not preserve existing env" >&2; exit 1; }
 
 bash "${SCRIPT_DIR}/install-linux.sh" --dry-run --hostname officechat.example.local >/dev/null
+bash "${SCRIPT_DIR}/install-linux.sh" --dry-run --enable-backup-timer >/dev/null
 if bash "${SCRIPT_DIR}/install-linux.sh" --dry-run --hostname 'https://invalid.example.local' >/dev/null 2>&1; then
   echo "install-linux.sh accepted an invalid hostname" >&2
   exit 1

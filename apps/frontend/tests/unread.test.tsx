@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { unreadFactory } from "./factories";
 
@@ -26,7 +26,7 @@ vi.mock("../lib/session", () => ({
 }));
 
 import { formatUnreadCount, useUnreadStore } from "../lib/useUnreadStore";
-import { useVisibleReadMarker } from "../lib/useVisibleReadMarker";
+import { useInitialMessageScroll, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 
 describe("unread store", () => {
   beforeEach(() => {
@@ -98,6 +98,70 @@ describe("unread store", () => {
     expect(result.current.getChat("group", "group-1")).toBeUndefined();
     expect(result.current.summary.groups).toBe(0);
     expect(result.current.summary.total).toBe(3);
+  });
+
+  it("replaces the consumed first unread marker with the authoritative next marker", async () => {
+    mocks.markChatRead.mockResolvedValueOnce({
+      chat_type: "group",
+      chat_id: "group-1",
+      last_read_message_id: "message-1",
+      first_unread_message_id: "message-2",
+      newest_unread_message_id: "message-2",
+      last_read_message_created_at: "2026-07-04T10:00:00Z",
+      last_read_at: "2026-07-04T10:00:00Z",
+      unread_count: 1,
+      mention_count: 0,
+      total_unread: 4,
+      notification_unread_count: 0,
+      read_notification_ids: []
+    });
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+
+    await act(async () => result.current.markRead("group", "group-1", "message-1"));
+
+    expect(result.current.getChat("group", "group-1")).toMatchObject({
+      unread_count: 1,
+      first_unread_message_id: "message-2",
+      newest_unread_message_id: "message-2"
+    });
+  });
+
+  it("reloads an authoritative marker when an older backend omits it", async () => {
+    mocks.markChatRead.mockResolvedValueOnce({
+      chat_type: "group",
+      chat_id: "group-1",
+      last_read_message_id: "message-1",
+      last_read_message_created_at: "2026-07-04T10:00:00Z",
+      last_read_at: "2026-07-04T10:00:00Z",
+      unread_count: 1,
+      mention_count: 0,
+      total_unread: 4,
+      notification_unread_count: 0,
+      read_notification_ids: []
+    });
+    const { result } = renderHook(() => useUnreadStore("token", "user-1"));
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+    mocks.getUnreadSummary.mockResolvedValueOnce(unreadFactory({
+      total: 4,
+      groups: 1,
+      direct: 3,
+      chats: [
+        {
+          chat_type: "group",
+          chat_id: "group-1",
+          unread_count: 1,
+          mention_count: 0,
+          first_unread_message_id: "message-2",
+          newest_unread_message_id: "message-2"
+        }
+      ]
+    }));
+
+    await act(async () => result.current.markRead("group", "group-1", "message-1"));
+
+    expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(2);
+    expect(result.current.getChat("group", "group-1")?.first_unread_message_id).toBe("message-2");
   });
 
   it("clears unread state on logout/authentication expiry", async () => {
@@ -328,6 +392,44 @@ describe("unread store", () => {
     expect(result.current.summary.direct).toBe(2);
   });
 
+  it("does not apply or retry a pending mark-read response for the next user", async () => {
+    let resolveRead!: (value: unknown) => void;
+    mocks.markChatRead.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRead = resolve; })
+    );
+    const { result, rerender } = renderHook(
+      ({ token, userId }) => useUnreadStore(token, userId),
+      { initialProps: { token: "token-a", userId: "user-a" } }
+    );
+    await waitFor(() => expect(result.current.summary.total).toBe(5));
+
+    let readRequest!: Promise<boolean>;
+    act(() => {
+      readRequest = result.current.markRead("group", "group-1", "message-1");
+    });
+    mocks.getUnreadSummary.mockResolvedValueOnce(
+      unreadFactory({ total: 2, groups: 0, direct: 2 })
+    );
+    rerender({ token: "token-b", userId: "user-b" });
+    await waitFor(() => expect(result.current.summary.total).toBe(2));
+
+    resolveRead({
+      chat_type: "group",
+      chat_id: "group-1",
+      last_read_message_id: "message-1",
+      last_read_message_created_at: "2026-07-04T10:00:00Z",
+      last_read_at: "2026-07-04T10:00:00Z",
+      unread_count: 1,
+      mention_count: 0,
+      total_unread: 4
+    });
+
+    await act(async () => expect(readRequest).resolves.toBe(false));
+    expect(result.current.summary.total).toBe(2);
+    expect(mocks.getUnreadSummary).toHaveBeenCalledTimes(2);
+    expect(mocks.getUnreadSummary).toHaveBeenLastCalledWith("token-b");
+  });
+
   it("preserves existing badges when the repair request fails", async () => {
     mocks.markAllCurrentRead.mockRejectedValueOnce(new Error("Unavailable"));
     const { result } = renderHook(() => useUnreadStore("token", "user-1"));
@@ -344,6 +446,170 @@ describe("unread store", () => {
     expect(caughtError).toBeInstanceOf(Error);
     expect(result.current.summary.total).toBe(5);
     expect(result.current.getChat("group", "group-1")?.unread_count).toBe(2);
+  });
+});
+
+describe("initial unread scroll", () => {
+  let nextFrameId = 1;
+  let frames = new Map<number, FrameRequestCallback>();
+
+  beforeEach(() => {
+    frames = new Map();
+    nextFrameId = 1;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      frames.set(frameId, callback);
+      return frameId;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (frameId: number) => {
+      frames.delete(frameId);
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function flushFrame() {
+    const pending = Array.from(frames.entries());
+    frames.clear();
+    act(() => {
+      for (const [, callback] of pending) callback(performance.now());
+    });
+  }
+
+  function setupScrollElements() {
+    const container = document.createElement("section");
+    const unreadMessage = document.createElement("article");
+    unreadMessage.dataset.messageId = "message-unread";
+    container.append(unreadMessage);
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 600 });
+    Object.defineProperty(container, "scrollTop", { configurable: true, writable: true, value: 100 });
+    container.getBoundingClientRect = vi.fn(() => ({ top: 100, height: 600 } as DOMRect));
+    unreadMessage.getBoundingClientRect = vi.fn(() => ({ top: 1000, height: 900 } as DOMRect));
+    const scrollTo = vi.fn();
+    container.scrollTo = scrollTo;
+    return { container, scrollTo };
+  }
+
+  it("positions the exact first unread near the upper third only once", () => {
+    const { container, scrollTo } = setupScrollElements();
+    const fallback = vi.fn();
+    const { rerender } = renderHook(
+      ({ targetMessageId }) => useInitialMessageScroll({
+        conversationKey: "group:group-1",
+        enabled: true,
+        messages: [{ id: "message-unread" }],
+        onFallbackToLatest: fallback,
+        scrollContainerRef: { current: container },
+        targetMessageId
+      }),
+      { initialProps: { targetMessageId: "message-unread" } }
+    );
+    flushFrame();
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+    expect(fallback).not.toHaveBeenCalled();
+
+    rerender({ targetMessageId: "message-next" });
+    flushFrame();
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a new initial-scroll lifecycle after switching conversations", () => {
+    const { container, scrollTo } = setupScrollElements();
+    const { rerender } = renderHook(
+      ({ conversationKey }) => useInitialMessageScroll({
+        conversationKey,
+        enabled: true,
+        messages: [{ id: "message-unread" }],
+        onFallbackToLatest: vi.fn(),
+        scrollContainerRef: { current: container },
+        targetMessageId: "message-unread"
+      }),
+      { initialProps: { conversationKey: "group:group-1" } }
+    );
+    flushFrame();
+    rerender({ conversationKey: "group:group-2" });
+    flushFrame();
+
+    expect(scrollTo).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a bounded latest-message fallback when the target DOM never appears", () => {
+    const container = document.createElement("section");
+    const fallback = vi.fn();
+    renderHook(() => useInitialMessageScroll({
+      conversationKey: "group:group-1",
+      enabled: true,
+      messages: [{ id: "message-latest" }],
+      onFallbackToLatest: fallback,
+      scrollContainerRef: { current: container },
+      targetMessageId: "message-not-loaded"
+    }));
+
+    flushFrame();
+    flushFrame();
+    flushFrame();
+    flushFrame();
+
+    expect(fallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not override manual scrolling before initial positioning", () => {
+    const { container, scrollTo } = setupScrollElements();
+    const fallback = vi.fn();
+    renderHook(() => useInitialMessageScroll({
+      conversationKey: "group:group-1",
+      enabled: true,
+      messages: [{ id: "message-unread" }],
+      onFallbackToLatest: fallback,
+      scrollContainerRef: { current: container },
+      targetMessageId: "message-unread"
+    }));
+
+    act(() => container.dispatchEvent(new WheelEvent("wheel")));
+    flushFrame();
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("does not override a native scroll before initial positioning", () => {
+    const { container, scrollTo } = setupScrollElements();
+    renderHook(() => useInitialMessageScroll({
+      conversationKey: "group:group-1",
+      enabled: true,
+      messages: [{ id: "message-unread" }],
+      onFallbackToLatest: vi.fn(),
+      scrollContainerRef: { current: container },
+      targetMessageId: "message-unread"
+    }));
+
+    act(() => container.dispatchEvent(new Event("scroll")));
+    flushFrame();
+
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("does not treat its own positioning scroll as manual interaction", () => {
+    const { container, scrollTo } = setupScrollElements();
+    scrollTo.mockImplementation(() => {
+      container.dispatchEvent(new Event("scroll"));
+    });
+    renderHook(() => useInitialMessageScroll({
+      conversationKey: "group:group-1",
+      enabled: true,
+      messages: [{ id: "message-unread" }],
+      onFallbackToLatest: vi.fn(),
+      scrollContainerRef: { current: container },
+      targetMessageId: "message-unread"
+    }));
+
+    flushFrame();
+
+    expect(scrollTo).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -429,7 +695,7 @@ describe("visible read marker", () => {
   it("observes the real scroll container at 60 percent and waits 500ms", () => {
     const { newestMessage, oldMessage, onMarkRead } = renderMarker("visible");
     const observer = TestIntersectionObserver.instances[0];
-    expect(observer.options?.threshold).toEqual([0, 0.6]);
+    expect(observer.options?.threshold).toEqual([0, 0.25, 0.5, 0.6]);
     observer.emit(oldMessage, 0.6);
     observer.emit(newestMessage, 0.6);
     act(() => vi.advanceTimersByTime(499));
@@ -491,12 +757,66 @@ describe("visible read marker", () => {
     expect(onMarkRead).toHaveBeenLastCalledWith("newest");
   });
 
+  it("continues with the next visible unread after the previous marker succeeds", async () => {
+    const onMarkRead = vi.fn().mockResolvedValue(true);
+    const { newestMessage, oldMessage } = renderMarker("visible", true, true, "old", onMarkRead);
+    const observer = TestIntersectionObserver.instances[0];
+    observer.emit(oldMessage, 1);
+    await act(async () => vi.advanceTimersByTimeAsync(501));
+    expect(onMarkRead).toHaveBeenLastCalledWith("old");
+
+    observer.emit(oldMessage, 0);
+    observer.emit(newestMessage, 1);
+    await act(async () => vi.advanceTimersByTimeAsync(501));
+
+    expect(onMarkRead).toHaveBeenCalledTimes(2);
+    expect(onMarkRead).toHaveBeenLastCalledWith("newest");
+  });
+
   it("can confirm an oversized message that fills most of the scroll container", () => {
     const { oldMessage, onMarkRead } = renderMarker("visible", true, true, "old");
     const observer = TestIntersectionObserver.instances[0];
     observer.emit(oldMessage, 0.3, { intersectionHeight: 70, messageHeight: 300, rootHeight: 100 });
     act(() => {
       vi.advanceTimersByTime(500);
+      vi.runOnlyPendingTimers();
+    });
+    expect(onMarkRead).toHaveBeenCalledWith("old");
+  });
+
+  it("can confirm the reached bottom of an oversized message", () => {
+    const { oldMessage, onMarkRead } = renderMarker("visible", true, true, "old");
+    const observer = TestIntersectionObserver.instances[0];
+    observer.callback([
+      {
+        target: oldMessage,
+        isIntersecting: true,
+        intersectionRatio: 0.1,
+        boundingClientRect: { height: 1000, bottom: 100 },
+        intersectionRect: { height: 25 },
+        rootBounds: { height: 100, top: 0, bottom: 100 }
+      } as unknown as IntersectionObserverEntry
+    ], observer as unknown as IntersectionObserver);
+    act(() => {
+      vi.advanceTimersByTime(500);
+      vi.runOnlyPendingTimers();
+    });
+    expect(onMarkRead).toHaveBeenCalledWith("old");
+  });
+
+  it("restarts the tall-message dwell after scrolling stops", async () => {
+    const { container, oldMessage, onMarkRead } = renderMarker("visible", true, true, "old");
+    TestIntersectionObserver.instances[0].emit(
+      oldMessage,
+      0.3,
+      { intersectionHeight: 70, messageHeight: 300, rootHeight: 100 }
+    );
+    act(() => vi.advanceTimersByTime(200));
+    act(() => container.dispatchEvent(new Event("scroll")));
+    await act(async () => vi.advanceTimersByTimeAsync(599));
+    expect(onMarkRead).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
       vi.runOnlyPendingTimers();
     });
     expect(onMarkRead).toHaveBeenCalledWith("old");

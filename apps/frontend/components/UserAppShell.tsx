@@ -2255,6 +2255,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   onDiscuss={(message) => void handleOpenDiscussion(message)}
                   onMarkRead={(messageId) => unreadStore.markRead("group", selectedGroup.id, messageId)}
                   unread={unreadStore.getChat("group", selectedGroup.id)}
+                  unreadReady={unreadStore.isReady}
                   messageContext={messageContext?.chat_type === "group" && messageContext.chat_id === selectedGroup.id ? messageContext : null}
                   onContextClosed={clearMessageContext}
                   onContextExpand={expandMessageContext}
@@ -2274,6 +2275,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   presenceByUserId={presenceByUserId}
                   onMarkRead={(messageId) => unreadStore.markRead("discussion", activeDiscussionId, messageId)}
                   unread={unreadStore.getChat("discussion", activeDiscussionId)}
+                  unreadReady={unreadStore.isReady}
                   messageContext={messageContext?.chat_type === "discussion" && messageContext.chat_id === activeDiscussionId ? messageContext : null}
                   onContextClosed={clearMessageContext}
                   onContextExpand={expandMessageContext}
@@ -2309,6 +2311,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 locale={locale}
                 onMarkRead={(messageId) => unreadStore.markRead("direct", selectedDirectConversation.id, messageId)}
                 unread={unreadStore.getChat("direct", selectedDirectConversation.id)}
+                unreadReady={unreadStore.isReady}
                 messageContext={messageContext?.chat_type === "direct" && messageContext.chat_id === selectedDirectConversation.id ? messageContext : null}
                 onContextClosed={clearMessageContext}
                 onContextExpand={expandMessageContext}

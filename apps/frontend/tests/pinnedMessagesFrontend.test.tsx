@@ -361,14 +361,14 @@ describe("pinned message frontend integration", () => {
     const pin = pinFactory();
     await screen.findByText("Pin me");
     await waitFor(() => expect(TestWebSocket.instances.length).toBeGreaterThan(0));
-    await act(async () => {
+    act(() => {
       TestWebSocket.instances.at(-1)?.receive({ type: "message.pinned", chat_type: "direct", chat_id: "direct-1", pin_id: pin.id, message_id: "message-1", pin });
-      await Promise.resolve();
     });
-    await act(async () => {
+    expect(screen.getByRole("region", { name: en.pins.title })).toBeInTheDocument();
+    act(() => {
       TestWebSocket.instances.at(-1)?.receive({ type: "message.unpinned", chat_type: "direct", chat_id: "direct-1", pin_id: pin.id, message_id: "message-1" });
-      await Promise.resolve();
     });
+    expect(screen.queryByRole("region", { name: en.pins.title })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.messages.moreActions })).toBeInTheDocument();
   });
 

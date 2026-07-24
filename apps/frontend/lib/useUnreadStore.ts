@@ -93,6 +93,8 @@ export function useUnreadStore(
     sessionGenerationRef.current += 1;
     requestRef.current = null;
     repairRequestRef.current = null;
+    markReadVersionsRef.current.clear();
+    authoritativeVersionRef.current += 1;
     setSummary(emptySummary);
     setIsLoading(false);
     setIsReady(false);
@@ -152,28 +154,42 @@ export function useUnreadStore(
       unread_count: state.unread_count,
       mention_count: state.mention_count,
       total_unread: state.total_unread,
-      last_read_message_id: state.last_read_message_id
+      last_read_message_id: state.last_read_message_id,
+      first_unread_message_id: state.first_unread_message_id,
+      newest_unread_message_id: state.newest_unread_message_id
     });
   }, [applyUnreadEvent]);
 
   const markRead = useCallback(async (chatType: ChatType, chatId: string, messageId: string) => {
     if (!token) return false;
+    const generation = sessionGenerationRef.current;
     const key = chatKey(chatType, chatId);
     const version = (markReadVersionsRef.current.get(key) ?? 0) + 1;
     const authoritativeVersion = authoritativeVersionRef.current;
     markReadVersionsRef.current.set(key, version);
     try {
       const state = await markChatRead(token, chatType, chatId, messageId);
+      if (sessionGenerationRef.current !== generation) return false;
       if (markReadVersionsRef.current.get(key) !== version) return true;
       if (authoritativeVersionRef.current !== authoritativeVersion) {
         await reload();
         return true;
       }
+      const requiresCompatibilityReload =
+        state.unread_count > 0 && state.first_unread_message_id === undefined;
       reconcileReadState(state);
       onReadStateRef.current?.(state);
+      if (requiresCompatibilityReload && sessionGenerationRef.current === generation) {
+        await reload();
+      }
       return true;
     } catch {
-      if (markReadVersionsRef.current.get(key) === version) await reload();
+      if (
+        sessionGenerationRef.current === generation &&
+        markReadVersionsRef.current.get(key) === version
+      ) {
+        await reload();
+      }
       return false;
     }
   }, [applyUnreadEvent, reconcileReadState, reload, token]);

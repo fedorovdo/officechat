@@ -33,9 +33,10 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { applyDeletedMessageEvent } from "../lib/message-privacy";
+import { loadInitialMessageWindow, mergeMessageWindow } from "../lib/messagePagination";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
-import { scrollUnreadMessageIntoView, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
+import { useInitialMessageScroll, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -57,6 +58,7 @@ type DirectChatPanelProps = {
   locale: Locale;
   onMarkRead?: (messageId: string) => boolean | void | Promise<boolean | void>;
   unread?: OfficeChatUnreadChat;
+  unreadReady?: boolean;
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
   onContextExpand?: (before: number, after: number) => void | Promise<void>;
@@ -65,7 +67,7 @@ type DirectChatPanelProps = {
 
 type LiveUpdateStatus = "connected" | "disconnected" | "reconnecting";
 
-export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread, messageContext, onContextClosed, onContextExpand, onJumpToMessage }: DirectChatPanelProps) {
+export function DirectChatPanel({ conversation, currentUser, dictionary, locale, onMarkRead, unread, unreadReady = true, messageContext, onContextClosed, onContextExpand, onJumpToMessage }: DirectChatPanelProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeFormRef = useRef<HTMLFormElement | null>(null);
@@ -75,9 +77,15 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   const socketRef = useRef<ResilientWebSocketConnection | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
-  const hasInitialMessageScrollRef = useRef(false);
   const historicalTargetRef = useRef<string | null>(null);
+  const initialLoadGenerationRef = useRef(0);
+  const activeConversationIdRef = useRef(conversation.id);
+  activeConversationIdRef.current = conversation.id;
+  const unreadRef = useRef(unread);
+  unreadRef.current = unread;
   const [messages, setMessages] = useState<OfficeChatDirectMessage[]>([]);
+  const [initialMessageWindowReady, setInitialMessageWindowReady] = useState(false);
+  const [hasEarlierUnreadOutsideWindow, setHasEarlierUnreadOutsideWindow] = useState(false);
   const [messageBody, setMessageBody] = useState("");
   const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
   const [replyToMessage, setReplyToMessage] = useState<OfficeChatDirectMessage | null>(null);
@@ -181,6 +189,16 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     setShowNewMessagesButton(false);
   }
 
+  useInitialMessageScroll({
+    conversationKey: `direct:${conversation.id}`,
+    enabled: unreadReady && initialMessageWindowReady,
+    messages,
+    onFallbackToLatest: () => scrollToLatestMessage("auto"),
+    scrollContainerRef: messagesListRef,
+    skip: Boolean(historicalTargetId || (messageContext?.chat_type === "direct" && messageContext.chat_id === conversation.id)),
+    targetMessageId: unread?.first_unread_message_id
+  });
+
   function resizeComposer(textarea: HTMLTextAreaElement) {
     textarea.style.height = "0px";
     const nextHeight = Math.min(textarea.scrollHeight, 160);
@@ -189,15 +207,20 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   }
 
   const refreshMessages = useCallback(
-    async (token: string) => {
-      setMessages(await getDirectMessages(token, conversation.id));
+    async (token: string, preserveWindow = false) => {
+      const requestedConversationId = conversation.id;
+      const loadedMessages = await getDirectMessages(token, conversation.id);
+      if (activeConversationIdRef.current !== requestedConversationId) return;
+      setMessages((current) => preserveWindow ? mergeMessageWindow(current, loadedMessages) : loadedMessages);
     },
     [conversation.id]
   );
 
   const refreshPins = useCallback(
     async (token: string) => {
-      setPins(await getPinnedMessages(token, "direct", conversation.id));
+      const requestedConversationId = conversation.id;
+      const loadedPins = await getPinnedMessages(token, "direct", conversation.id);
+      if (activeConversationIdRef.current === requestedConversationId) setPins(loadedPins);
     },
     [conversation.id]
   );
@@ -227,7 +250,9 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
   }
 
   useEffect(() => {
-    hasInitialMessageScrollRef.current = false;
+    initialLoadGenerationRef.current += 1;
+    setInitialMessageWindowReady(false);
+    setHasEarlierUnreadOutsideWindow(false);
     shouldScrollToBottomRef.current = false;
     historicalTargetRef.current = null;
     setShowNewMessagesButton(false);
@@ -254,11 +279,65 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       router.replace(`/${locale}/login`);
       return;
     }
-    if (!messageContext || messageContext.chat_id !== conversation.id) {
-      void Promise.all([refreshMessages(token), refreshPins(token)]).catch(() => setError(dictionary.directMessages.loadError));
+    const abortController = new AbortController();
+    if (messageContext?.chat_type === "direct" && messageContext.chat_id === conversation.id) {
+      setHasEarlierUnreadOutsideWindow(false);
+      setInitialMessageWindowReady(true);
+      const requestedConversationId = conversation.id;
+      void getDirectReadReceipt(token, conversation.id, abortController.signal)
+        .then((receipt) => {
+          if (activeConversationIdRef.current === requestedConversationId) setReadReceipt(receipt);
+        })
+        .catch((caughtError) => {
+          if (caughtError instanceof Error && caughtError.name === "AbortError") return;
+          if (activeConversationIdRef.current === requestedConversationId) setReadReceipt(null);
+        });
+    } else {
+      const generation = initialLoadGenerationRef.current + 1;
+      initialLoadGenerationRef.current = generation;
+      setInitialMessageWindowReady(false);
+      const targetMessageId = unreadReady ? unreadRef.current?.first_unread_message_id : null;
+      const messagesRequest = unreadReady
+        ? loadInitialMessageWindow(
+            (limit, before) => getDirectMessages(
+              token,
+              conversation.id,
+              limit,
+              before,
+              abortController.signal
+            ),
+            targetMessageId,
+            abortController.signal
+          )
+        : getDirectMessages(token, conversation.id, 50, undefined, abortController.signal)
+            .then((loadedMessages) => ({ messages: loadedMessages, targetFound: false }));
+      void Promise.all([
+        messagesRequest,
+        getPinnedMessages(token, "direct", conversation.id, abortController.signal)
+      ])
+        .then(([messageWindow, loadedPins]) => {
+          if (initialLoadGenerationRef.current !== generation) return;
+          setMessages(messageWindow.messages);
+          setPins(loadedPins);
+          setHasEarlierUnreadOutsideWindow(Boolean(targetMessageId && !messageWindow.targetFound));
+          setInitialMessageWindowReady(unreadReady);
+        })
+        .catch((caughtError) => {
+          if (caughtError instanceof Error && caughtError.name === "AbortError") return;
+          if (initialLoadGenerationRef.current === generation) setError(dictionary.directMessages.loadError);
+        });
+      void getDirectReadReceipt(token, conversation.id, abortController.signal)
+        .then((receipt) => {
+          if (initialLoadGenerationRef.current === generation) setReadReceipt(receipt);
+        })
+        .catch((caughtError) => {
+          if (caughtError instanceof Error && caughtError.name === "AbortError") return;
+          if (initialLoadGenerationRef.current === generation) setReadReceipt(null);
+        });
+      return () => abortController.abort();
     }
-    void getDirectReadReceipt(token, conversation.id).then(setReadReceipt).catch(() => setReadReceipt(null));
-  }, [dictionary.directMessages.loadError, conversation.id, locale, messageContext?.target_message_id, refreshMessages, refreshPins, router]);
+    return () => abortController.abort();
+  }, [dictionary.directMessages.loadError, conversation.id, locale, messageContext?.target_message_id, router, unreadReady]);
 
   useEffect(() => {
     if (!messageContext || messageContext.chat_type !== "direct" || messageContext.chat_id !== conversation.id) return;
@@ -267,7 +346,6 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
     setHighlightedMessageId(messageContext.target_message_id);
     setMessages(messageContext.messages as OfficeChatDirectMessage[]);
     setShowNewMessagesButton(messageContext.has_more_after);
-    hasInitialMessageScrollRef.current = true;
     requestAnimationFrame(() => {
       messagesListRef.current
         ?.querySelector(`[data-message-id="${messageContext.target_message_id}"]`)
@@ -282,21 +360,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       return;
     }
 
-    if (!hasInitialMessageScrollRef.current) {
-      hasInitialMessageScrollRef.current = true;
-      requestAnimationFrame(() => {
-        if (!scrollUnreadMessageIntoView(messagesListRef.current, unread?.first_unread_message_id)) {
-          scrollToLatestMessage("auto");
-        }
-      });
-      return;
-    }
-
     if (shouldScrollToBottomRef.current) {
       shouldScrollToBottomRef.current = false;
       requestAnimationFrame(() => scrollToLatestMessage());
     }
-  }, [messages, unread?.first_unread_message_id]);
+  }, [messages]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -319,6 +387,7 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       onStatusChange: setLiveUpdateStatus,
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
+        if (activeConversationIdRef.current !== conversation.id) return;
         try {
           const payload = JSON.parse(event.data as string) as DirectMessageEvent;
           if (payload.type === "typing.updated") {
@@ -351,14 +420,14 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
             setEditingMessageId((current) => current === payload.message.id ? null : current);
             setEditingMessageBody("");
             void refreshPins(accessToken);
-            if (!historicalTargetRef.current) void refreshMessages(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken, true);
           } else if (payload.type.startsWith("direct.message.")) {
             markIncomingMessage();
-            if (!historicalTargetRef.current) void refreshMessages(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken, true);
           }
         } catch {
           markIncomingMessage();
-          if (!historicalTargetRef.current) void refreshMessages(accessToken);
+          if (!historicalTargetRef.current) void refreshMessages(accessToken, true);
         }
       }
     });
@@ -741,6 +810,11 @@ export function DirectChatPanel({ conversation, currentUser, dictionary, locale,
       ) : null}
 
       <div className="messages-list" ref={messagesListRef}>
+        {hasEarlierUnreadOutsideWindow ? (
+          <p className="unread-history-notice" role="status">
+            {dictionary.unread.earlierMessagesOutsideWindow}
+          </p>
+        ) : null}
         {messageContext?.has_more_before ? (
           <button className="context-load-button" onClick={() => {
             const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
 
-from app.schemas.unread import MarkReadRequest, UnreadSummaryPublic
+from app.schemas.unread import MarkReadRequest, UnreadChatPublic, UnreadSummaryPublic
 from app.services import unread
 
 NOW = datetime.now(timezone.utc)
@@ -335,6 +335,47 @@ class MarkReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unread_event["chat_type"], "group")
         self.assertEqual(notification_event["type"], "notifications.messages_read")
         self.assertEqual(notification_event["notification_ids"], [str(notification_id)])
+
+    async def test_mark_read_response_includes_the_authoritative_next_unread_marker(self):
+        state = SimpleNamespace(
+            last_read_message_id=None,
+            last_read_message_created_at=None,
+            last_read_at=None,
+        )
+        session = StateSession(state)
+        user = SimpleNamespace(id=uuid4())
+        payload = MarkReadRequest(chat_type="group", chat_id=uuid4(), message_id=uuid4())
+        message = SimpleNamespace(id=payload.message_id, created_at=NOW)
+        next_unread_id = uuid4()
+        newest_unread_id = uuid4()
+        summary = UnreadSummaryPublic(
+            total=2,
+            groups=2,
+            direct=0,
+            discussions=0,
+            chats=[
+                UnreadChatPublic(
+                    chat_type="group",
+                    chat_id=payload.chat_id,
+                    unread_count=2,
+                    mention_count=0,
+                    first_unread_message_id=next_unread_id,
+                    newest_unread_message_id=newest_unread_id,
+                )
+            ],
+        )
+        with (
+            patch("app.services.unread._load_authorized_message", AsyncMock(return_value=message)),
+            patch("app.services.unread.mark_message_notifications_read_through", AsyncMock(return_value=[])),
+            patch("app.services.unread.notification_unread_count", AsyncMock(return_value=0)),
+            patch("app.services.unread.get_unread_summary", AsyncMock(return_value=summary)),
+            patch("app.services.unread.user_websocket_manager.broadcast_to_user", AsyncMock()),
+            patch("app.services.unread.direct_websocket_manager.broadcast_to_conversation", AsyncMock()),
+        ):
+            result = await unread.mark_chat_read(session, user, payload)
+
+        self.assertEqual(result.first_unread_message_id, next_unread_id)
+        self.assertEqual(result.newest_unread_message_id, newest_unread_id)
 
     async def test_unrelated_user_cannot_mark_direct_conversation_read(self):
         user = SimpleNamespace(id=uuid4())

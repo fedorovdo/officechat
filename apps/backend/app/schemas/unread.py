@@ -34,6 +34,8 @@ class ReadStatePublic(BaseModel):
     chat_type: ChatType
     chat_id: UUID
     last_read_message_id: UUID | None
+    first_unread_message_id: UUID | None = None
+    newest_unread_message_id: UUID | None = None
     last_read_message_created_at: datetime | None
     last_read_at: datetime | None
     unread_count: int

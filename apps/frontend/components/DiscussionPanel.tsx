@@ -36,9 +36,10 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { applyDeletedMessageEvent } from "../lib/message-privacy";
+import { loadInitialMessageWindow, mergeMessageWindow } from "../lib/messagePagination";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
-import { scrollUnreadMessageIntoView, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
+import { useInitialMessageScroll, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -63,6 +64,7 @@ type DiscussionPanelProps = {
   presenceByUserId?: Record<string, OfficeChatPresence>;
   onMarkRead?: (messageId: string) => boolean | void | Promise<boolean | void>;
   unread?: OfficeChatUnreadChat;
+  unreadReady?: boolean;
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
   onContextExpand?: (before: number, after: number) => void | Promise<void>;
@@ -80,6 +82,7 @@ export function DiscussionPanel({
   presenceByUserId = {},
   onMarkRead,
   unread,
+  unreadReady = true,
   messageContext,
   onContextClosed,
   onContextExpand,
@@ -93,8 +96,15 @@ export function DiscussionPanel({
   const panelRef = useRef<HTMLElement | null>(null);
   const messagesListRef = useRef<HTMLDivElement | null>(null);
   const historicalTargetRef = useRef<string | null>(null);
+  const initialLoadGenerationRef = useRef(0);
+  const activeDiscussionIdRef = useRef(discussionId);
+  activeDiscussionIdRef.current = discussionId;
+  const unreadRef = useRef(unread);
+  unreadRef.current = unread;
   const [discussion, setDiscussion] = useState<OfficeChatDiscussion | null>(null);
   const [messages, setMessages] = useState<OfficeChatDiscussionMessage[]>([]);
+  const [initialMessageWindowReady, setInitialMessageWindowReady] = useState(false);
+  const [hasEarlierUnreadOutsideWindow, setHasEarlierUnreadOutsideWindow] = useState(false);
   const [messageBody, setMessageBody] = useState("");
   const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
   const [inviteUsername, setInviteUsername] = useState("");
@@ -173,19 +183,39 @@ export function DiscussionPanel({
     textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
   }
 
-  const refreshDiscussion = useCallback(async (token: string) => {
+  function scrollToLatestMessage(behavior: ScrollBehavior = "auto") {
+    const panel = panelRef.current;
+    if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior });
+    setShowNewMessagesButton(false);
+  }
+
+  useInitialMessageScroll({
+    conversationKey: `discussion:${discussionId}`,
+    enabled: unreadReady && initialMessageWindowReady,
+    messages,
+    onFallbackToLatest: () => scrollToLatestMessage("auto"),
+    scrollContainerRef: panelRef,
+    skip: Boolean(historicalTargetId || (messageContext?.chat_type === "discussion" && messageContext.chat_id === discussionId)),
+    targetMessageId: unread?.first_unread_message_id
+  });
+
+  const refreshDiscussion = useCallback(async (token: string, preserveWindow = false) => {
+    const requestedDiscussionId = discussionId;
     const [loadedDiscussion, loadedMessages, loadedPins] = await Promise.all([
       getDiscussion(token, discussionId),
       getDiscussionMessages(token, discussionId),
       getPinnedMessages(token, "discussion", discussionId)
     ]);
+    if (activeDiscussionIdRef.current !== requestedDiscussionId) return;
     setDiscussion(loadedDiscussion);
-    setMessages(loadedMessages);
+    setMessages((current) => preserveWindow ? mergeMessageWindow(current, loadedMessages) : loadedMessages);
     setPins(loadedPins);
   }, [discussionId]);
 
   const refreshPins = useCallback(async (token: string) => {
-    setPins(await getPinnedMessages(token, "discussion", discussionId));
+    const requestedDiscussionId = discussionId;
+    const loadedPins = await getPinnedMessages(token, "discussion", discussionId);
+    if (activeDiscussionIdRef.current === requestedDiscussionId) setPins(loadedPins);
   }, [discussionId]);
 
   function applyPinnedMessage(pin: OfficeChatPinnedMessage) {
@@ -213,6 +243,9 @@ export function DiscussionPanel({
   }
 
   useEffect(() => {
+    initialLoadGenerationRef.current += 1;
+    setInitialMessageWindowReady(false);
+    setHasEarlierUnreadOutsideWindow(false);
     setMessageBody("");
     historicalTargetRef.current = null;
     setHistoricalTargetId(null);
@@ -228,26 +261,61 @@ export function DiscussionPanel({
   }, [discussionId]);
 
   useEffect(() => {
-    if (!unread?.first_unread_message_id || messages.length === 0) return;
-    requestAnimationFrame(() => {
-      scrollUnreadMessageIntoView(messagesListRef.current, unread.first_unread_message_id);
-    });
-  }, [messages, unread?.first_unread_message_id]);
-
-  useEffect(() => {
     const token = getStoredAccessToken();
     if (!token) {
       router.replace(`/${locale}/login`);
       return;
     }
-    if (!messageContext || messageContext.chat_id !== discussionId) {
-      void refreshDiscussion(token).catch((caughtError) => {
+    const abortController = new AbortController();
+    if (messageContext?.chat_type === "discussion" && messageContext.chat_id === discussionId) {
+      setHasEarlierUnreadOutsideWindow(false);
+      setInitialMessageWindowReady(true);
+      const requestedDiscussionId = discussionId;
+      void getDiscussion(token, discussionId, abortController.signal)
+        .then((loadedDiscussion) => {
+          if (activeDiscussionIdRef.current === requestedDiscussionId) setDiscussion(loadedDiscussion);
+        })
+        .catch(() => undefined);
+      return () => abortController.abort();
+    }
+    const generation = initialLoadGenerationRef.current + 1;
+    initialLoadGenerationRef.current = generation;
+    setInitialMessageWindowReady(false);
+    const targetMessageId = unreadReady ? unreadRef.current?.first_unread_message_id : null;
+    const messagesRequest = unreadReady
+      ? loadInitialMessageWindow(
+          (limit, before) => getDiscussionMessages(
+            token,
+            discussionId,
+            limit,
+            before,
+            abortController.signal
+          ),
+          targetMessageId,
+          abortController.signal
+        )
+      : getDiscussionMessages(token, discussionId, 50, undefined, abortController.signal)
+          .then((loadedMessages) => ({ messages: loadedMessages, targetFound: false }));
+    void Promise.all([
+      getDiscussion(token, discussionId, abortController.signal),
+      messagesRequest,
+      getPinnedMessages(token, "discussion", discussionId, abortController.signal)
+    ])
+      .then(([loadedDiscussion, messageWindow, loadedPins]) => {
+        if (initialLoadGenerationRef.current !== generation) return;
+        setDiscussion(loadedDiscussion);
+        setMessages(messageWindow.messages);
+        setPins(loadedPins);
+        setHasEarlierUnreadOutsideWindow(Boolean(targetMessageId && !messageWindow.targetFound));
+        setInitialMessageWindowReady(unreadReady);
+      })
+      .catch((caughtError) => {
+        if (caughtError instanceof Error && caughtError.name === "AbortError") return;
+        if (initialLoadGenerationRef.current !== generation) return;
         setError(caughtError instanceof Error ? caughtError.message : dictionary.discussions.loadError);
       });
-    } else {
-      void getDiscussion(token, discussionId).then(setDiscussion).catch(() => undefined);
-    }
-  }, [dictionary.discussions.loadError, discussionId, locale, messageContext?.target_message_id, refreshDiscussion, router]);
+    return () => abortController.abort();
+  }, [dictionary.discussions.loadError, discussionId, locale, messageContext?.target_message_id, router, unreadReady]);
 
   useEffect(() => {
     if (!messageContext || messageContext.chat_type !== "discussion" || messageContext.chat_id !== discussionId) return;
@@ -277,6 +345,7 @@ export function DiscussionPanel({
       onStatusChange: setLiveUpdateStatus,
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
+        if (activeDiscussionIdRef.current !== discussionId) return;
         try {
           const payload = JSON.parse(event.data as string) as DiscussionEvent;
           if (payload.type === "typing.updated") {
@@ -298,14 +367,14 @@ export function DiscussionPanel({
             setEditingMessageBody("");
             void refreshPins(accessToken);
             if (historicalTargetRef.current) setShowNewMessagesButton(true);
-            else void refreshDiscussion(accessToken);
+            else void refreshDiscussion(accessToken, true);
           } else if (payload.type.startsWith("discussion.")) {
             if (historicalTargetRef.current) setShowNewMessagesButton(true);
-            else void refreshDiscussion(accessToken);
+            else void refreshDiscussion(accessToken, true);
           }
         } catch {
           if (historicalTargetRef.current) setShowNewMessagesButton(true);
-          else void refreshDiscussion(accessToken);
+          else void refreshDiscussion(accessToken, true);
         }
       }
     });
@@ -750,6 +819,11 @@ export function DiscussionPanel({
           ) : null}
         </div>
         <div className="discussion-messages-list" ref={messagesListRef}>
+          {hasEarlierUnreadOutsideWindow ? (
+            <p className="unread-history-notice" role="status">
+              {dictionary.unread.earlierMessagesOutsideWindow}
+            </p>
+          ) : null}
           {messageContext?.has_more_before ? (
             <button className="context-load-button" onClick={() => {
               const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);

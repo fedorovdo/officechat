@@ -1476,8 +1476,12 @@ export function markAllCurrentRead(token: string) {
   );
 }
 
-export function getDirectReadReceipt(token: string, conversationId: string) {
-  return apiFetch<OfficeChatDirectReadReceipt>(`/api/read-state/direct/${conversationId}/receipt`, token);
+export function getDirectReadReceipt(token: string, conversationId: string, signal?: AbortSignal) {
+  return apiFetch<OfficeChatDirectReadReceipt>(
+    `/api/read-state/direct/${conversationId}/receipt`,
+    token,
+    { signal }
+  );
 }
 
 export function searchMessages(token: string, filters: MessageSearchFilters, signal?: AbortSignal) {
@@ -1618,13 +1622,21 @@ export function removeGroupMember(token: string, groupId: string, memberId: stri
   });
 }
 
-export function getGroupMessages(token: string, groupId: string, limit = 50) {
-  return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages?limit=${limit}`, token);
+export function getGroupMessages(
+  token: string,
+  groupId: string,
+  limit = 50,
+  before?: string,
+  signal?: AbortSignal
+) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before) query.set("before", before);
+  return apiFetch<OfficeChatMessage[]>(`/api/groups/${groupId}/messages?${query}`, token, { signal });
 }
 
-export function getPinnedMessages(token: string, chatType: ChatType, chatId: string) {
+export function getPinnedMessages(token: string, chatType: ChatType, chatId: string, signal?: AbortSignal) {
   const query = new URLSearchParams({ chat_type: chatType, chat_id: chatId });
-  return apiFetch<OfficeChatPinnedMessage[]>(`/api/pins?${query}`, token);
+  return apiFetch<OfficeChatPinnedMessage[]>(`/api/pins?${query}`, token, { signal });
 }
 
 export function pinMessage(token: string, chatType: ChatType, chatId: string, messageId: string, note?: string | null) {
@@ -1730,10 +1742,19 @@ export function createDirectConversation(token: string, username: string, signal
   });
 }
 
-export function getDirectMessages(token: string, conversationId: string, limit = 50) {
+export function getDirectMessages(
+  token: string,
+  conversationId: string,
+  limit = 50,
+  before?: string,
+  signal?: AbortSignal
+) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before) query.set("before", before);
   return apiFetch<OfficeChatDirectMessage[]>(
-    `/api/direct/conversations/${conversationId}/messages?limit=${limit}`,
-    token
+    `/api/direct/conversations/${conversationId}/messages?${query}`,
+    token,
+    { signal }
   );
 }
 
@@ -1863,12 +1884,24 @@ export function getDiscussionByMessage(token: string, messageId: string) {
   return apiFetch<OfficeChatDiscussion>(`/api/discussions/by-message/${messageId}`, token);
 }
 
-export function getDiscussion(token: string, discussionId: string) {
-  return apiFetch<OfficeChatDiscussion>(`/api/discussions/${discussionId}`, token);
+export function getDiscussion(token: string, discussionId: string, signal?: AbortSignal) {
+  return apiFetch<OfficeChatDiscussion>(`/api/discussions/${discussionId}`, token, { signal });
 }
 
-export function getDiscussionMessages(token: string, discussionId: string, limit = 50) {
-  return apiFetch<OfficeChatDiscussionMessage[]>(`/api/discussions/${discussionId}/messages?limit=${limit}`, token);
+export function getDiscussionMessages(
+  token: string,
+  discussionId: string,
+  limit = 50,
+  before?: string,
+  signal?: AbortSignal
+) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before) query.set("before", before);
+  return apiFetch<OfficeChatDiscussionMessage[]>(
+    `/api/discussions/${discussionId}/messages?${query}`,
+    token,
+    { signal }
+  );
 }
 
 export function getArchivedDiscussionMessages(token: string, discussionId: string, limit = 50, before?: string) {

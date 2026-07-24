@@ -497,6 +497,8 @@ async def mark_chat_read(
         chat_type=payload.chat_type,
         chat_id=payload.chat_id,
         last_read_message_id=state.last_read_message_id,
+        first_unread_message_id=chat.first_unread_message_id if chat else None,
+        newest_unread_message_id=chat.newest_unread_message_id if chat else None,
         last_read_message_created_at=state.last_read_message_created_at,
         last_read_at=state.last_read_at,
         unread_count=chat.unread_count if chat else 0,

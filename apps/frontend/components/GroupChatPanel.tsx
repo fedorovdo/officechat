@@ -30,9 +30,10 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { applyDeletedMessageEvent } from "../lib/message-privacy";
+import { loadInitialMessageWindow, mergeMessageWindow } from "../lib/messagePagination";
 import { connectResilientWebSocket, type ResilientWebSocketConnection } from "../lib/resilientWebSocket";
 import { useTyping } from "../lib/useTyping";
-import { scrollUnreadMessageIntoView, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
+import { useInitialMessageScroll, useVisibleReadMarker } from "../lib/useVisibleReadMarker";
 import { COMPOSER_FILE_ACCEPT, useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useDragDropAttachment } from "../hooks/useDragDropAttachment";
 import { ComposerAttachmentsPreview } from "./ComposerAttachmentsPreview";
@@ -56,6 +57,7 @@ type GroupChatPanelProps = {
   onDiscuss?: (message: OfficeChatMessage) => void;
   onMarkRead?: (messageId: string) => boolean | void | Promise<boolean | void>;
   unread?: OfficeChatUnreadChat;
+  unreadReady?: boolean;
   messageContext?: OfficeChatMessageContext | null;
   onContextClosed?: () => void;
   onContextExpand?: (before: number, after: number) => void | Promise<void>;
@@ -73,6 +75,7 @@ export function GroupChatPanel({
   onDiscuss,
   onMarkRead,
   unread,
+  unreadReady = true,
   messageContext,
   onContextClosed,
   onContextExpand,
@@ -87,9 +90,15 @@ export function GroupChatPanel({
   const socketRef = useRef<ResilientWebSocketConnection | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const shouldScrollToBottomRef = useRef(false);
-  const hasInitialMessageScrollRef = useRef(false);
   const historicalTargetRef = useRef<string | null>(null);
+  const initialLoadGenerationRef = useRef(0);
+  const activeGroupIdRef = useRef(groupId);
+  activeGroupIdRef.current = groupId;
+  const unreadRef = useRef(unread);
+  unreadRef.current = unread;
   const [messages, setMessages] = useState<OfficeChatMessage[]>([]);
+  const [initialMessageWindowReady, setInitialMessageWindowReady] = useState(false);
+  const [hasEarlierUnreadOutsideWindow, setHasEarlierUnreadOutsideWindow] = useState(false);
   const [messageBody, setMessageBody] = useState("");
   const [emojiPickerResetKey, setEmojiPickerResetKey] = useState(0);
   const [replyToMessage, setReplyToMessage] = useState<OfficeChatMessage | null>(null);
@@ -182,6 +191,16 @@ export function GroupChatPanel({
     setHighlightedMessageId(null);
   }
 
+  useInitialMessageScroll({
+    conversationKey: `group:${groupId}`,
+    enabled: unreadReady && initialMessageWindowReady,
+    messages,
+    onFallbackToLatest: () => scrollToLatestMessage("auto"),
+    scrollContainerRef: messagesListRef,
+    skip: Boolean(historicalTargetId || (messageContext?.chat_type === "group" && messageContext.chat_id === groupId)),
+    targetMessageId: unread?.first_unread_message_id
+  });
+
   function resizeComposer(textarea: HTMLTextAreaElement) {
     textarea.style.height = "0px";
     const nextHeight = Math.min(textarea.scrollHeight, 160);
@@ -190,15 +209,20 @@ export function GroupChatPanel({
   }
 
   const refreshMessages = useCallback(
-    async (token: string) => {
-      setMessages(await getGroupMessages(token, groupId));
+    async (token: string, preserveWindow = false) => {
+      const requestedGroupId = groupId;
+      const loadedMessages = await getGroupMessages(token, groupId);
+      if (activeGroupIdRef.current !== requestedGroupId) return;
+      setMessages((current) => preserveWindow ? mergeMessageWindow(current, loadedMessages) : loadedMessages);
     },
     [groupId]
   );
 
   const refreshPins = useCallback(
     async (token: string) => {
-      setPins(await getPinnedMessages(token, "group", groupId));
+      const requestedGroupId = groupId;
+      const loadedPins = await getPinnedMessages(token, "group", groupId);
+      if (activeGroupIdRef.current === requestedGroupId) setPins(loadedPins);
     },
     [groupId]
   );
@@ -228,7 +252,9 @@ export function GroupChatPanel({
   }
 
   useEffect(() => {
-    hasInitialMessageScrollRef.current = false;
+    initialLoadGenerationRef.current += 1;
+    setInitialMessageWindowReady(false);
+    setHasEarlierUnreadOutsideWindow(false);
     shouldScrollToBottomRef.current = false;
     setShowNewMessagesButton(false);
     setReplyToMessage(null);
@@ -247,10 +273,47 @@ export function GroupChatPanel({
       router.replace(`/${locale}/login`);
       return;
     }
-    if (!messageContext || messageContext.chat_id !== groupId) {
-      void Promise.all([refreshMessages(token), refreshPins(token)]).catch(() => setError(dictionary.messages.loadError));
+    if (messageContext?.chat_type === "group" && messageContext.chat_id === groupId) {
+      setHasEarlierUnreadOutsideWindow(false);
+      setInitialMessageWindowReady(true);
+      return;
     }
-  }, [dictionary.messages.loadError, groupId, locale, messageContext?.target_message_id, refreshMessages, refreshPins, router]);
+    const generation = initialLoadGenerationRef.current + 1;
+    initialLoadGenerationRef.current = generation;
+    const abortController = new AbortController();
+    setInitialMessageWindowReady(false);
+    const targetMessageId = unreadReady ? unreadRef.current?.first_unread_message_id : null;
+    const messagesRequest = unreadReady
+      ? loadInitialMessageWindow(
+          (limit, before) => getGroupMessages(
+            token,
+            groupId,
+            limit,
+            before,
+            abortController.signal
+          ),
+          targetMessageId,
+          abortController.signal
+        )
+      : getGroupMessages(token, groupId, 50, undefined, abortController.signal)
+          .then((loadedMessages) => ({ messages: loadedMessages, targetFound: false }));
+    void Promise.all([
+      messagesRequest,
+      getPinnedMessages(token, "group", groupId, abortController.signal)
+    ])
+      .then(([messageWindow, loadedPins]) => {
+        if (initialLoadGenerationRef.current !== generation) return;
+        setMessages(messageWindow.messages);
+        setPins(loadedPins);
+        setHasEarlierUnreadOutsideWindow(Boolean(targetMessageId && !messageWindow.targetFound));
+        setInitialMessageWindowReady(unreadReady);
+      })
+      .catch((caughtError) => {
+        if (caughtError instanceof Error && caughtError.name === "AbortError") return;
+        if (initialLoadGenerationRef.current === generation) setError(dictionary.messages.loadError);
+      });
+    return () => abortController.abort();
+  }, [dictionary.messages.loadError, groupId, locale, messageContext?.target_message_id, router, unreadReady]);
 
   useEffect(() => {
     if (!messageContext || messageContext.chat_type !== "group" || messageContext.chat_id !== groupId) return;
@@ -259,7 +322,6 @@ export function GroupChatPanel({
     setHighlightedMessageId(messageContext.target_message_id);
     setMessages(messageContext.messages as OfficeChatMessage[]);
     setShowNewMessagesButton(messageContext.has_more_after);
-    hasInitialMessageScrollRef.current = true;
     requestAnimationFrame(() => {
       messagesListRef.current
         ?.querySelector(`[data-message-id="${messageContext.target_message_id}"]`)
@@ -274,21 +336,11 @@ export function GroupChatPanel({
       return;
     }
 
-    if (!hasInitialMessageScrollRef.current) {
-      hasInitialMessageScrollRef.current = true;
-      requestAnimationFrame(() => {
-        if (!scrollUnreadMessageIntoView(messagesListRef.current, unread?.first_unread_message_id)) {
-          scrollToLatestMessage("auto");
-        }
-      });
-      return;
-    }
-
     if (shouldScrollToBottomRef.current) {
       shouldScrollToBottomRef.current = false;
       requestAnimationFrame(() => scrollToLatestMessage());
     }
-  }, [messages, unread?.first_unread_message_id]);
+  }, [messages]);
 
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -311,6 +363,7 @@ export function GroupChatPanel({
       onStatusChange: setLiveUpdateStatus,
       onForbidden: () => setError(dictionary.session.accessDenied),
       onMessage: (event) => {
+        if (activeGroupIdRef.current !== groupId) return;
         try {
           const payload = JSON.parse(event.data as string) as GroupMessageEvent;
           if (payload.type === "typing.updated") {
@@ -333,14 +386,14 @@ export function GroupChatPanel({
             setEditingMessageId((current) => current === payload.message.id ? null : current);
             setEditingMessageBody("");
             void refreshPins(accessToken);
-            if (!historicalTargetRef.current) void refreshMessages(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken, true);
           } else if (payload.type.startsWith("message.")) {
             markIncomingMessage();
-            if (!historicalTargetRef.current) void refreshMessages(accessToken);
+            if (!historicalTargetRef.current) void refreshMessages(accessToken, true);
           }
         } catch {
           markIncomingMessage();
-          if (!historicalTargetRef.current) void refreshMessages(accessToken);
+          if (!historicalTargetRef.current) void refreshMessages(accessToken, true);
         }
       }
     });
@@ -731,6 +784,11 @@ export function GroupChatPanel({
       ) : null}
 
       <div className="messages-list" ref={messagesListRef}>
+        {hasEarlierUnreadOutsideWindow ? (
+          <p className="unread-history-notice" role="status">
+            {dictionary.unread.earlierMessagesOutsideWindow}
+          </p>
+        ) : null}
         {messageContext?.has_more_before ? (
           <button className="context-load-button" onClick={() => {
             const targetIndex = messageContext.messages.findIndex((message) => message.id === messageContext.target_message_id);

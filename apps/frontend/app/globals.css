@@ -1129,6 +1129,18 @@ a {
   white-space: nowrap;
 }
 
+.unread-history-notice {
+  width: min(100%, 620px);
+  margin: 8px auto;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
 .direct-read-receipt {
   margin: 3px 0 0;
   color: #64748b;

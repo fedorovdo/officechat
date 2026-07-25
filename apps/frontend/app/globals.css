@@ -4471,6 +4471,30 @@ a {
   margin-top: 3px;
 }
 
+.directory-linked-user {
+  color: var(--accent);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px 8px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.directory-linked-user em,
+.directory-linked-user-detail em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.directory-linked-user-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+}
+
 .directory-entry-inactive {
   opacity: 0.62;
 }

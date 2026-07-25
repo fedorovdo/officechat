@@ -54,10 +54,12 @@ const entry: OfficeChatDirectoryEntry = {
 };
 
 function renderPanel({
+  currentUserId = "user-1",
   manager = false,
   dictionary = en,
   onStartDirect = vi.fn()
 }: {
+  currentUserId?: string;
   manager?: boolean;
   dictionary?: typeof en;
   onStartDirect?: (userId: string) => void;
@@ -65,7 +67,7 @@ function renderPanel({
   return render(
     <DirectoryPanel
       currentUser={userFactory({
-        id: "user-1",
+        id: currentUserId,
         permissions: manager ? ["can_manage_directory"] : []
       })}
       dictionary={dictionary}
@@ -110,6 +112,107 @@ describe("directory panel", () => {
     expect(screen.queryByRole("button", { name: en.directory.add })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: en.directory.message })[0]);
     expect(onStartDirect).toHaveBeenCalledWith("user-2");
+  });
+
+  it("shows the linked OfficeChat user in desktop, mobile and contact detail views", async () => {
+    renderPanel();
+
+    expect((await screen.findAllByText("OfficeChat: @dmitrii")).length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+
+    const dialog = screen.getByRole("dialog", { name: entry.display_name });
+    expect(within(dialog).getByText("Dmitrii Fedorov (@dmitrii)")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: en.directory.messageInOfficeChat })
+    ).toBeInTheDocument();
+  });
+
+  it("uses the users list when an older response has only linked_user_id", async () => {
+    const onStartDirect = vi.fn();
+    apiMocks.getDirectoryEntries.mockResolvedValueOnce({
+      items: [{ ...entry, linked_user: null }],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    renderPanel({ onStartDirect });
+
+    expect((await screen.findAllByText("OfficeChat: @dmitrii")).length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.message })[0]);
+    expect(onStartDirect).toHaveBeenCalledWith(linkedUser.id);
+  });
+
+  it("does not show messaging actions when there is no linked user", async () => {
+    apiMocks.getDirectoryEntries.mockResolvedValueOnce({
+      items: [{ ...entry, linked_user_id: null, linked_user: null }],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    renderPanel();
+
+    await screen.findAllByText(entry.display_name);
+    expect(screen.queryByText("OfficeChat: @dmitrii")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.directory.message })).not.toBeInTheDocument();
+  });
+
+  it("marks the current linked user and does not offer a self conversation", async () => {
+    renderPanel({ currentUserId: linkedUser.id });
+
+    expect(await screen.findAllByText(en.directory.thisIsYou)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: en.directory.message })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    expect(
+      within(screen.getByRole("dialog", { name: entry.display_name })).queryByRole("button", {
+        name: en.directory.messageInOfficeChat
+      })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a disabled linked account without a messaging action", async () => {
+    const disabledUser = { ...linkedUser, is_active: false };
+    apiMocks.getDirectoryEntries.mockResolvedValueOnce({
+      items: [{ ...entry, linked_user: disabledUser }],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    render(
+      <DirectoryPanel
+        currentUser={userFactory({ id: "user-1" })}
+        dictionary={en}
+        locale="en"
+        onBack={vi.fn()}
+        onStartDirect={vi.fn()}
+        users={[disabledUser]}
+      />
+    );
+
+    expect(await screen.findAllByText(en.directory.accountDisabled)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: en.directory.message })).not.toBeInTheDocument();
+  });
+
+  it("does not offer a direct conversation for a linked bot user", async () => {
+    const botUser = { ...linkedUser, username: "alerts_bot", role: "bot" as const };
+    apiMocks.getDirectoryEntries.mockResolvedValueOnce({
+      items: [{ ...entry, linked_user_id: botUser.id, linked_user: botUser }],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    render(
+      <DirectoryPanel
+        currentUser={userFactory({ id: "user-1" })}
+        dictionary={en}
+        locale="en"
+        onBack={vi.fn()}
+        onStartDirect={vi.fn()}
+        users={[botUser]}
+      />
+    );
+
+    expect(await screen.findAllByText("OfficeChat: @alerts_bot")).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: en.directory.message })).not.toBeInTheDocument();
   });
 
   it("applies search and department filters without losing pagination conventions", async () => {
@@ -315,6 +418,12 @@ describe("directory panel", () => {
 
   it("provides equivalent RU and EN localization keys", () => {
     expect(en.directory.title).toBe("Directory");
+    expect(en.directory.messageInOfficeChat).toBeTruthy();
+    expect(ru.directory.messageInOfficeChat).toBeTruthy();
+    expect(en.directory.thisIsYou).toBeTruthy();
+    expect(ru.directory.thisIsYou).toBeTruthy();
+    expect(en.directory.accountDisabled).toBeTruthy();
+    expect(ru.directory.accountDisabled).toBeTruthy();
     expect(ru.directory.title).toBe("Справочник");
     expect(en.adminUsers.permissions.items.can_manage_directory.label).toBeTruthy();
     expect(ru.adminUsers.permissions.items.can_manage_directory.label).toBeTruthy();

@@ -54,7 +54,6 @@ export type OfficeChatDirectoryLinkedUser = {
   username: string;
   display_name: string;
   is_active: boolean;
-  role: UserRole;
 };
 
 export type OfficeChatDirectoryEntry = {

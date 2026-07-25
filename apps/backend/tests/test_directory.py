@@ -12,7 +12,7 @@ from app.api import deps
 from app.api.routes import directory as directory_routes
 from app.core.permissions import CAN_MANAGE_DIRECTORY, PERMISSION_CATALOG
 from app.models.directory import DirectoryEntry
-from app.schemas.directory import DirectoryEntryCreate, DirectoryEntryUpdate
+from app.schemas.directory import DirectoryEntryCreate, DirectoryEntryPublic, DirectoryEntryUpdate
 from app.services import directory
 
 
@@ -88,6 +88,45 @@ class DirectoryFoundationTests(unittest.TestCase):
         payload = DirectoryEntryCreate(display_name="  Employee  ", email="employee@example.com")
         self.assertEqual(payload.display_name, "Employee")
         self.assertEqual(str(payload.email), "employee@example.com")
+
+    def test_directory_response_contains_only_safe_linked_user_summary(self):
+        linked_user = user(
+            username="dmitrii",
+            display_name="Dmitrii Fedorov",
+            email="private@example.com",
+            role="admin",
+            permissions=["can_manage_directory"],
+            is_active=True,
+        )
+        model = entry(linked_user_id=linked_user.id)
+        model.linked_user = linked_user
+
+        payload = DirectoryEntryPublic.model_validate(model).model_dump(mode="json")
+
+        self.assertEqual(
+            payload["linked_user"],
+            {
+                "id": str(linked_user.id),
+                "username": "dmitrii",
+                "display_name": "Dmitrii Fedorov",
+                "is_active": True,
+            },
+        )
+        self.assertNotIn("email", payload["linked_user"])
+        self.assertNotIn("permissions", payload["linked_user"])
+        self.assertNotIn("role", payload["linked_user"])
+
+    def test_directory_response_handles_null_and_inactive_linked_users(self):
+        without_link = DirectoryEntryPublic.model_validate(entry()).model_dump(mode="json")
+        self.assertIsNone(without_link["linked_user"])
+
+        linked_user = user(username="disabled", display_name="Disabled User", is_active=False)
+        model = entry(linked_user_id=linked_user.id)
+        model.linked_user = linked_user
+        payload = DirectoryEntryPublic.model_validate(model).model_dump(mode="json")
+
+        self.assertEqual(payload["linked_user"]["is_active"], False)
+        self.assertEqual(payload["linked_user"]["username"], "disabled")
 
     def test_phone_search_removes_formatting(self):
         self.assertEqual(directory.normalize_phone_search("+7 (495) 123-45-67"), "74951234567")

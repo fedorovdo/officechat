@@ -86,7 +86,6 @@ class DirectoryLinkedUserPublic(BaseModel):
     username: str
     display_name: str
     is_active: bool
-    role: str
 
 
 class DirectoryEntryPublic(BaseModel):

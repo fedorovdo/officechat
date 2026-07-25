@@ -13,6 +13,7 @@ import {
   updateDirectoryEntry,
   type DirectoryEntryPayload,
   type OfficeChatDirectoryEntry,
+  type OfficeChatDirectoryLinkedUser,
   type OfficeChatDirectoryUser,
   type OfficeChatUser
 } from "../lib/api";
@@ -109,6 +110,24 @@ function ContactLinks({ entry, labels }: { entry: OfficeChatDirectoryEntry; labe
       ))}
       {entry.email ? <a href={`mailto:${entry.email}`}>{entry.email}</a> : null}
     </div>
+  );
+}
+
+function LinkedUserIndicator({
+  currentUserId,
+  labels,
+  linkedUser
+}: {
+  currentUserId: string;
+  labels: Dictionary["directory"];
+  linkedUser: OfficeChatDirectoryLinkedUser;
+}) {
+  return (
+    <span className="directory-linked-user">
+      {labels.officeChatUser.replace("{username}", linkedUser.username)}
+      {linkedUser.id === currentUserId ? <em>{labels.thisIsYou}</em> : null}
+      {!linkedUser.is_active ? <em>{labels.accountDisabled}</em> : null}
+    </span>
   );
 }
 
@@ -280,13 +299,21 @@ export function DirectoryPanel({
     }
   }
 
+  function resolveLinkedUser(entry: OfficeChatDirectoryEntry): OfficeChatDirectoryLinkedUser | null {
+    return entry.linked_user ?? users.find((user) => user.id === entry.linked_user_id) ?? null;
+  }
+
   function canMessage(entry: OfficeChatDirectoryEntry) {
-    return Boolean(
-      entry.linked_user &&
-      entry.linked_user.is_active &&
-      entry.linked_user.role !== "bot" &&
-      entry.linked_user.id !== currentUser.id
-    );
+    const linkedUser = resolveLinkedUser(entry);
+    const directTarget = linkedUser
+      ? users.find((user) => user.id === linkedUser.id && user.role !== "bot")
+      : null;
+    return Boolean(directTarget?.is_active && directTarget.id !== currentUser.id);
+  }
+
+  function startDirect(entry: OfficeChatDirectoryEntry) {
+    const linkedUser = resolveLinkedUser(entry);
+    if (linkedUser && canMessage(entry)) onStartDirect(linkedUser.id);
   }
 
   return (
@@ -364,14 +391,23 @@ export function DirectoryPanel({
                 <tbody>
                   {entries.map((entry) => (
                     <tr className={entry.is_active ? "" : "directory-entry-inactive"} key={entry.id}>
-                      <td><strong>{entry.display_name}</strong></td>
+                      <td>
+                        <strong>{entry.display_name}</strong>
+                        {resolveLinkedUser(entry) ? (
+                          <LinkedUserIndicator
+                            currentUserId={currentUser.id}
+                            labels={t}
+                            linkedUser={resolveLinkedUser(entry)!}
+                          />
+                        ) : null}
+                      </td>
                       <td><span>{entry.position || t.emptyValue}</span><small>{entry.department || t.emptyValue}</small></td>
                       <td><ContactLinks entry={entry} labels={t} /></td>
                       <td><span>{entry.room || t.emptyValue}</span><small>{entry.location || t.emptyValue}</small></td>
                       <td>
                         <div className="directory-row-actions">
                           <button className="table-action" onClick={() => setSelectedEntry(entry)} type="button">{t.open}</button>
-                          {canMessage(entry) ? <button className="table-action" onClick={() => onStartDirect(entry.linked_user_id!)} type="button">{t.message}</button> : null}
+                          {canMessage(entry) ? <button className="table-action" onClick={() => startDirect(entry)} type="button">{t.message}</button> : null}
                           {canManage ? <button className="table-action" onClick={() => openEdit(entry)} type="button">{t.edit}</button> : null}
                         </div>
                       </td>
@@ -386,11 +422,18 @@ export function DirectoryPanel({
                   <button className="directory-card-open" onClick={() => setSelectedEntry(entry)} type="button">
                     <strong>{entry.display_name}</strong>
                     <span>{[entry.position, entry.department].filter(Boolean).join(" · ") || t.emptyValue}</span>
+                    {resolveLinkedUser(entry) ? (
+                      <LinkedUserIndicator
+                        currentUserId={currentUser.id}
+                        labels={t}
+                        linkedUser={resolveLinkedUser(entry)!}
+                      />
+                    ) : null}
                   </button>
                   <ContactLinks entry={entry} labels={t} />
                   <small>{[entry.room, entry.location].filter(Boolean).join(" · ") || t.emptyValue}</small>
                   <div className="directory-row-actions">
-                    {canMessage(entry) ? <button className="table-action" onClick={() => onStartDirect(entry.linked_user_id!)} type="button">{t.message}</button> : null}
+                    {canMessage(entry) ? <button className="table-action" onClick={() => startDirect(entry)} type="button">{t.message}</button> : null}
                     {canManage ? <button className="table-action" onClick={() => openEdit(entry)} type="button">{t.edit}</button> : null}
                   </div>
                 </article>
@@ -428,9 +471,21 @@ export function DirectoryPanel({
               <dt>{t.fields.room}</dt><dd>{selectedEntry.room || t.emptyValue}</dd>
               <dt>{t.fields.location}</dt><dd>{selectedEntry.location || t.emptyValue}</dd>
               <dt>{t.fields.notes}</dt><dd className="directory-notes">{selectedEntry.notes || t.emptyValue}</dd>
+              <dt>{t.fields.linkedUser}</dt>
+              <dd>
+                {resolveLinkedUser(selectedEntry) ? (
+                  <span className="directory-linked-user-detail">
+                    {t.linkedUserSummary
+                      .replace("{displayName}", resolveLinkedUser(selectedEntry)!.display_name)
+                      .replace("{username}", resolveLinkedUser(selectedEntry)!.username)}
+                    {resolveLinkedUser(selectedEntry)!.id === currentUser.id ? <em>{t.thisIsYou}</em> : null}
+                    {!resolveLinkedUser(selectedEntry)!.is_active ? <em>{t.accountDisabled}</em> : null}
+                  </span>
+                ) : t.noLinkedUser}
+              </dd>
             </dl>
             <div className="actions">
-              {canMessage(selectedEntry) ? <button className="primary-button" onClick={() => onStartDirect(selectedEntry.linked_user_id!)} type="button">{t.message}</button> : null}
+              {canMessage(selectedEntry) ? <button className="primary-button" onClick={() => startDirect(selectedEntry)} type="button">{t.messageInOfficeChat}</button> : null}
               {canManage ? <button className="secondary-link" onClick={() => openEdit(selectedEntry)} type="button">{t.edit}</button> : null}
               {canManage ? (
                 <button

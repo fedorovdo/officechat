@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -74,6 +74,7 @@ function defaultEvents() {
     calendarEvent({ id: "event-3", title: "Training", event_type: "training", starts_at: "2026-07-15T10:00:00Z", ends_at: "2026-07-15T11:00:00Z", conference_url: null }),
     calendarEvent({ id: "event-4", title: "Maintenance", event_type: "maintenance", starts_at: "2026-07-15T11:00:00Z", ends_at: "2026-07-15T12:00:00Z", conference_url: null }),
     calendarEvent({ id: "event-5", title: "Office party", event_type: "office_event", is_all_day: true, starts_at: null, ends_at: null, all_day_start_date: "2026-07-15", all_day_end_date: "2026-07-15", conference_url: null }),
+    calendarEvent({ id: "event-27", title: "Board review July 27", starts_at: "2026-07-27T07:00:00Z", ends_at: "2026-07-27T08:00:00Z", conference_url: null }),
     calendarEvent({
       id: "event-cancelled",
       title: "Cancelled sync",
@@ -193,6 +194,14 @@ describe("calendar panel", () => {
     expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-14");
   });
 
+  it("opens on today's date in month view", async () => {
+    renderCalendar();
+
+    await waitFor(() => expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-14"));
+    expect(screen.getByRole("button", { name: "Month" })).toHaveClass("secondary-link-active");
+    expect(screen.getByRole("button", { name: "14" })).toHaveAttribute("aria-current", "date");
+  });
+
   it("highlights today and selected dates", async () => {
     const { container } = renderCalendar();
     await waitFor(() => expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-14"));
@@ -200,6 +209,41 @@ describe("calendar panel", () => {
     expect(container.querySelector(".calendar-date-today")).toBeTruthy();
     expect(container.querySelector(".calendar-date-selected")).toBeTruthy();
     expect(screen.getByRole("button", { name: "14" })).toHaveAttribute("aria-current", "date");
+  });
+
+  it("opens the selected date's month and highlights its cell", async () => {
+    const { container } = renderCalendar();
+    await waitFor(() => expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-14"));
+
+    fireEvent.change(screen.getByLabelText("Calendar date"), { target: { value: "2026-08-27" } });
+
+    await waitFor(() => {
+      expect(apiMocks.getCalendarEvents).toHaveBeenCalledWith("token", expect.objectContaining({
+        date_from: "2026-07-27",
+        date_to: "2026-09-06"
+      }));
+    });
+    expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-08-27");
+    expect(container.querySelector(".calendar-date-selected .calendar-date-button")).toHaveTextContent("27");
+    expect(container.querySelector(".calendar-month-grid-6")).toBeTruthy();
+  });
+
+  it("does not reload the same month when selecting another date inside it", async () => {
+    const { container } = renderCalendar();
+    await waitFor(() => expect(apiMocks.getCalendarEvents).toHaveBeenCalledTimes(2));
+    apiMocks.getCalendarEvents.mockClear();
+
+    fireEvent.change(screen.getByLabelText("Calendar date"), { target: { value: "2026-07-20" } });
+
+    expect(container.querySelector(".calendar-date-selected .calendar-date-button")).toHaveTextContent("20");
+    expect(apiMocks.getCalendarEvents).not.toHaveBeenCalled();
+  });
+
+  it("shows an event on July 27 in its month cell", async () => {
+    renderCalendar();
+
+    await waitFor(() => expect(screen.getByText("Board review July 27")).toBeInTheDocument());
+    expect(screen.getByText("Board review July 27").closest(".calendar-month-cell")?.querySelector(".calendar-date-button")).toHaveTextContent("27");
   });
 
   it("opens prefilled create form from an empty day for managers only", async () => {
@@ -224,13 +268,49 @@ describe("calendar panel", () => {
 
   it("opens day view from the more events control", async () => {
     renderCalendar();
-    await waitFor(() => expect(screen.getByRole("button", { name: "2 more" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "3 more" })).toBeInTheDocument());
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "2 more" }));
+      fireEvent.click(screen.getByRole("button", { name: "3 more" }));
     });
     expect(screen.getByRole("button", { name: "Day" })).toHaveClass("secondary-link-active");
     expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-15");
+  });
+
+  it("shows a dated next event and the number of additional future events", async () => {
+    renderCalendar();
+
+    await waitFor(() => expect(screen.getByText("Next event")).toBeInTheDocument());
+    expect(screen.getByText("July 15, 2026 · All day")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "5 more upcoming events" })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "5 more upcoming events" }));
+    expect(within(screen.getByLabelText("Upcoming events")).getByRole("button", { name: /Planning/ })).toBeInTheDocument();
+  });
+
+  it("formats all-day and timed event dates in the details panel", async () => {
+    renderCalendar();
+    await waitFor(() => expect(screen.getByText("Next event")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const allDayDetails = screen.getByLabelText("Office party");
+    expect(within(allDayDetails).getByText("Date and time")).toBeInTheDocument();
+    expect(within(allDayDetails).getByText("July 15, 2026 · All day")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Planning, / }));
+    expect(within(screen.getByLabelText("Planning")).getByText(/July 15, 2026 · .*-.*/)).toBeInTheDocument();
+  });
+
+  it("preserves the selected date while switching calendar views", async () => {
+    renderCalendar();
+    await waitFor(() => expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-14"));
+    fireEvent.change(screen.getByLabelText("Calendar date"), { target: { value: "2026-07-27" } });
+
+    for (const viewName of ["Agenda", "Day", "Week", "Month"]) {
+      fireEvent.click(screen.getByRole("button", { name: viewName }));
+      expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-27");
+    }
   });
 
   it("shows cancelled event restore action and hides edit/join", async () => {

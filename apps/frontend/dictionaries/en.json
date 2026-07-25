@@ -637,6 +637,12 @@
     "noEventsForDate": "No events on the selected date.",
     "noUpcomingEvents": "No upcoming events.",
     "nextEvent": "Next event",
+    "upcomingList": "Upcoming events",
+    "moreUpcoming": {
+      "one": "{count} more upcoming event",
+      "few": "{count} more upcoming events",
+      "many": "{count} more upcoming events"
+    },
     "allDay": "All day",
     "more": "{count} more",
     "join": "Join",
@@ -644,6 +650,7 @@
     "type": "Type",
     "status": "Status",
     "time": "Time",
+    "dateAndTime": "Date and time",
     "timezone": "Timezone",
     "location": "Location",
     "organizer": "Organizer",

@@ -637,6 +637,12 @@
     "noEventsForDate": "На выбранную дату событий нет.",
     "noUpcomingEvents": "Ближайших событий нет.",
     "nextEvent": "Ближайшее событие",
+    "upcomingList": "Следующие события",
+    "moreUpcoming": {
+      "one": "Ещё {count} ближайшее событие",
+      "few": "Ещё {count} ближайших события",
+      "many": "Ещё {count} ближайших событий"
+    },
     "allDay": "Весь день",
     "more": "Ещё {count}",
     "join": "Подключиться",
@@ -644,6 +650,7 @@
     "type": "Тип",
     "status": "Статус",
     "time": "Время",
+    "dateAndTime": "Дата и время",
     "timezone": "Часовой пояс",
     "location": "Место",
     "organizer": "Организатор",

@@ -37,7 +37,8 @@ const calendarViewKey = "officechat.calendar.view";
 const eventTypes: CalendarEventType[] = ["meeting", "video_conference", "office_event", "training", "maintenance", "other"];
 const audienceTypes: CalendarAudienceType[] = ["all_active_users", "selected_groups", "selected_users"];
 const reminderOptions = [0, 15, 30, 60, 1440];
-const monthEventLimit = 3;
+const monthEventLimit = 2;
+const upcomingEventHorizonDays = 365;
 const calendarStartHour = 7;
 const calendarEndHour = 20;
 
@@ -73,7 +74,11 @@ function addDays(date: Date, days: number) {
 
 function addMonths(date: Date, months: number) {
   const copy = new Date(date);
+  const day = copy.getDate();
+  copy.setDate(1);
   copy.setMonth(copy.getMonth() + months);
+  const lastDay = new Date(copy.getFullYear(), copy.getMonth() + 1, 0).getDate();
+  copy.setDate(Math.min(day, lastDay));
   return copy;
 }
 
@@ -116,6 +121,19 @@ function reminderLabel(dictionary: Dictionary, minutes: number) {
   return dictionary.calendar.reminderLabels[key] ?? `${minutes} min`;
 }
 
+function upcomingCountLabel(dictionary: Dictionary, locale: Locale, count: number) {
+  let form: keyof typeof dictionary.calendar.moreUpcoming = "many";
+  if (locale === "ru") {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) form = "one";
+    else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) form = "few";
+  } else if (count === 1) {
+    form = "one";
+  }
+  return dictionary.calendar.moreUpcoming[form].replace("{count}", String(count));
+}
+
 function matchesAudienceSearch(option: AudienceOption, query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
@@ -134,6 +152,14 @@ function eventOccursOn(event: OfficeChatCalendarEvent, dateValue: string) {
 function eventSortValue(event: OfficeChatCalendarEvent) {
   if (event.is_all_day) return event.all_day_start_date ?? "";
   return event.starts_at ?? "";
+}
+
+function eventEndTimestamp(event: OfficeChatCalendarEvent) {
+  if (event.is_all_day) {
+    return event.all_day_end_date ? new Date(`${event.all_day_end_date}T23:59:59.999`).getTime() : 0;
+  }
+  const value = event.ends_at ?? event.starts_at;
+  return value ? new Date(value).getTime() : 0;
 }
 
 function currentTimePercent() {
@@ -175,6 +201,8 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   });
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [events, setEvents] = useState<OfficeChatCalendarEvent[]>([]);
+  const [upcomingEvents, setUpcomingEvents] = useState<OfficeChatCalendarEvent[]>([]);
+  const [isUpcomingListOpen, setIsUpcomingListOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<OfficeChatCalendarEvent | null>(null);
   const [form, setForm] = useState<CalendarEventPayload>(() => createInitialForm(defaultTimezone));
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -200,6 +228,14 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     () => new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", { weekday: "short", day: "numeric", month: "short" }),
     [locale]
   );
+  const dateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long", year: "numeric" }),
+    [locale]
+  );
+  const timeFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit" }),
+    [locale]
+  );
   const groupOptions = useMemo<AudienceOption[]>(
     () => groups.map((group) => ({ id: group.id, label: group.name, meta: group.slug })),
     [groups]
@@ -221,6 +257,9 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
 
   const todayValue = formatDateInput(new Date());
   const selectedDateValue = formatDateInput(anchorDate);
+  const rangeStartValue = formatDateInput(range.start);
+  const rangeEndValue = formatDateInput(range.end);
+  const upcomingEndValue = formatDateInput(addDays(dateFromInput(todayValue), upcomingEventHorizonDays));
 
   const loadEvents = useCallback(async () => {
     const token = getStoredAccessToken();
@@ -229,8 +268,8 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     setError(null);
     try {
       const page = await getCalendarEvents(token, {
-        date_from: formatDateInput(range.start),
-        date_to: formatDateInput(range.end),
+        date_from: rangeStartValue,
+        date_to: rangeEndValue,
         include_cancelled: true,
         limit: 500
       });
@@ -240,7 +279,23 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     } finally {
       setIsLoading(false);
     }
-  }, [dictionary.calendar.loadError, range.end, range.start]);
+  }, [dictionary.calendar.loadError, rangeEndValue, rangeStartValue]);
+
+  const loadUpcomingEvents = useCallback(async () => {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    try {
+      const page = await getCalendarEvents(token, {
+        date_from: todayValue,
+        date_to: upcomingEndValue,
+        include_cancelled: false,
+        limit: 500
+      });
+      setUpcomingEvents(page.items);
+    } catch {
+      // The main calendar remains usable if the optional upcoming summary cannot load.
+    }
+  }, [todayValue, upcomingEndValue]);
 
   useEffect(() => {
     localStorage.setItem(calendarViewKey, view);
@@ -249,6 +304,10 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
+
+  useEffect(() => {
+    void loadUpcomingEvents();
+  }, [loadUpcomingEvents]);
 
   useEffect(() => {
     if (!activeAudienceHelp && !selectedEvent && !isEditorOpen) return undefined;
@@ -272,6 +331,11 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     if (!externalEvent) return;
     setEvents((current) => {
       const next = current.filter((item) => item.id !== externalEvent.id);
+      return [...next, externalEvent].sort((a, b) => eventSortValue(a).localeCompare(eventSortValue(b)));
+    });
+    setUpcomingEvents((current) => {
+      const next = current.filter((item) => item.id !== externalEvent.id);
+      if (externalEvent.status === "cancelled" || eventEndTimestamp(externalEvent) < Date.now()) return next;
       return [...next, externalEvent].sort((a, b) => eventSortValue(a).localeCompare(eventSortValue(b)));
     });
   }, [externalEvent]);
@@ -491,7 +555,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
       setMessage(editingEventId ? dictionary.calendar.updateSuccess : dictionary.calendar.createSuccess);
       setSelectedEvent(saved);
       setIsEditorOpen(false);
-      await loadEvents();
+      await Promise.all([loadEvents(), loadUpcomingEvents()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : dictionary.calendar.saveError);
     } finally {
@@ -507,7 +571,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
       const cancelled = await cancelCalendarEvent(token, event.id, reason);
       setSelectedEvent(cancelled);
       setMessage(dictionary.calendar.cancelSuccess);
-      await loadEvents();
+      await Promise.all([loadEvents(), loadUpcomingEvents()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : dictionary.calendar.cancelError);
     }
@@ -521,7 +585,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
       const restored = await restoreCalendarEvent(token, event.id);
       setSelectedEvent(restored);
       setMessage(dictionary.calendar.restoreSuccess);
-      await loadEvents();
+      await Promise.all([loadEvents(), loadUpcomingEvents()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : dictionary.calendar.restoreError);
     }
@@ -542,6 +606,11 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     }
   }
 
+  function handleAnchorDateChange(value: string) {
+    if (!value || value === selectedDateValue) return;
+    setAnchorDate(dateFromInput(value));
+  }
+
   const isSaveDisabled = isSaving || (form.audience_type === "all_active_users" && isPreviewStale);
 
   const eventsByDate = useMemo(() => {
@@ -553,21 +622,31 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     return grouped;
   }, [events, range.end, range.start]);
 
-  const nearestVisibleEvent = useMemo(() => {
+  const futureEvents = useMemo(() => {
     const now = Date.now();
-    return [...events]
+    return [...upcomingEvents]
       .filter((event) => event.status !== "cancelled")
-      .filter((event) => {
-        const value = event.is_all_day ? event.all_day_start_date : event.starts_at;
-        return value ? new Date(event.is_all_day ? `${value}T00:00:00` : value).getTime() >= now : false;
-      })
-      .sort((a, b) => eventSortValue(a).localeCompare(eventSortValue(b)))[0] ?? null;
-  }, [events]);
+      .filter((event) => eventEndTimestamp(event) >= now)
+      .sort((a, b) => eventSortValue(a).localeCompare(eventSortValue(b)));
+  }, [upcomingEvents]);
+  const nearestVisibleEvent = futureEvents[0] ?? null;
+  const additionalUpcomingCount = Math.max(0, futureEvents.length - 1);
 
-  function renderEventTime(event: OfficeChatCalendarEvent) {
-    if (event.is_all_day) return dictionary.calendar.allDay;
+  function renderEventSchedule(event: OfficeChatCalendarEvent) {
+    if (event.is_all_day) {
+      if (!event.all_day_start_date) return dictionary.calendar.allDay;
+      const start = dateFormatter.format(dateFromInput(event.all_day_start_date));
+      const end = event.all_day_end_date ? dateFormatter.format(dateFromInput(event.all_day_end_date)) : start;
+      return `${start}${end !== start ? ` - ${end}` : ""} · ${dictionary.calendar.allDay}`;
+    }
     if (!event.starts_at || !event.ends_at) return "";
-    return `${formatter.format(new Date(event.starts_at))} - ${formatter.format(new Date(event.ends_at))}`;
+    const start = new Date(event.starts_at);
+    const end = new Date(event.ends_at);
+    const date = dateFormatter.format(start);
+    if (formatDateInput(start) === formatDateInput(end)) {
+      return `${date} · ${timeFormatter.format(start)}-${timeFormatter.format(end)}`;
+    }
+    return `${formatter.format(start)} - ${formatter.format(end)}`;
   }
 
   function eventStatusLabel(event: OfficeChatCalendarEvent) {
@@ -609,6 +688,25 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     );
   }
 
+  function renderMonthEventChip(event: OfficeChatCalendarEvent) {
+    const time = event.is_all_day
+      ? dictionary.calendar.allDay
+      : timeFormatter.format(new Date(event.starts_at ?? ""));
+    return (
+      <button
+        aria-label={`${event.title}, ${time}`}
+        className={`calendar-month-event calendar-event-${event.status}`}
+        key={event.id}
+        onClick={(clickEvent) => openEventDetails(event, clickEvent.currentTarget)}
+        title={`${event.title} - ${dictionary.calendar.eventTypes[event.event_type]}`}
+        type="button"
+      >
+        <span>{time}</span>
+        <strong>{event.title}</strong>
+      </button>
+    );
+  }
+
   function renderAgenda() {
     return (
       <div className="calendar-agenda">
@@ -629,22 +727,24 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   }
 
   function renderMonth() {
+    const weekCount = Math.ceil(eventsByDate.size / 7);
     return (
-      <div className="calendar-month-grid">
+      <div className={`calendar-month-grid calendar-month-grid-${weekCount}`}>
         {Array.from(eventsByDate.entries()).map(([dateValue, dayEvents]) => (
           <div
-            className={`calendar-month-cell${dateValue === todayValue ? " calendar-date-today" : ""}${dateValue === selectedDateValue ? " calendar-date-selected" : ""}`}
+            className={`calendar-month-cell${dateValue === todayValue ? " calendar-date-today" : ""}${dateValue === selectedDateValue ? " calendar-date-selected" : ""}${dayEvents.length ? " calendar-date-has-events" : ""}${dateFromInput(dateValue).getMonth() !== anchorDate.getMonth() ? " calendar-date-outside" : ""}`}
             key={dateValue}
           >
             <button
               aria-current={dateValue === todayValue ? "date" : undefined}
+              aria-pressed={dateValue === selectedDateValue}
               className="calendar-date-button"
               onClick={(event) => handleDateClick(dateValue, 9, event.currentTarget)}
               type="button"
             >
               {dateFromInput(dateValue).getDate()}
             </button>
-            {dayEvents.slice(0, monthEventLimit).map(renderEventChip)}
+            {dayEvents.slice(0, monthEventLimit).map(renderMonthEventChip)}
             {dayEvents.length > monthEventLimit ? (
               <button
                 className="calendar-more"
@@ -711,9 +811,9 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   }
 
   return (
-    <section className="calendar-panel" aria-label={dictionary.calendar.title}>
+    <section className={`calendar-panel calendar-panel-${view}`} aria-label={dictionary.calendar.title}>
       <div className="calendar-toolbar">
-        <div>
+        <div className="calendar-toolbar-heading">
           <h2 className="section-title">{dictionary.calendar.title}</h2>
           <p className="admin-current">{dictionary.calendar.subtitle}</p>
         </div>
@@ -721,13 +821,34 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
           <div className="calendar-next-event">
             <span>{dictionary.calendar.nextEvent}</span>
             <strong>{nearestVisibleEvent.title}</strong>
-            <small>{renderEventTime(nearestVisibleEvent)} - {dictionary.calendar.eventTypes[nearestVisibleEvent.event_type]}</small>
+            <small className="calendar-event-schedule">{renderEventSchedule(nearestVisibleEvent)}</small>
+            <small>{dictionary.calendar.eventTypes[nearestVisibleEvent.event_type]}</small>
             <div className="calendar-next-actions">
               <button className="secondary-link compact-button" onClick={(event) => openEventDetails(nearestVisibleEvent, event.currentTarget)} type="button">{dictionary.calendar.open}</button>
               {nearestVisibleEvent.conference_url ? (
                 <a className="secondary-link compact-button" href={nearestVisibleEvent.conference_url} rel="noopener noreferrer" target="_blank">{dictionary.calendar.join}</a>
               ) : null}
+              {additionalUpcomingCount ? (
+                <button
+                  aria-expanded={isUpcomingListOpen}
+                  className="secondary-link compact-button"
+                  onClick={() => setIsUpcomingListOpen((current) => !current)}
+                  type="button"
+                >
+                  {upcomingCountLabel(dictionary, locale, additionalUpcomingCount)}
+                </button>
+              ) : null}
             </div>
+            {isUpcomingListOpen ? (
+              <div className="calendar-upcoming-list" aria-label={dictionary.calendar.upcomingList}>
+                {futureEvents.slice(1, 6).map((event) => (
+                  <button key={event.id} onClick={(clickEvent) => openEventDetails(event, clickEvent.currentTarget)} type="button">
+                    <strong>{event.title}</strong>
+                    <small>{renderEventSchedule(event)}</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : <p className="calendar-next-event muted">{dictionary.calendar.noUpcomingEvents}</p>}
         <div className="calendar-toolbar-actions">
@@ -737,7 +858,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
           <input
             aria-label={dictionary.calendar.anchorDate}
             className="field-input"
-            onChange={(event) => setAnchorDate(dateFromInput(event.target.value))}
+            onChange={(event) => handleAnchorDateChange(event.target.value)}
             type="date"
             value={formatDateInput(anchorDate)}
           />
@@ -746,7 +867,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
               {dictionary.calendar.views[item]}
             </button>
           ))}
-          <button className="secondary-link" onClick={() => void loadEvents()} type="button">{dictionary.calendar.refresh}</button>
+          <button className="secondary-link" onClick={() => void Promise.all([loadEvents(), loadUpcomingEvents()])} type="button">{dictionary.calendar.refresh}</button>
           {canManageCalendar ? <button className="primary-button" onClick={(event) => openCreateForm(anchorDate, 9, event.currentTarget)} type="button">{dictionary.calendar.create}</button> : null}
         </div>
       </div>
@@ -765,7 +886,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
             <dl className="calendar-detail-list">
               <dt>{dictionary.calendar.type}</dt><dd>{dictionary.calendar.eventTypes[selectedEvent.event_type]}</dd>
               <dt>{dictionary.calendar.status}</dt><dd>{dictionary.calendar.statuses[selectedEvent.status]}</dd>
-              <dt>{dictionary.calendar.time}</dt><dd>{renderEventTime(selectedEvent)}</dd>
+              <dt>{dictionary.calendar.dateAndTime}</dt><dd className="calendar-event-schedule">{renderEventSchedule(selectedEvent)}</dd>
               <dt>{dictionary.calendar.timezone}</dt><dd>{selectedEvent.timezone}</dd>
               <dt>{dictionary.calendar.location}</dt><dd>{selectedEvent.location || dictionary.calendar.emptyValue}</dd>
               <dt>{dictionary.calendar.organizer}</dt><dd>{selectedEvent.created_by.display_name || selectedEvent.created_by.username || dictionary.calendar.emptyValue}</dd>

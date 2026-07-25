@@ -10,7 +10,11 @@ import { buildWebSocketUrl, getApiBaseUrl } from "./public-url";
 export type UserRole = "superadmin" | "admin" | "group_owner" | "moderator" | "user" | "bot";
 export type GroupRole = "owner" | "moderator" | "member";
 export type DiscussionMemberRole = "owner" | "member";
-export type PermissionKey = "can_broadcast" | "can_pin_messages" | "can_manage_calendar";
+export type PermissionKey =
+  | "can_broadcast"
+  | "can_pin_messages"
+  | "can_manage_calendar"
+  | "can_manage_directory";
 export type BroadcastPriority = "normal" | "important" | "urgent";
 export type BroadcastAudienceType = "all_active_users" | "selected_groups" | "selected_users";
 export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partially_failed" | "retracted";
@@ -43,6 +47,57 @@ export type OfficeChatDirectoryUser = {
   is_active: boolean;
   avatar_url: string | null;
   last_seen_at: string | null;
+};
+
+export type OfficeChatDirectoryLinkedUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  is_active: boolean;
+  role: UserRole;
+};
+
+export type OfficeChatDirectoryEntry = {
+  id: string;
+  display_name: string;
+  department: string | null;
+  position: string | null;
+  internal_phone: string | null;
+  work_phone: string | null;
+  mobile_phone: string | null;
+  email: string | null;
+  room: string | null;
+  location: string | null;
+  notes: string | null;
+  linked_user_id: string | null;
+  linked_user: OfficeChatDirectoryLinkedUser | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+};
+
+export type OfficeChatDirectoryEntryPage = {
+  items: OfficeChatDirectoryEntry[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type DirectoryEntryPayload = {
+  display_name: string;
+  department?: string | null;
+  position?: string | null;
+  internal_phone?: string | null;
+  work_phone?: string | null;
+  mobile_phone?: string | null;
+  email?: string | null;
+  room?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  linked_user_id?: string | null;
+  is_active?: boolean;
 };
 
 export type OfficeChatPresence = {
@@ -1280,6 +1335,61 @@ export function getStorageStats(token: string) {
 
 export function getUsers(token: string) {
   return apiFetch<OfficeChatDirectoryUser[]>("/api/users", token);
+}
+
+export function getDirectoryEntries(
+  token: string,
+  query: {
+    search?: string;
+    department?: string;
+    status?: "active" | "all";
+    page?: number;
+    limit?: number;
+  } = {}
+) {
+  const params = new URLSearchParams({
+    page: String(query.page ?? 1),
+    limit: String(query.limit ?? 30),
+    status: query.status ?? "active"
+  });
+  if (query.search) params.set("search", query.search);
+  if (query.department) params.set("department", query.department);
+  return apiFetch<OfficeChatDirectoryEntryPage>(`/api/directory?${params}`, token);
+}
+
+export function getDirectoryEntry(token: string, entryId: string) {
+  return apiFetch<OfficeChatDirectoryEntry>(`/api/directory/${entryId}`, token);
+}
+
+export function getDirectoryDepartments(token: string, includeInactive = false) {
+  const query = includeInactive ? "?include_inactive=true" : "";
+  return apiFetch<{ items: string[] }>(`/api/directory/departments${query}`, token);
+}
+
+export function createDirectoryEntry(token: string, payload: DirectoryEntryPayload) {
+  return apiFetch<OfficeChatDirectoryEntry>("/api/directory", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateDirectoryEntry(token: string, entryId: string, payload: DirectoryEntryPayload) {
+  return apiFetch<OfficeChatDirectoryEntry>(`/api/directory/${entryId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function archiveDirectoryEntry(token: string, entryId: string) {
+  return apiFetch<OfficeChatDirectoryEntry>(`/api/directory/${entryId}/archive`, token, {
+    method: "POST"
+  });
+}
+
+export function restoreDirectoryEntry(token: string, entryId: string) {
+  return apiFetch<OfficeChatDirectoryEntry>(`/api/directory/${entryId}/restore`, token, {
+    method: "POST"
+  });
 }
 
 export function getAnnouncements(token: string, page = 1, limit = 20) {

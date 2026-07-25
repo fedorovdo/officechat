@@ -1,6 +1,7 @@
 CAN_BROADCAST = "can_broadcast"
 CAN_PIN_MESSAGES = "can_pin_messages"
 CAN_MANAGE_CALENDAR = "can_manage_calendar"
+CAN_MANAGE_DIRECTORY = "can_manage_directory"
 
 
 PERMISSION_CATALOG = {
@@ -18,6 +19,11 @@ PERMISSION_CATALOG = {
         "category": "calendar",
         "description_ru": "Может создавать, изменять, переносить и отменять корпоративные события.",
         "description_en": "Can create, edit, reschedule and cancel corporate events.",
+    },
+    CAN_MANAGE_DIRECTORY: {
+        "category": "directory",
+        "description_ru": "Может создавать, изменять, архивировать и восстанавливать записи корпоративного справочника.",
+        "description_en": "Can create, edit, archive and restore corporate directory entries.",
     },
 }
 

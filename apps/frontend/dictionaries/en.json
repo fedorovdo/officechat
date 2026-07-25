@@ -590,6 +590,70 @@
       "retracted": "Retracted"
     }
   },
+  "directory": {
+    "title": "Directory",
+    "eyebrow": "Corporate contacts",
+    "sidebarPreview": "Phones and employee contacts",
+    "subtitle": "Find colleagues by name, department, position or phone number.",
+    "loading": "Loading directory...",
+    "loadError": "Could not load the directory.",
+    "search": "Search",
+    "searchPlaceholder": "Name, department, phone, email or room",
+    "department": "Department",
+    "allDepartments": "All departments",
+    "activity": "Entry status",
+    "activeOnly": "Active entries",
+    "allEntries": "All entries",
+    "apply": "Search",
+    "reset": "Reset",
+    "empty": "No contacts found",
+    "emptyHint": "Try changing the search query or filters.",
+    "add": "Add entry",
+    "open": "Open",
+    "edit": "Edit",
+    "message": "Message",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archived": "Archived",
+    "archiveConfirm": "Archive this directory entry?",
+    "restoreConfirm": "Restore this directory entry?",
+    "archiveSuccess": "Directory entry archived.",
+    "restoreSuccess": "Directory entry restored.",
+    "createSuccess": "Directory entry created.",
+    "updateSuccess": "Directory entry updated.",
+    "saveError": "Could not save the directory entry.",
+    "actionError": "Could not update the directory entry.",
+    "createTitle": "New directory entry",
+    "editTitle": "Edit directory entry",
+    "save": "Save",
+    "saving": "Saving",
+    "cancel": "Cancel",
+    "close": "Close",
+    "contact": "Contact",
+    "contacts": "Contacts",
+    "organization": "Position and department",
+    "place": "Room and location",
+    "actions": "Actions",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {page} of {pages}, {total} entries",
+    "emptyValue": "Not specified",
+    "noLinkedUser": "No linked OfficeChat user",
+    "fields": {
+      "displayName": "Display name",
+      "department": "Department",
+      "position": "Position",
+      "internalPhone": "Extension",
+      "workPhone": "Work phone",
+      "mobilePhone": "Mobile phone",
+      "email": "Email",
+      "room": "Room",
+      "location": "Location",
+      "notes": "Notes",
+      "linkedUser": "OfficeChat user",
+      "active": "Active entry"
+    }
+  },
   "calendar": {
     "title": "Calendar",
     "sidebarPreview": "Meetings and events",
@@ -870,6 +934,10 @@
         "can_manage_calendar": {
           "label": "Manage calendar",
           "description": "Can create, edit, reschedule and cancel corporate events."
+        },
+        "can_manage_directory": {
+          "label": "Manage directory",
+          "description": "Can create, edit, archive and restore corporate directory entries."
         }
       }
     }

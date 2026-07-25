@@ -12,6 +12,7 @@ from app.api.routes.calendar import router as calendar_router
 from app.api.routes.cache import router as cache_router
 from app.api.routes.db import router as db_router
 from app.api.routes.direct import router as direct_router
+from app.api.routes.directory import router as directory_router
 from app.api.routes.discussions import router as discussions_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.notifications import router as notifications_router
@@ -34,6 +35,7 @@ api_router.include_router(bots_router, prefix="/bots", tags=["bots"])
 api_router.include_router(broadcasts_router, tags=["broadcasts"])
 api_router.include_router(calendar_router, prefix="/calendar", tags=["calendar"])
 api_router.include_router(direct_router, prefix="/direct", tags=["direct"])
+api_router.include_router(directory_router, prefix="/directory", tags=["directory"])
 api_router.include_router(discussions_router, prefix="/discussions", tags=["discussions"])
 api_router.include_router(admin_bots_router, prefix="/admin/bots", tags=["admin"])
 api_router.include_router(admin_audit_router, prefix="/admin/audit", tags=["admin", "audit"])

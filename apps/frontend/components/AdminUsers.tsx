@@ -33,7 +33,12 @@ type AdminUsersProps = {
 };
 
 const roles: UserRole[] = ["superadmin", "admin", "group_owner", "moderator", "user", "bot"];
-const specialPermissionKeys: PermissionKey[] = ["can_broadcast", "can_pin_messages", "can_manage_calendar"];
+const specialPermissionKeys: PermissionKey[] = [
+  "can_broadcast",
+  "can_pin_messages",
+  "can_manage_calendar",
+  "can_manage_directory"
+];
 type UserStatusFilter = "all" | "active" | "disabled" | "bots";
 
 const initialCreateForm: CreateAdminUserPayload = {

@@ -84,6 +84,7 @@ import { MessageSearchPanel } from "./MessageSearchPanel";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { AnnouncementUnreadBadge } from "./AnnouncementUnreadBadge";
 import { CalendarPanel } from "./CalendarPanel";
+import { DirectoryPanel } from "./DirectoryPanel";
 import { UserAvatar } from "./UserAvatar";
 import { PresenceStatus } from "./PresenceStatus";
 import {
@@ -111,6 +112,7 @@ type AppSelection =
   | { type: "direct"; conversationId: string }
   | { type: "announcements" }
   | { type: "calendar" }
+  | { type: "directory" }
   | { type: "empty" };
 
 type AppSettings = {
@@ -2094,6 +2096,29 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 <span className="sidebar-item-preview">{dictionary.calendar.sidebarPreview}</span>
               </span>
             </button>
+            <button
+              aria-label={dictionary.directory.title}
+              className={[
+                "user-app-nav-item",
+                "user-app-nav-item-directory",
+                selected.type === "directory" ? "user-app-nav-item-active" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => {
+                setSelected({ type: "directory" });
+                setActiveDiscussionId(null);
+                clearMessageContext();
+              }}
+              title={isSidebarCollapsed ? dictionary.directory.title : undefined}
+              type="button"
+            >
+              <span className="chat-avatar chat-avatar-group" aria-hidden="true">D</span>
+              <span className="sidebar-item-content">
+                <span className="sidebar-item-top">
+                  <strong>{dictionary.directory.title}</strong>
+                </span>
+                <span className="sidebar-item-preview">{dictionary.directory.sidebarPreview}</span>
+              </span>
+            </button>
             {!isLoading && normalizedSidebarSearch && !hasSidebarSearchResults ? (
               <p className="sidebar-empty-state">{dictionary.appShell.nothingFound}</p>
             ) : null}
@@ -2222,6 +2247,20 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               externalEvent={latestCalendarEvent}
               groups={groups}
               locale={locale}
+              users={users}
+            />
+          ) : null}
+
+          {!isLoading && selected.type === "directory" && currentUser ? (
+            <DirectoryPanel
+              currentUser={currentUser}
+              dictionary={dictionary}
+              locale={locale}
+              onBack={closeChatOnSmallScreen}
+              onStartDirect={(userId) => {
+                const target = users.find((user) => user.id === userId && user.is_active && user.role !== "bot");
+                if (target) void handleOpenDirectUser(target);
+              }}
               users={users}
             />
           ) : null}

@@ -18,6 +18,7 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { DirectoryImportWizard } from "./DirectoryImportWizard";
 
 type DirectoryPanelProps = {
   currentUser: OfficeChatUser;
@@ -153,6 +154,7 @@ export function DirectoryPanel({
   const [editingEntry, setEditingEntry] = useState<OfficeChatDirectoryEntry | null>(null);
   const [form, setForm] = useState<DirectoryForm>(emptyDirectoryForm);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [actionEntryId, setActionEntryId] = useState<string | null>(null);
@@ -325,7 +327,14 @@ export function DirectoryPanel({
           <h2 className="section-title">{t.title}</h2>
           <p className="admin-current">{t.subtitle}</p>
         </div>
-        {canManage ? <button className="primary-button" onClick={openCreate} type="button">{t.add}</button> : null}
+        {canManage ? (
+          <div className="directory-heading-actions">
+            <button className="secondary-link" onClick={() => setIsImportOpen(true)} type="button">
+              {dictionary.directoryImport.open}
+            </button>
+            <button className="primary-button" onClick={openCreate} type="button">{t.add}</button>
+          </div>
+        ) : null}
       </header>
 
       <div className="directory-content">
@@ -551,6 +560,13 @@ export function DirectoryPanel({
             </div>
           </form>
         </div>
+      ) : null}
+
+      {isImportOpen ? (
+        <DirectoryImportWizard
+          dictionary={dictionary}
+          onClose={() => setIsImportOpen(false)}
+        />
       ) : null}
     </div>
   );

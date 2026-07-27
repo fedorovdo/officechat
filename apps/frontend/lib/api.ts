@@ -99,6 +99,80 @@ export type DirectoryEntryPayload = {
   is_active?: boolean;
 };
 
+export type DirectoryImportParserMode = "auto" | "table" | "legacy_layout";
+export type DirectoryImportKind =
+  | "person"
+  | "role"
+  | "department_contact"
+  | "organization_metadata"
+  | "unknown";
+export type DirectoryImportAction = "create" | "skip";
+
+export type DirectoryImportBatch = {
+  id: string;
+  original_filename: string;
+  file_type: "xlsx" | "csv";
+  file_sha256: string;
+  available_sheets: string[];
+  selected_sheet: string | null;
+  parser_mode: DirectoryImportParserMode;
+  column_mapping: Record<string, string>;
+  source_columns: Array<{ index: number; label: string; samples: string[] }>;
+  status: "draft" | "analyzed" | "cancelled";
+  total_source_rows: number;
+  detected_rows: number;
+  selected_rows: number;
+  warning_rows: number;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DirectoryImportRow = {
+  id: string;
+  batch_id: string;
+  source_sheet: string | null;
+  source_row_start: number;
+  source_row_end: number;
+  raw_cells: {
+    rows?: Array<{
+      row: number;
+      cells: string[];
+      formula_columns?: number[];
+      truncated_columns?: number[];
+    }>;
+    header_row?: {
+      row: number;
+      cells: string[];
+      formula_columns?: number[];
+      truncated_columns?: number[];
+    };
+  };
+  detected_kind: DirectoryImportKind;
+  confidence: number | null;
+  normalized_data: Record<string, string | null>;
+  warnings: Array<{ code: string; severity: "info" | "warning" | "blocking"; [key: string]: unknown }>;
+  is_selected: boolean;
+  proposed_action: DirectoryImportAction;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DirectoryImportBatchPage = {
+  items: DirectoryImportBatch[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type DirectoryImportRowPage = {
+  items: DirectoryImportRow[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
 export type OfficeChatPresence = {
   user_id: string;
   status: "online" | "offline";
@@ -1388,6 +1462,102 @@ export function archiveDirectoryEntry(token: string, entryId: string) {
 export function restoreDirectoryEntry(token: string, entryId: string) {
   return apiFetch<OfficeChatDirectoryEntry>(`/api/directory/${entryId}/restore`, token, {
     method: "POST"
+  });
+}
+
+export async function uploadDirectoryImport(
+  token: string,
+  file: File,
+  parserMode: DirectoryImportParserMode
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("parser_mode", parserMode);
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/directory/imports/upload`, token, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new ApiResponseError(
+      response.status,
+      typeof body?.detail === "string" ? body.detail : response.statusText
+    );
+  }
+  return (await response.json()) as DirectoryImportBatch;
+}
+
+export function getDirectoryImports(token: string, page = 1, limit = 30) {
+  return apiFetch<DirectoryImportBatchPage>(
+    `/api/directory/imports?page=${page}&limit=${limit}`,
+    token
+  );
+}
+
+export function getDirectoryImport(token: string, batchId: string) {
+  return apiFetch<DirectoryImportBatch>(`/api/directory/imports/${batchId}`, token);
+}
+
+export function getDirectoryImportRows(
+  token: string,
+  batchId: string,
+  warningsOnly = false,
+  page = 1,
+  limit = 200
+) {
+  const query = new URLSearchParams({
+    warnings_only: String(warningsOnly),
+    page: String(page),
+    limit: String(limit)
+  });
+  return apiFetch<DirectoryImportRowPage>(
+    `/api/directory/imports/${batchId}/rows?${query}`,
+    token
+  );
+}
+
+export function updateDirectoryImport(
+  token: string,
+  batchId: string,
+  payload: {
+    parser_mode?: DirectoryImportParserMode;
+    selected_sheet?: string | null;
+    column_mapping?: Record<string, string>;
+  }
+) {
+  return apiFetch<DirectoryImportBatch>(`/api/directory/imports/${batchId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateDirectoryImportRow(
+  token: string,
+  batchId: string,
+  rowId: string,
+  payload: {
+    detected_kind?: DirectoryImportKind;
+    normalized_data?: Record<string, string | null>;
+    is_selected?: boolean;
+    proposed_action?: DirectoryImportAction;
+  }
+) {
+  return apiFetch<DirectoryImportRow>(`/api/directory/imports/${batchId}/rows/${rowId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function reanalyzeDirectoryImport(token: string, batchId: string) {
+  return apiFetch<DirectoryImportBatch>(`/api/directory/imports/${batchId}/reanalyze`, token, {
+    method: "POST"
+  });
+}
+
+export function cancelDirectoryImport(token: string, batchId: string) {
+  return apiFetch<DirectoryImportBatch>(`/api/directory/imports/${batchId}`, token, {
+    method: "DELETE"
   });
 }
 

@@ -283,6 +283,15 @@ Important auth environment variables:
 - `CALENDAR_MAX_RECIPIENTS` - maximum resolved recipients per calendar event, default `10000`.
 - `CALENDAR_MAX_REMINDERS` - maximum reminders per event, default `5`.
 - `CALENDAR_REMINDER_POLL_SECONDS` - calendar worker polling interval, default `30`.
+- `DIRECTORY_IMPORT_MAX_FILE_SIZE_MB` - directory XLSX/CSV preview upload limit, default `10`.
+- `DIRECTORY_IMPORT_MAX_SHEETS`, `DIRECTORY_IMPORT_MAX_ROWS`, `DIRECTORY_IMPORT_MAX_COLUMNS` - workbook structure limits.
+- `DIRECTORY_IMPORT_MAX_CELLS`, `DIRECTORY_IMPORT_MAX_CELL_LENGTH` - parsed data limits.
+- `DIRECTORY_IMPORT_MAX_ZIP_MEMBERS`, `DIRECTORY_IMPORT_MAX_UNCOMPRESSED_MB` - XLSX archive safety limits.
+
+Directory managers can open an XLSX/CSV import preview from the corporate
+directory. This first stage stores isolated import batches and editable preview
+rows only; it does not create or update directory entries. See
+[`docs/DIRECTORY_IMPORT_RU.md`](docs/DIRECTORY_IMPORT_RU.md).
 
 ## Useful Docker Compose Commands
 

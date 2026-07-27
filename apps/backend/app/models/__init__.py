@@ -5,6 +5,7 @@ from app.models.broadcast import BroadcastAnnouncement, BroadcastRecipient
 from app.models.calendar import CalendarEvent, CalendarEventRecipient, CalendarReminderDelivery
 from app.models.direct import DirectConversation, DirectMessage
 from app.models.directory import DirectoryEntry
+from app.models.directory_import import DirectoryImportBatch, DirectoryImportRow
 from app.models.discussion import Discussion, DiscussionMember, DiscussionMessage
 from app.models.group import Group, GroupMember
 from app.models.mention import MessageMention
@@ -31,6 +32,8 @@ __all__ = [
     "DirectMessageAttachment",
     "DirectMessageReaction",
     "DirectoryEntry",
+    "DirectoryImportBatch",
+    "DirectoryImportRow",
     "Discussion",
     "DiscussionMember",
     "DiscussionMessage",

@@ -368,3 +368,20 @@ bash scripts/release/create-release-bundle.sh --dry-run
 ```
 
 Workflow `.github/workflows/release-images.yml` публикует GHCR images только при tag `v*` или ручном `workflow_dispatch`; локальная разработка ничего не публикует.
+
+## Preview импорта справочника
+
+Пользователь с `can_manage_directory` может открыть на странице справочника
+wizard импорта XLSX/CSV. На текущем этапе создаются только
+`directory_import_batches` и `directory_import_rows`; `DirectoryEntry` не
+изменяется. Настройки ограничений находятся в `.env.example` с prefix
+`DIRECTORY_IMPORT_`.
+
+Проверка parser и API:
+
+```powershell
+docker compose exec backend python -m pytest -q tests/test_directory_import_parser.py tests/test_directory_import_api.py
+docker compose exec backend env RUN_POSTGRES_INTEGRATION_TESTS=1 python -m pytest -q tests/test_directory_import_postgres.py
+```
+
+Подробности: `docs/DIRECTORY_IMPORT_RU.md`.

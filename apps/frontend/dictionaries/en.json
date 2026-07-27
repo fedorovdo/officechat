@@ -659,6 +659,107 @@
       "active": "Active entry"
     }
   },
+  "directoryImport": {
+    "open": "Import",
+    "title": "Directory import preview",
+    "eyebrow": "XLSX and CSV analysis",
+    "previewOnly": "This preview does not create or update directory entries.",
+    "close": "Close",
+    "stepsLabel": "Import steps",
+    "steps": {
+      "upload": "Upload",
+      "mapping": "Structure",
+      "preview": "Preview"
+    },
+    "file": "XLSX or CSV file",
+    "fileHelp": "Default server limit: 10 MB. XLSX and CSV only; XLS, XLSM and macros are not supported.",
+    "parserMode": "Parser mode",
+    "modes": {
+      "auto": "Automatic",
+      "table": "Standard table",
+      "legacy": "Formatted directory"
+    },
+    "analyze": "Upload and analyze",
+    "uploading": "Analyzing...",
+    "uploadSuccess": "The file was analyzed. Review its structure before preview.",
+    "recent": "Recent import previews",
+    "sheet": "Worksheet",
+    "summary": "Source rows: {rows}. Rows with warnings: {warnings}.",
+    "reanalyze": "Reanalyze",
+    "reanalyzing": "Reanalyzing...",
+    "reanalyzeConfirm": "Reanalysis replaces manual row changes. Continue?",
+    "reanalyzeSuccess": "The preview was rebuilt.",
+    "openPreview": "Open preview",
+    "cancelBatch": "Cancel preview",
+    "cancelConfirm": "Cancel this import preview?",
+    "cancelled": "The import preview was cancelled.",
+    "selectedCount": "Selected rows: {count}",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {page} of {pages}, {total} preview rows",
+    "warningsOnly": "Only rows with warnings",
+    "backToMapping": "Back to structure",
+    "editRow": "Review and edit",
+    "saveRow": "Save preview row",
+    "rawCells": "Raw source cells",
+    "empty": "Not detected",
+    "mapping": {
+      "title": "Column mapping",
+      "skipColumn": "Do not import",
+      "unnamed": "Column {index}",
+      "noSamples": "No sample values",
+      "column": "Mapping for {column}"
+    },
+    "preview": {
+      "select": "Select",
+      "selectRow": "Select source row {row}",
+      "source": "Source",
+      "kind": "Record type",
+      "contacts": "Phones and email",
+      "warnings": "Warnings",
+      "action": "Proposed action"
+    },
+    "kinds": {
+      "person": "Person",
+      "role": "Role/common contact",
+      "department_contact": "Department contact",
+      "organization_metadata": "Metadata",
+      "unknown": "Unknown"
+    },
+    "actions": {
+      "create": "Create",
+      "skip": "Skip"
+    },
+    "warningCodes": {
+      "missing_display_name": "No person or display name detected",
+      "column_mapping_required": "Column mapping is required",
+      "unknown_row_structure": "Unknown row structure",
+      "multiline_position": "Multi-line position was joined",
+      "role_without_person": "Position or role detected without a person",
+      "shared_department_contact": "Shared department contact",
+      "department_context": "Department context",
+      "organization_metadata": "Row looks like organization metadata",
+      "formula_replaced_with_saved_value": "Formula was replaced with its saved value",
+      "formula_without_cached_value": "Formula was not evaluated and has no saved value",
+      "external_links_ignored": "External workbook links were ignored",
+      "email_in_phone_column": "Email was detected in a phone column",
+      "phone_and_email_combined": "Phone and email were combined in one cell",
+      "phone_type_uncertain": "Phone type is uncertain; review the work phone field",
+      "phone_fax_source": "Source marks this number as phone/fax",
+      "multiple_phone_values": "Multiple phone values found; review the raw source cells",
+      "value_truncated": "Value was truncated at the configured limit"
+    },
+    "errors": {
+      "fileRequired": "Choose a file to analyze.",
+      "unsupportedFile": "Only XLSX and CSV files are supported.",
+      "fileTooLarge": "The file exceeds the 10 MB upload limit.",
+      "upload": "Could not upload or analyze the file.",
+      "reanalyze": "Could not reanalyze the import preview.",
+      "rows": "Could not load preview rows.",
+      "row": "Could not update the preview row.",
+      "cancel": "Could not cancel the import preview."
+    }
+  },
   "calendar": {
     "title": "Calendar",
     "sidebarPreview": "Meetings and events",

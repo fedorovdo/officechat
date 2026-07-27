@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     calendar_max_duration_days: int = Field(default=30, ge=1, le=366)
     calendar_reminder_poll_seconds: int = Field(default=30, ge=5, le=3600)
     calendar_reminder_batch_size: int = Field(default=100, ge=1, le=1000)
+    directory_import_max_file_size_mb: int = Field(default=10, ge=1, le=100)
+    directory_import_max_sheets: int = Field(default=20, ge=1, le=100)
+    directory_import_max_rows: int = Field(default=20000, ge=1, le=100000)
+    directory_import_max_columns: int = Field(default=100, ge=1, le=1000)
+    directory_import_max_cells: int = Field(default=200000, ge=1, le=1000000)
+    directory_import_max_cell_length: int = Field(default=2000, ge=32, le=10000)
+    directory_import_max_zip_members: int = Field(default=1000, ge=10, le=10000)
+    directory_import_max_uncompressed_mb: int = Field(default=100, ge=1, le=1000)
     attachment_max_upload_size_mb: int = Field(
         default=25,
         validation_alias=AliasChoices("ATTACHMENT_MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_SIZE_MB"),
@@ -206,6 +214,14 @@ class Settings(BaseSettings):
     @property
     def avatar_max_upload_size_bytes(self) -> int:
         return self.avatar_max_upload_size_mb * 1024 * 1024
+
+    @property
+    def directory_import_max_file_size_bytes(self) -> int:
+        return self.directory_import_max_file_size_mb * 1024 * 1024
+
+    @property
+    def directory_import_max_uncompressed_bytes(self) -> int:
+        return self.directory_import_max_uncompressed_mb * 1024 * 1024
 
     @property
     def database_url(self) -> str:

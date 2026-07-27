@@ -13,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
   getDirectoryEntries: vi.fn(),
   getStoredAccessToken: vi.fn(() => "token"),
   restoreDirectoryEntry: vi.fn(),
+  getDirectoryImports: vi.fn(),
   updateDirectoryEntry: vi.fn()
 }));
 
@@ -93,6 +94,7 @@ describe("directory panel", () => {
     apiMocks.updateDirectoryEntry.mockResolvedValue(entry);
     apiMocks.archiveDirectoryEntry.mockResolvedValue({ ...entry, is_active: false });
     apiMocks.restoreDirectoryEntry.mockResolvedValue(entry);
+    apiMocks.getDirectoryImports.mockResolvedValue({ items: [], total: 0, page: 1, limit: 10 });
   });
 
   it("loads and renders contact details with tel and mailto links", async () => {
@@ -294,6 +296,7 @@ describe("directory panel", () => {
 
     renderPanel({ manager: true });
     expect(await screen.findByRole("button", { name: en.directory.add })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.directoryImport.open })).toBeInTheDocument();
     expect(screen.getByLabelText(en.directory.activity)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: en.directory.edit }).length).toBeGreaterThan(0);
   });

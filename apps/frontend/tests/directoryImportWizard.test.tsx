@@ -4,17 +4,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DirectoryImportWizard } from "../components/DirectoryImportWizard";
 import { getDictionary } from "../lib/i18n";
-import type { DirectoryImportBatch, DirectoryImportRow } from "../lib/api";
+import {
+  ApiResponseError,
+  type DirectoryImportBatch,
+  type DirectoryImportRow
+} from "../lib/api";
 
 const apiMocks = vi.hoisted(() => ({
   cancelDirectoryImport: vi.fn(),
+  executeDirectoryImport: vi.fn(),
+  getDirectoryEntry: vi.fn(),
+  getDirectoryImportReconciliation: vi.fn(),
+  getDirectoryImportResult: vi.fn(),
   getDirectoryImportRows: vi.fn(),
   getDirectoryImports: vi.fn(),
   getStoredAccessToken: vi.fn(() => "token"),
+  reconcileDirectoryImport: vi.fn(),
   reanalyzeDirectoryImport: vi.fn(),
   updateDirectoryImport: vi.fn(),
+  updateDirectoryImportMatch: vi.fn(),
   updateDirectoryImportRow: vi.fn(),
-  uploadDirectoryImport: vi.fn()
+  uploadDirectoryImport: vi.fn(),
+  validateDirectoryImport: vi.fn()
 }));
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -42,6 +53,14 @@ const batch: DirectoryImportBatch = {
   detected_rows: 2,
   selected_rows: 1,
   warning_rows: 1,
+  reconciliation_started_at: null,
+  reconciled_at: null,
+  execution_started_at: null,
+  executed_at: null,
+  execution_summary: null,
+  execution_error: null,
+  directory_snapshot_at: null,
+  version: 1,
   created_by_user_id: "user-1",
   created_at: "2026-07-27T10:00:00Z",
   updated_at: "2026-07-27T10:00:00Z"
@@ -70,17 +89,90 @@ const previewRow: DirectoryImportRow = {
   warnings: [{ code: "multiline_position", severity: "info" }],
   is_selected: true,
   proposed_action: "create",
+  match_status: null,
+  matched_entry_id: null,
+  match_score: null,
+  match_reasons: [],
+  match_candidates: [],
+  update_fields: [],
+  restore_if_archived: false,
+  expected_entry_updated_at: null,
+  execution_status: "pending",
+  result_entry_id: null,
+  execution_error: null,
   sort_order: 0,
   created_at: "2026-07-27T10:00:00Z",
   updated_at: "2026-07-27T10:00:00Z"
 };
+const reconciledBatch: DirectoryImportBatch = {
+  ...batch,
+  status: "reconciled",
+  reconciled_at: "2026-07-28T10:00:00Z",
+  directory_snapshot_at: "2026-07-28T10:00:00Z",
+  version: 2
+};
+const matchedRow: DirectoryImportRow = {
+  ...previewRow,
+  match_status: "exact",
+  matched_entry_id: "11111111-1111-4111-8111-111111111111",
+  match_score: 100,
+  match_reasons: [
+    { code: "exact_email", weight: 100 },
+    { code: "exact_name", weight: 50 }
+  ],
+  match_candidates: [{
+    id: "11111111-1111-4111-8111-111111111111",
+    display_name: "Existing User",
+    department: "IT",
+    position: "Engineer",
+    internal_phone: null,
+    work_phone: "3 11 11",
+    mobile_phone: null,
+    email: "existing@example.test",
+    room: "401",
+    location: "HQ",
+    is_active: true,
+    updated_at: "2026-07-28T09:00:00Z",
+    score: 100,
+    reasons: [{ code: "exact_email", weight: 100 }]
+  }],
+  proposed_action: "update",
+  update_fields: ["display_name", "position"],
+  expected_entry_updated_at: "2026-07-28T09:00:00Z"
+};
+const validation = {
+  create_count: 0,
+  update_count: 1,
+  restore_count: 0,
+  skip_count: 0,
+  blocking_count: 0,
+  stale_count: 0,
+  invalid_count: 0,
+  duplicate_count: 0,
+  can_execute: true,
+  blocking_reasons: []
+};
+const completedResult = {
+  batch_id: batch.id,
+  status: "completed" as const,
+  created: 0,
+  updated: 1,
+  restored: 0,
+  skipped: 0,
+  errors: 0,
+  duration_ms: 42,
+  result_entry_ids: ["11111111-1111-4111-8111-111111111111"],
+  error_code: null
+};
 
-function renderWizard() {
-  return render(<DirectoryImportWizard dictionary={en} onClose={vi.fn()} />);
+function renderWizard(onImported?: () => void) {
+  return render(
+    <DirectoryImportWizard dictionary={en} onClose={vi.fn()} onImported={onImported} />
+  );
 }
 
-async function uploadValidFile() {
-  renderWizard();
+async function uploadValidFile(onImported?: () => void) {
+  renderWizard(onImported);
   const file = new File(["xlsx-content"], "directory.xlsx", {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   });
@@ -95,6 +187,13 @@ async function uploadValidFile() {
     expect(apiMocks.uploadDirectoryImport).toHaveBeenCalledWith("token", file, "table")
   );
   await screen.findByText(batch.original_filename);
+}
+
+async function openReconciliation(onImported?: () => void) {
+  await uploadValidFile(onImported);
+  fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
+  fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.startReconciliation }));
+  await screen.findByText(en.directoryImport.reconciliation.title);
 }
 
 describe("directory import wizard", () => {
@@ -114,6 +213,41 @@ describe("directory import wizard", () => {
       async (_token, _batchId, _rowId, payload) => ({ ...previewRow, ...payload })
     );
     apiMocks.cancelDirectoryImport.mockResolvedValue({ ...batch, status: "cancelled" });
+    apiMocks.reconcileDirectoryImport.mockResolvedValue(reconciledBatch);
+    apiMocks.getDirectoryImportReconciliation.mockImplementation(
+      async (_token, _batchId, _page, _limit, filter = "all") => ({
+        items: filter === "all" || filter === matchedRow.match_status ? [matchedRow] : [],
+        total: filter === "all" || filter === matchedRow.match_status ? 1 : 0,
+        page: 1,
+        limit: 200
+      })
+    );
+    apiMocks.validateDirectoryImport.mockResolvedValue(validation);
+    apiMocks.updateDirectoryImportMatch.mockImplementation(
+      async (_token, _batchId, _rowId, payload) => ({ ...matchedRow, ...payload })
+    );
+    apiMocks.executeDirectoryImport.mockResolvedValue(completedResult);
+    apiMocks.getDirectoryImportResult.mockResolvedValue(completedResult);
+    apiMocks.getDirectoryEntry.mockResolvedValue({
+      id: matchedRow.matched_entry_id,
+      display_name: "Existing User",
+      department: "IT",
+      position: "Engineer",
+      internal_phone: null,
+      work_phone: "3 11 11",
+      mobile_phone: null,
+      email: "existing@example.test",
+      room: "401",
+      location: "HQ",
+      notes: "Existing note",
+      linked_user_id: null,
+      linked_user: null,
+      is_active: true,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-28T09:00:00Z",
+      created_by_user_id: null,
+      updated_by_user_id: null
+    });
   });
 
   it("validates file extension before upload", async () => {
@@ -466,6 +600,188 @@ describe("directory import wizard", () => {
     expect(apiMocks.reanalyzeDirectoryImport).not.toHaveBeenCalled();
   });
 
+  it("renders reconciliation counts, filters and deterministic match reasons", async () => {
+    await openReconciliation();
+
+    expect(apiMocks.reconcileDirectoryImport).toHaveBeenCalledWith("token", batch.id);
+    expect(apiMocks.getDirectoryImportReconciliation).toHaveBeenCalledWith(
+      "token",
+      batch.id,
+      1,
+      200,
+      "all"
+    );
+    expect(screen.getAllByText(en.directoryImport.matchStatuses.exact).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(en.directoryImport.matchReasons.exact_email).length).toBeGreaterThan(0);
+    expect(document.querySelector(".directory-import-reconciliation-summary")).toHaveTextContent(
+      `${en.directoryImport.reconciliation.update}: 1`
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.matchStatuses.unmatched }));
+    expect(await screen.findByText(en.directoryImport.reconciliation.empty)).toBeInTheDocument();
+    expect(apiMocks.getDirectoryImportReconciliation).toHaveBeenLastCalledWith(
+      "token",
+      batch.id,
+      1,
+      200,
+      "unmatched"
+    );
+  });
+
+  it("selects a candidate and explicit non-empty update fields", async () => {
+    await openReconciliation();
+    fireEvent.click(screen.getAllByRole("button", { name: en.directoryImport.reconciliation.compare })[0]);
+    const dialog = screen.getByRole("dialog", { name: en.directoryImport.detailsTitle });
+    const scope = within(dialog);
+
+    expect(scope.getAllByText("Existing User").length).toBeGreaterThan(0);
+    const position = scope.getByLabelText(
+      en.directoryImport.reconciliation.applyField.replace(
+        "{field}",
+        en.directory.fields.position
+      )
+    );
+    fireEvent.click(position);
+    fireEvent.click(scope.getByRole("button", { name: en.directoryImport.reconciliation.save }));
+
+    await waitFor(() =>
+      expect(apiMocks.updateDirectoryImportMatch).toHaveBeenCalledWith(
+        "token",
+        batch.id,
+        matchedRow.id,
+        expect.objectContaining({
+          proposed_action: "update",
+          matched_entry_id: matchedRow.matched_entry_id,
+          update_fields: ["display_name"],
+          version: 2
+        })
+      )
+    );
+  });
+
+  it("requires final confirmation and blocks a duplicate execute submission", async () => {
+    let resolveExecution: ((value: typeof completedResult) => void) | undefined;
+    apiMocks.executeDirectoryImport.mockReturnValueOnce(
+      new Promise<typeof completedResult>((resolve) => {
+        resolveExecution = resolve;
+      })
+    );
+    await openReconciliation();
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reconciliation.continue }));
+    await screen.findByText(en.directoryImport.confirmation.title);
+
+    const execute = screen.getByRole("button", { name: en.directoryImport.confirmation.execute });
+    expect(execute).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(en.directoryImport.confirmation.checkbox));
+    fireEvent.click(execute);
+    fireEvent.click(execute);
+    expect(apiMocks.executeDirectoryImport).toHaveBeenCalledTimes(1);
+
+    resolveExecution?.(completedResult);
+    expect(await screen.findByText(en.directoryImport.result.success)).toBeInTheDocument();
+    expect(screen.getByText(en.directoryImport.result.updated).nextSibling).toHaveTextContent("1");
+  });
+
+  it("shows the atomic rollback result after an execution failure", async () => {
+    apiMocks.executeDirectoryImport.mockRejectedValueOnce(new Error("network"));
+    apiMocks.getDirectoryImportResult.mockResolvedValueOnce({
+      ...completedResult,
+      status: "failed",
+      updated: 0,
+      errors: 1,
+      result_entry_ids: [],
+      error_code: "execution_failed"
+    });
+    await openReconciliation();
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reconciliation.continue }));
+    fireEvent.click(await screen.findByLabelText(en.directoryImport.confirmation.checkbox));
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.confirmation.execute }));
+
+    expect(await screen.findByText(en.directoryImport.result.failed)).toBeInTheDocument();
+    expect(screen.getByText(en.directoryImport.result.rollbackDescription)).toBeInTheDocument();
+  });
+
+  it("returns stale execution conflicts to reconciliation", async () => {
+    apiMocks.executeDirectoryImport.mockRejectedValueOnce(
+      new ApiResponseError(409, "stale_match")
+    );
+    await openReconciliation();
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reconciliation.continue }));
+    fireEvent.click(await screen.findByLabelText(en.directoryImport.confirmation.checkbox));
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.confirmation.execute }));
+
+    expect(await screen.findByText(en.directoryImport.errors.stale)).toBeInTheDocument();
+    expect(screen.getByText(en.directoryImport.reconciliation.title)).toBeInTheDocument();
+    expect(apiMocks.getDirectoryImportResult).not.toHaveBeenCalled();
+  });
+
+  it("warns before leaving only while execution is pending", async () => {
+    let resolveExecution: ((value: typeof completedResult) => void) | undefined;
+    apiMocks.executeDirectoryImport.mockReturnValueOnce(
+      new Promise<typeof completedResult>((resolve) => {
+        resolveExecution = resolve;
+      })
+    );
+    await openReconciliation();
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reconciliation.continue }));
+    fireEvent.click(await screen.findByLabelText(en.directoryImport.confirmation.checkbox));
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.confirmation.execute }));
+
+    const pendingExit = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(pendingExit);
+    expect(pendingExit.defaultPrevented).toBe(true);
+
+    resolveExecution?.(completedResult);
+    await screen.findByText(en.directoryImport.result.success);
+    const completedExit = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(completedExit);
+    expect(completedExit.defaultPrevented).toBe(false);
+  });
+
+  it("does not offer whitespace-only imported fields for update", async () => {
+    const whitespaceRow = {
+      ...matchedRow,
+      normalized_data: {
+        ...matchedRow.normalized_data,
+        position: " \t\n"
+      },
+      update_fields: ["display_name"]
+    };
+    apiMocks.getDirectoryImportReconciliation.mockResolvedValue({
+      items: [whitespaceRow],
+      total: 1,
+      page: 1,
+      limit: 200
+    });
+    await openReconciliation();
+    fireEvent.click(screen.getAllByRole("button", { name: en.directoryImport.reconciliation.compare })[0]);
+    await waitFor(() => expect(apiMocks.getDirectoryEntry).toHaveBeenCalled());
+
+    expect(
+      within(
+        screen.getByRole("dialog", { name: en.directoryImport.detailsTitle })
+      ).queryByLabelText(
+        en.directoryImport.reconciliation.applyField.replace(
+          "{field}",
+          en.directory.fields.position
+        )
+      )
+    ).not.toBeInTheDocument();
+  });
+
+  it("refreshes the directory when a network retry discovers a completed result", async () => {
+    const onImported = vi.fn();
+    apiMocks.executeDirectoryImport.mockRejectedValueOnce(new Error("network"));
+    await openReconciliation(onImported);
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reconciliation.continue }));
+    fireEvent.click(await screen.findByLabelText(en.directoryImport.confirmation.checkbox));
+    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.confirmation.execute }));
+
+    expect(await screen.findByText(en.directoryImport.result.success)).toBeInTheDocument();
+    expect(apiMocks.getDirectoryImportResult).toHaveBeenCalledWith("token", batch.id);
+    expect(onImported).toHaveBeenCalledTimes(1);
+  });
+
   it("cancels the preview and has no DirectoryEntry execution action", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await uploadValidFile();
@@ -518,5 +834,11 @@ describe("directory import wizard", () => {
     expect(ru.directoryImport.openDetails).toBeTruthy();
     expect(en.directoryImport.errors.displayNameRequired).toBeTruthy();
     expect(ru.directoryImport.errors.displayNameRequired).toBeTruthy();
+    expect(en.directoryImport.reconciliation.title).toBeTruthy();
+    expect(ru.directoryImport.reconciliation.title).toBeTruthy();
+    expect(en.directoryImport.confirmation.checkbox).toBeTruthy();
+    expect(ru.directoryImport.confirmation.checkbox).toBeTruthy();
+    expect(en.directoryImport.errors.stale).toBeTruthy();
+    expect(ru.directoryImport.errors.stale).toBeTruthy();
   });
 });

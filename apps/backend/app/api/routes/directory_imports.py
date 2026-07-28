@@ -19,9 +19,14 @@ from app.schemas.directory_import import (
     DirectoryImportBatchPublic,
     DirectoryImportBatchUpdate,
     DirectoryImportParserMode,
+    DirectoryImportExecutionRequest,
+    DirectoryImportExecutionResultPublic,
+    DirectoryImportMatchStatus,
+    DirectoryImportMatchUpdate,
     DirectoryImportRowPage,
     DirectoryImportRowPublic,
     DirectoryImportRowUpdate,
+    DirectoryImportValidationPublic,
 )
 from app.services.audit import record_audit_event
 from app.services.directory_import_parser import (
@@ -44,6 +49,14 @@ from app.services.directory_imports import (
     update_import_batch,
     update_import_row,
 )
+from app.services.directory_import_reconciliation import (
+    DirectoryImportValidationError,
+    execute_directory_import_batch,
+    mark_directory_import_execution_failed,
+    reconcile_directory_import_batch,
+    update_directory_import_match,
+    validate_directory_import_execution,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -65,6 +78,10 @@ def import_limits() -> ImportLimits:
 def import_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, DirectoryImportNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import batch not found")
+    if isinstance(exc, DirectoryImportValidationError) and exc.code == "not_found":
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import resource not found")
+    if isinstance(exc, DirectoryImportValidationError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.code)
     if isinstance(exc, DirectoryImportStateError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, DirectoryImportLimitError):
@@ -249,7 +266,12 @@ async def patch_directory_import(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryImportBatchPublic:
     try:
-        batch = await get_import_batch(session, batch_id, actor=current_user)
+        batch = await get_import_batch(
+            session,
+            batch_id,
+            actor=current_user,
+            for_update=True,
+        )
         response = DirectoryImportBatchPublic.model_validate(
             await update_import_batch(session, batch, payload)
         )
@@ -269,7 +291,12 @@ async def patch_directory_import_row(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryImportRowPublic:
     try:
-        batch = await get_import_batch(session, batch_id, actor=current_user)
+        batch = await get_import_batch(
+            session,
+            batch_id,
+            actor=current_user,
+            for_update=True,
+        )
         response = DirectoryImportRowPublic.model_validate(
             await update_import_row(session, batch, row_id, payload)
         )
@@ -288,7 +315,12 @@ async def post_directory_import_reanalyze(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryImportBatchPublic:
     try:
-        batch = await get_import_batch(session, batch_id, actor=current_user)
+        batch = await get_import_batch(
+            session,
+            batch_id,
+            actor=current_user,
+            for_update=True,
+        )
         await reanalyze_import_batch(session, batch)
         await record_audit_event(
             session,
@@ -311,6 +343,173 @@ async def post_directory_import_reanalyze(
         raise import_http_error(exc) from exc
 
 
+@router.post("/{batch_id}/reconcile", response_model=DirectoryImportBatchPublic)
+async def post_directory_import_reconcile(
+    batch_id: UUID,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_can_manage_directory)],
+) -> DirectoryImportBatchPublic:
+    try:
+        batch = await reconcile_directory_import_batch(session, batch_id, actor=current_user)
+        validation = await validate_directory_import_execution(session, batch)
+        await record_audit_event(
+            session,
+            event_type="directory_import_reconciled",
+            category="directory",
+            action="reconcile",
+            status="success",
+            actor=current_user,
+            target_type="directory_import_batch",
+            target_id=batch.id,
+            target_label=None,
+            details={
+                "batch_id": str(batch.id),
+                "create": validation.create_count,
+                "update": validation.update_count,
+                "skip": validation.skip_count,
+                "blocking": validation.blocking_count,
+            },
+            request=request,
+        )
+        response = DirectoryImportBatchPublic.model_validate(batch)
+        await session.commit()
+        return response
+    except Exception as exc:
+        await session.rollback()
+        raise import_http_error(exc) from exc
+
+
+@router.get("/{batch_id}/reconciliation", response_model=DirectoryImportRowPage)
+async def get_directory_import_reconciliation(
+    batch_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_can_manage_directory)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    match_status: DirectoryImportMatchStatus | None = None,
+) -> DirectoryImportRowPage:
+    try:
+        batch = await get_import_batch(session, batch_id, actor=current_user)
+        if batch.status not in {"reconciled", "completed", "failed"}:
+            raise DirectoryImportStateError("Import batch is not reconciled")
+        rows, total = await list_import_rows(
+            session,
+            batch,
+            warnings_only=False,
+            match_status=match_status,
+            page=page,
+            limit=limit,
+        )
+        return DirectoryImportRowPage(items=rows, total=total, page=page, limit=limit)
+    except Exception as exc:
+        raise import_http_error(exc) from exc
+
+
+@router.patch("/{batch_id}/rows/{row_id}/match", response_model=DirectoryImportRowPublic)
+async def patch_directory_import_match(
+    batch_id: UUID,
+    row_id: UUID,
+    payload: DirectoryImportMatchUpdate,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_can_manage_directory)],
+) -> DirectoryImportRowPublic:
+    try:
+        row = await update_directory_import_match(
+            session,
+            batch_id,
+            row_id,
+            payload,
+            actor=current_user,
+        )
+        response = DirectoryImportRowPublic.model_validate(row)
+        await session.commit()
+        return response
+    except Exception as exc:
+        await session.rollback()
+        raise import_http_error(exc) from exc
+
+
+@router.post("/{batch_id}/validate-execution", response_model=DirectoryImportValidationPublic)
+async def post_directory_import_validate_execution(
+    batch_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_can_manage_directory)],
+) -> DirectoryImportValidationPublic:
+    try:
+        batch = await get_import_batch(session, batch_id, actor=current_user)
+        if batch.status != "reconciled":
+            raise DirectoryImportStateError("Import batch is not reconciled")
+        return await validate_directory_import_execution(session, batch)
+    except Exception as exc:
+        raise import_http_error(exc) from exc
+
+
+@router.post("/{batch_id}/execute", response_model=DirectoryImportExecutionResultPublic)
+async def post_directory_import_execute(
+    batch_id: UUID,
+    payload: DirectoryImportExecutionRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_can_manage_directory)],
+) -> DirectoryImportExecutionResultPublic:
+    try:
+        result = await execute_directory_import_batch(
+            session,
+            batch_id,
+            actor=current_user,
+            version=payload.version,
+            request=request,
+        )
+        await session.commit()
+        return result
+    except DirectoryImportValidationError as exc:
+        await session.rollback()
+        raise import_http_error(exc) from exc
+    except Exception as exc:
+        await session.rollback()
+        try:
+            await mark_directory_import_execution_failed(
+                session,
+                batch_id,
+                actor=current_user,
+                request=request,
+            )
+            await session.commit()
+        except Exception as persist_exc:
+            await session.rollback()
+            logger.error(
+                "Could not persist directory import failure state",
+                extra={
+                    "batch_id": str(batch_id),
+                    "error_type": type(persist_exc).__name__,
+                },
+            )
+        logger.error(
+            "Directory import execution failed and was rolled back",
+            extra={"batch_id": str(batch_id), "error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Directory import was rolled back",
+        ) from exc
+
+
+@router.get("/{batch_id}/result", response_model=DirectoryImportExecutionResultPublic)
+async def get_directory_import_result(
+    batch_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_can_manage_directory)],
+) -> DirectoryImportExecutionResultPublic:
+    try:
+        batch = await get_import_batch(session, batch_id, actor=current_user)
+        if batch.status not in {"completed", "failed"} or not batch.execution_summary:
+            raise DirectoryImportStateError("Import result is not available")
+        return DirectoryImportExecutionResultPublic.model_validate(batch.execution_summary)
+    except Exception as exc:
+        raise import_http_error(exc) from exc
+
+
 @router.delete("/{batch_id}", response_model=DirectoryImportBatchPublic)
 async def delete_directory_import(
     batch_id: UUID,
@@ -319,7 +518,12 @@ async def delete_directory_import(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryImportBatchPublic:
     try:
-        batch = await get_import_batch(session, batch_id, actor=current_user)
+        batch = await get_import_batch(
+            session,
+            batch_id,
+            actor=current_user,
+            for_update=True,
+        )
         await cancel_import_batch(session, batch)
         await record_audit_event(
             session,

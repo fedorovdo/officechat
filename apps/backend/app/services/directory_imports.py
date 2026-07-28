@@ -31,6 +31,16 @@ class DirectoryImportStateError(ValueError):
     pass
 
 
+IMMUTABLE_IMPORT_STATES = {"executing", "completed", "cancelled"}
+
+
+def require_mutable_import(batch: DirectoryImportBatch) -> None:
+    if batch.status in IMMUTABLE_IMPORT_STATES:
+        raise DirectoryImportStateError(
+            f"Import batches in {batch.status} state cannot be changed"
+        )
+
+
 def batch_visibility_condition(user: User):
     if user.role == "superadmin":
         return True
@@ -89,14 +99,19 @@ async def list_import_batches(
 
 
 async def get_import_batch(
-    session: AsyncSession, batch_id: UUID, *, actor: User
+    session: AsyncSession,
+    batch_id: UUID,
+    *,
+    actor: User,
+    for_update: bool = False,
 ) -> DirectoryImportBatch:
-    batch = await session.scalar(
-        select(DirectoryImportBatch).where(
+    statement = select(DirectoryImportBatch).where(
             DirectoryImportBatch.id == batch_id,
             batch_visibility_condition(actor),
         )
-    )
+    if for_update:
+        statement = statement.with_for_update()
+    batch = await session.scalar(statement)
     if batch is None:
         raise DirectoryImportNotFoundError("Directory import batch not found")
     return batch
@@ -107,6 +122,7 @@ async def list_import_rows(
     batch: DirectoryImportBatch,
     *,
     warnings_only: bool,
+    match_status: str | None = None,
     page: int,
     limit: int,
 ) -> tuple[list[DirectoryImportRow], int]:
@@ -115,6 +131,8 @@ async def list_import_rows(
         conditions.append(DirectoryImportRow.source_sheet == batch.selected_sheet)
     if warnings_only:
         conditions.append(func.jsonb_array_length(DirectoryImportRow.warnings) > 0)
+    if match_status is not None:
+        conditions.append(DirectoryImportRow.match_status == match_status)
     total = int(
         await session.scalar(select(func.count(DirectoryImportRow.id)).where(*conditions)) or 0
     )
@@ -133,8 +151,7 @@ async def update_import_batch(
     batch: DirectoryImportBatch,
     payload: DirectoryImportBatchUpdate,
 ) -> DirectoryImportBatch:
-    if batch.status == "cancelled":
-        raise DirectoryImportStateError("Cancelled import batches cannot be changed")
+    require_mutable_import(batch)
     fields = payload.model_fields_set
     if "selected_sheet" in fields:
         if payload.selected_sheet not in batch.available_sheets:
@@ -148,6 +165,7 @@ async def update_import_batch(
     if "column_mapping" in fields and payload.column_mapping is not None:
         batch.column_mapping = payload.column_mapping
     batch.status = "draft"
+    batch.version = getattr(batch, "version", 1) + 1
     await session.flush()
     await session.refresh(batch)
     return batch
@@ -159,8 +177,7 @@ async def update_import_row(
     row_id: UUID,
     payload: DirectoryImportRowUpdate,
 ) -> DirectoryImportRow:
-    if batch.status == "cancelled":
-        raise DirectoryImportStateError("Cancelled import batches cannot be changed")
+    require_mutable_import(batch)
     row = await session.scalar(
         select(DirectoryImportRow).where(
             DirectoryImportRow.id == row_id,
@@ -197,14 +214,15 @@ async def update_import_row(
     await session.flush()
     await session.refresh(row)
     await refresh_batch_counts(session, batch)
+    batch.status = "analyzed"
+    batch.version = getattr(batch, "version", 1) + 1
     return row
 
 
 async def reanalyze_import_batch(
     session: AsyncSession, batch: DirectoryImportBatch
 ) -> DirectoryImportBatch:
-    if batch.status == "cancelled":
-        raise DirectoryImportStateError("Cancelled import batches cannot be reanalyzed")
+    require_mutable_import(batch)
     rows = list(
         (
             await session.execute(
@@ -249,6 +267,7 @@ async def reanalyze_import_batch(
     batch.column_mapping = mapping
     batch.source_columns = source_columns
     batch.status = "analyzed"
+    batch.version = getattr(batch, "version", 1) + 1
     await _replace_rows(session, batch, candidates)
     return batch
 
@@ -258,6 +277,10 @@ async def cancel_import_batch(
 ) -> DirectoryImportBatch:
     if batch.status == "cancelled":
         return batch
+    if batch.status in {"executing", "completed"}:
+        raise DirectoryImportStateError(
+            f"Import batches in {batch.status} state cannot be cancelled"
+        )
     batch.status = "cancelled"
     await session.execute(
         delete(DirectoryImportRow).where(DirectoryImportRow.batch_id == batch.id)

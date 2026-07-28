@@ -288,10 +288,11 @@ Important auth environment variables:
 - `DIRECTORY_IMPORT_MAX_CELLS`, `DIRECTORY_IMPORT_MAX_CELL_LENGTH` - parsed data limits.
 - `DIRECTORY_IMPORT_MAX_ZIP_MEMBERS`, `DIRECTORY_IMPORT_MAX_UNCOMPRESSED_MB` - XLSX archive safety limits.
 
-Directory managers can open an XLSX/CSV import preview from the corporate
-directory. This first stage stores isolated import batches and editable preview
-rows only; it does not create or update directory entries. See
-[`docs/DIRECTORY_IMPORT_RU.md`](docs/DIRECTORY_IMPORT_RU.md).
+Directory managers can import XLSX/CSV through an isolated preview,
+deterministic duplicate reconciliation, explicit field-level create/update/skip
+choices, dry validation and one atomic transaction. Empty imported values never
+overwrite existing data, stale matches block execution, and completed batches
+discard raw preview PII. See [docs/DIRECTORY_IMPORT_RU.md](docs/DIRECTORY_IMPORT_RU.md).
 
 ## Useful Docker Compose Commands
 

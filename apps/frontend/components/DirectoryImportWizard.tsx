@@ -5,23 +5,35 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ApiResponseError,
   cancelDirectoryImport,
+  executeDirectoryImport,
+  getDirectoryEntry,
+  getDirectoryImportReconciliation,
+  getDirectoryImportResult,
   getDirectoryImportRows,
   getDirectoryImports,
   getStoredAccessToken,
+  reconcileDirectoryImport,
   reanalyzeDirectoryImport,
   updateDirectoryImport,
+  updateDirectoryImportMatch,
   updateDirectoryImportRow,
   uploadDirectoryImport,
+  validateDirectoryImport,
   type DirectoryImportBatch,
+  type DirectoryImportExecutionResult,
   type DirectoryImportKind,
+  type DirectoryImportMatchStatus,
   type DirectoryImportParserMode,
-  type DirectoryImportRow
+  type DirectoryImportRow,
+  type DirectoryImportValidation,
+  type OfficeChatDirectoryEntry
 } from "../lib/api";
 import type { Dictionary } from "../lib/i18n";
 
 type Props = {
   dictionary: Dictionary;
   onClose: () => void;
+  onImported?: () => void;
 };
 
 const importFields = [
@@ -54,7 +66,14 @@ function editableRowSnapshot(row: DirectoryImportRow | null) {
   });
 }
 
-export function DirectoryImportWizard({ dictionary, onClose }: Props) {
+function hasImportedValue(value: unknown) {
+  return value !== null && value !== undefined &&
+    (typeof value !== "string" || value.trim().length > 0);
+}
+
+type WizardView = "preview" | "reconciliation" | "confirmation" | "result";
+
+export function DirectoryImportWizard({ dictionary, onClose, onImported }: Props) {
   const t = dictionary.directoryImport;
   const [file, setFile] = useState<File | null>(null);
   const [parserMode, setParserMode] = useState<DirectoryImportParserMode>("auto");
@@ -70,7 +89,15 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
   const [editorError, setEditorError] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [view, setView] = useState<WizardView>("preview");
+  const [validation, setValidation] = useState<DirectoryImportValidation | null>(null);
+  const [executionResult, setExecutionResult] = useState<DirectoryImportExecutionResult | null>(null);
+  const [executionConfirmed, setExecutionConfirmed] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [matchFilter, setMatchFilter] = useState<DirectoryImportMatchStatus | "all">("all");
+  const [comparisonEntry, setComparisonEntry] = useState<OfficeChatDirectoryEntry | null>(null);
   const uploadBusyRef = useRef(false);
+  const executeBusyRef = useRef(false);
   const loadGenerationRef = useRef(0);
   const mountedRef = useRef(true);
   const editorRef = useRef<HTMLElement | null>(null);
@@ -78,8 +105,15 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
   const editingRowRef = useRef<DirectoryImportRow | null>(null);
   const rowsRef = useRef<DirectoryImportRow[]>([]);
   const closeEditorRef = useRef<() => void>(() => undefined);
+  const comparisonEntryIdRef = useRef<string | null>(null);
 
-  const step = batch ? (rows.length || batch.detected_rows === 0 ? 3 : 2) : 1;
+  const step = executionResult || view === "result"
+    ? 5
+    : view === "reconciliation" || view === "confirmation"
+      ? 4
+      : batch
+        ? (rows.length || batch.detected_rows === 0 ? 3 : 2)
+        : 1;
   const mappingTargets = useMemo(
     () => [
       ["", t.mapping.skipColumn],
@@ -99,6 +133,24 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     editorTriggerRef.current = trigger;
     setEditorError("");
     setEditingRow({ ...row, normalized_data: { ...row.normalized_data } });
+    setComparisonEntry(null);
+    if (view === "reconciliation" && row.matched_entry_id) {
+      void loadComparisonEntry(row.matched_entry_id);
+    }
+  }
+
+  async function loadComparisonEntry(entryId: string) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    comparisonEntryIdRef.current = entryId;
+    try {
+      const entry = await getDirectoryEntry(token, entryId);
+      if (comparisonEntryIdRef.current === entry.id) {
+        setComparisonEntry(entry);
+      }
+    } catch {
+      setComparisonEntry(null);
+    }
   }
 
   function closeRowEditor() {
@@ -116,6 +168,8 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     }
     setEditorError("");
     setEditingRow(null);
+    setComparisonEntry(null);
+    comparisonEntryIdRef.current = null;
   }
   closeEditorRef.current = closeRowEditor;
 
@@ -136,6 +190,16 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
       loadGenerationRef.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isExecuting) return;
+    function preventAccidentalExit(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", preventAccidentalExit);
+    return () => window.removeEventListener("beforeunload", preventAccidentalExit);
+  }, [isExecuting]);
 
   useEffect(() => {
     if (!editingRow) return;
@@ -299,7 +363,11 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     setIsBusy(true);
     setError("");
     try {
-      await loadRows(batch, warningsOnly, nextPage);
+      if (view === "reconciliation") {
+        await loadReconciliationRows(batch, nextPage, matchFilter);
+      } else {
+        await loadRows(batch, warningsOnly, nextPage);
+      }
     } catch {
       setError(t.errors.rows);
     } finally {
@@ -343,6 +411,154 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     }
   }
 
+  async function loadReconciliationRows(
+    nextBatch: DirectoryImportBatch,
+    nextPage = 1,
+    filter: DirectoryImportMatchStatus | "all" = matchFilter
+  ) {
+    const token = getStoredAccessToken();
+    if (!token) return;
+    const generation = ++loadGenerationRef.current;
+    const result = await getDirectoryImportReconciliation(
+      token,
+      nextBatch.id,
+      nextPage,
+      previewPageSize,
+      filter
+    );
+    if (!mountedRef.current || generation !== loadGenerationRef.current) return;
+    setRows(result.items);
+    setRowPage(result.page);
+    setRowTotal(result.total);
+  }
+
+  async function startReconciliation() {
+    if (!batch || isBusy) return;
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setIsBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const reconciled = await reconcileDirectoryImport(token, batch.id);
+      setBatch(reconciled);
+      setMatchFilter("all");
+      await loadReconciliationRows(reconciled, 1, "all");
+      const checked = await validateDirectoryImport(token, reconciled.id);
+      setView("reconciliation");
+      setValidation(checked);
+      setExecutionConfirmed(false);
+    } catch {
+      setError(t.errors.reconcile);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function saveMatch(
+    row: DirectoryImportRow,
+    payload: {
+      proposed_action: "create" | "update" | "skip";
+      matched_entry_id?: string | null;
+      update_fields?: string[];
+      restore_if_archived?: boolean;
+    }
+  ) {
+    if (!batch || isBusy) return false;
+    const token = getStoredAccessToken();
+    if (!token) return false;
+    setIsBusy(true);
+    setError("");
+    try {
+      const updated = await updateDirectoryImportMatch(token, batch.id, row.id, {
+        ...payload,
+        version: batch.version
+      });
+      setRows((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setEditingRow((current) => current?.id === updated.id ? updated : current);
+      setValidation(await validateDirectoryImport(token, batch.id));
+      return true;
+    } catch {
+      setError(t.errors.match);
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function openConfirmation() {
+    if (!batch || isBusy) return;
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setIsBusy(true);
+    setError("");
+    try {
+      const checked = await validateDirectoryImport(token, batch.id);
+      setValidation(checked);
+      setExecutionConfirmed(false);
+      setView("confirmation");
+    } catch {
+      setError(t.errors.validate);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function executeImport() {
+    if (
+      !batch ||
+      !validation?.can_execute ||
+      !executionConfirmed ||
+      isBusy ||
+      executeBusyRef.current
+    ) return;
+    const token = getStoredAccessToken();
+    if (!token) return;
+    executeBusyRef.current = true;
+    setIsExecuting(true);
+    setIsBusy(true);
+    setError("");
+    try {
+      const result = await executeDirectoryImport(token, batch.id, batch.version);
+      setExecutionResult(result);
+      setBatch((current) => current ? { ...current, status: result.status } : current);
+      setRows([]);
+      setView("result");
+      onImported?.();
+    } catch (executionError) {
+      if (
+        executionError instanceof ApiResponseError &&
+        executionError.status === 409 &&
+        ["stale_match", "stale_batch", "blocking_conflicts"].includes(executionError.message)
+      ) {
+        setExecutionConfirmed(false);
+        setView("reconciliation");
+        setError(
+          executionError.message === "stale_match" || executionError.message === "stale_batch"
+            ? t.errors.stale
+            : t.errors.validate
+        );
+        return;
+      }
+      try {
+        const result = await getDirectoryImportResult(token, batch.id);
+        setExecutionResult(result);
+        setBatch((current) => current ? { ...current, status: result.status } : current);
+        if (result.status === "completed") {
+          setRows([]);
+          onImported?.();
+        }
+        setView("result");
+      } catch {
+        setError(t.errors.execute);
+      }
+    } finally {
+      executeBusyRef.current = false;
+      setIsExecuting(false);
+      setIsBusy(false);
+    }
+  }
+
   async function cancelBatch() {
     if (!batch || !window.confirm(t.cancelConfirm)) return;
     const token = getStoredAccessToken();
@@ -364,9 +580,68 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     }
   }
 
+  async function openRecentBatch(item: DirectoryImportBatch) {
+    const token = getStoredAccessToken();
+    if (!token || isBusy) return;
+    loadGenerationRef.current += 1;
+    setBatch(item);
+    setRows([]);
+    setHasManualRowEdits(false);
+    setRowPage(1);
+    setRowTotal(0);
+    setExecutionResult(null);
+    setIsBusy(true);
+    try {
+      if (item.status === "completed" || item.status === "failed") {
+        setExecutionResult(await getDirectoryImportResult(token, item.id));
+        setView("result");
+      } else if (item.status === "reconciled") {
+        setMatchFilter("all");
+        await loadReconciliationRows(item, 1, "all");
+        setValidation(await validateDirectoryImport(token, item.id));
+        setView("reconciliation");
+      } else {
+        setView("preview");
+      }
+    } catch {
+      setError(t.errors.rows);
+      setView("preview");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function saveEditingRow(event: FormEvent) {
     event.preventDefault();
     if (!editingRow || isBusy) return;
+    if (view === "reconciliation") {
+      if (editingRow.proposed_action === "update" && !editingRow.matched_entry_id) {
+        setEditorError(t.errors.candidateRequired);
+        return;
+      }
+      if (
+        editingRow.proposed_action === "update" &&
+        !editingRow.update_fields.length &&
+        !editingRow.restore_if_archived
+      ) {
+        setEditorError(t.errors.updateFieldRequired);
+        return;
+      }
+      const saved = await saveMatch(editingRow, {
+        proposed_action: editingRow.proposed_action,
+        matched_entry_id: editingRow.proposed_action === "update"
+          ? editingRow.matched_entry_id
+          : null,
+        update_fields: editingRow.proposed_action === "update"
+          ? editingRow.update_fields
+          : [],
+        restore_if_archived: editingRow.proposed_action === "update"
+          ? editingRow.restore_if_archived
+          : false
+      });
+      if (saved) setEditingRow(null);
+      return;
+    }
     if (
       editingRow.proposed_action === "create" &&
       !editingRow.normalized_data.display_name?.trim()
@@ -379,7 +654,9 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     const saved = await patchRow(originalRow, {
       detected_kind: editingRow.detected_kind,
       normalized_data: editingRow.normalized_data,
-      proposed_action: editingRow.proposed_action,
+      proposed_action: editingRow.proposed_action === "update"
+        ? "skip"
+        : editingRow.proposed_action,
       is_selected: editingRow.is_selected
     });
     if (saved) setEditingRow(null);
@@ -439,9 +716,32 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     );
   }
 
+  function matchLabel(status: DirectoryImportMatchStatus | null) {
+    return status ? t.matchStatuses[status] : t.notAvailable;
+  }
+
+  function matchReasonLabel(code: string) {
+    return t.matchReasons[code as keyof typeof t.matchReasons] ?? code;
+  }
+
+  async function changeMatchFilter(filter: DirectoryImportMatchStatus | "all") {
+    if (!batch || isBusy) return;
+    setMatchFilter(filter);
+    setIsBusy(true);
+    setError("");
+    try {
+      await loadReconciliationRows(batch, 1, filter);
+    } catch {
+      setError(t.errors.rows);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   const editingRowHasBlockingWarning = editingRow?.warnings.some(
     (warning) => warning.severity === "blocking"
   ) ?? false;
+  const reconciliationRows = rows;
 
   return (
     <div className="directory-import-backdrop" role="presentation">
@@ -463,7 +763,13 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
         </header>
 
         <ol aria-label={t.stepsLabel} className="directory-import-steps">
-          {[t.steps.upload, t.steps.mapping, t.steps.preview].map((label, index) => (
+          {[
+            t.steps.upload,
+            t.steps.mapping,
+            t.steps.preview,
+            t.steps.reconciliation,
+            t.steps.result
+          ].map((label, index) => (
             <li className={step === index + 1 ? "is-current" : ""} key={label}>
               <span>{index + 1}</span>{label}
             </li>
@@ -520,14 +826,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                     className="table-action"
                     disabled={isBusy}
                     key={item.id}
-                    onClick={() => {
-                      loadGenerationRef.current += 1;
-                      setBatch(item);
-                      setRows([]);
-                      setHasManualRowEdits(false);
-                      setRowPage(1);
-                      setRowTotal(0);
-                    }}
+                    onClick={() => void openRecentBatch(item)}
                     type="button"
                   >
                     {item.original_filename} · {item.detected_rows}
@@ -538,7 +837,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
           </form>
         ) : null}
 
-        {batch && rows.length === 0 ? (
+        {batch && rows.length === 0 && view === "preview" && !executionResult ? (
           <div className="directory-import-mapping">
             <div className="directory-import-summary">
               <strong>{batch.original_filename}</strong>
@@ -635,7 +934,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
           </div>
         ) : null}
 
-        {batch && rows.length > 0 ? (
+        {batch && rows.length > 0 && view === "preview" ? (
           <div className="directory-import-preview">
             <div className="directory-import-preview-toolbar">
               <div className="directory-import-preview-summary">
@@ -806,6 +1105,205 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
 
             <div className="actions">
               <button className="secondary-link" disabled={isBusy} onClick={() => setRows([])} type="button">{t.backToMapping}</button>
+              <button className="primary-button" disabled={isBusy} onClick={() => void startReconciliation()} type="button">
+                {isBusy ? t.reconciling : t.startReconciliation}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {batch && view === "reconciliation" ? (
+          <div className="directory-import-preview directory-import-reconciliation">
+            <div className="directory-import-preview-toolbar">
+              <div className="directory-import-preview-summary">
+                <strong>{t.reconciliation.title}</strong>
+                <small>{t.reconciliation.description}</small>
+              </div>
+              <button
+                className="secondary-link"
+                disabled={isBusy}
+                onClick={() => void startReconciliation()}
+                type="button"
+              >
+                {isBusy ? t.reconciling : t.reconciliation.refresh}
+              </button>
+            </div>
+            {validation ? (
+              <div className="directory-import-reconciliation-summary">
+                <span>{t.reconciliation.create}: <strong>{validation.create_count}</strong></span>
+                <span>{t.reconciliation.update}: <strong>{validation.update_count}</strong></span>
+                <span>{t.reconciliation.restore}: <strong>{validation.restore_count}</strong></span>
+                <span>{t.reconciliation.skip}: <strong>{validation.skip_count}</strong></span>
+                <span className={validation.blocking_count ? "has-blocking" : ""}>
+                  {t.reconciliation.blocking}: <strong>{validation.blocking_count}</strong>
+                </span>
+              </div>
+            ) : null}
+            <div className="directory-import-match-filters" aria-label={t.reconciliation.filters}>
+              {(["all", "unmatched", "exact", "probable", "ambiguous", "archived_match", "batch_duplicate"] as const).map((filter) => (
+                <button
+                  aria-pressed={matchFilter === filter}
+                  className={matchFilter === filter ? "table-action is-active" : "table-action"}
+                  disabled={isBusy}
+                  key={filter}
+                  onClick={() => void changeMatchFilter(filter)}
+                  type="button"
+                >
+                  {filter === "all" ? t.reconciliation.all : matchLabel(filter)}
+                </button>
+              ))}
+            </div>
+            <div className="directory-import-table-wrap">
+              <table className="directory-import-table directory-import-reconciliation-table">
+                <thead>
+                  <tr>
+                    <th>{t.preview.source}</th>
+                    <th>{t.preview.contact}</th>
+                    <th>{t.reconciliation.match}</th>
+                    <th>{t.reconciliation.reasons}</th>
+                    <th>{t.preview.action}</th>
+                    <th>{t.preview.details}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconciliationRows.map((row) => (
+                    <tr className={row.match_status === "ambiguous" || row.match_status === "batch_duplicate" ? "directory-import-row-blocking" : undefined} key={row.id}>
+                      <td>{row.source_sheet} · {rowRange(row)}</td>
+                      <td>{renderContact(row)}</td>
+                      <td>
+                        <span className={`import-match import-match-${row.match_status ?? "none"}`}>
+                          {matchLabel(row.match_status)}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="directory-import-match-reasons">
+                          {row.match_reasons.slice(0, 3).map((reason, index) => (
+                            <span key={`${reason.code}-${index}`}>{matchReasonLabel(reason.code)}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>{t.actions[row.proposed_action]}</td>
+                      <td>
+                        <button
+                          className="table-action"
+                          disabled={isBusy}
+                          onClick={(event) => openRowEditor(row, event.currentTarget)}
+                          type="button"
+                        >
+                          {t.reconciliation.compare}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="directory-import-cards">
+              {reconciliationRows.map((row) => (
+                <article className="directory-import-card" key={row.id}>
+                  <header>
+                    <span>{row.source_sheet} · {rowRange(row)}</span>
+                    <span className={`import-match import-match-${row.match_status ?? "none"}`}>
+                      {matchLabel(row.match_status)}
+                    </span>
+                  </header>
+                  {renderContact(row)}
+                  <div className="directory-import-match-reasons">
+                    {row.match_reasons.slice(0, 3).map((reason, index) => (
+                      <span key={`${reason.code}-${index}`}>{matchReasonLabel(reason.code)}</span>
+                    ))}
+                  </div>
+                  <div className="directory-import-card-footer">
+                    <span className="directory-import-action">{t.actions[row.proposed_action]}</span>
+                    <button
+                      className="table-action"
+                      disabled={isBusy}
+                      onClick={(event) => openRowEditor(row, event.currentTarget)}
+                      type="button"
+                    >
+                      {t.reconciliation.compare}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            {!reconciliationRows.length ? <p className="empty-state">{t.reconciliation.empty}</p> : null}
+            {rowTotal > previewPageSize ? (
+              <div className="directory-pagination">
+                <span>
+                  {t.page
+                    .replace("{page}", String(rowPage))
+                    .replace("{pages}", String(Math.ceil(rowTotal / previewPageSize)))
+                    .replace("{total}", String(rowTotal))}
+                </span>
+                <div>
+                  <button className="secondary-link" disabled={isBusy || rowPage <= 1} onClick={() => void changeRowPage(rowPage - 1)} type="button">{t.previous}</button>
+                  <button className="secondary-link" disabled={isBusy || rowPage >= Math.ceil(rowTotal / previewPageSize)} onClick={() => void changeRowPage(rowPage + 1)} type="button">{t.next}</button>
+                </div>
+              </div>
+            ) : null}
+            <div className="actions">
+              <button className="secondary-link" disabled={isBusy} onClick={() => { setView("preview"); setRows([]); }} type="button">{t.backToMapping}</button>
+              <button className="primary-button" disabled={isBusy} onClick={() => void openConfirmation()} type="button">{t.reconciliation.continue}</button>
+            </div>
+          </div>
+        ) : null}
+
+        {batch && view === "confirmation" && validation ? (
+          <div className="directory-import-confirmation">
+            <h4>{t.confirmation.title}</h4>
+            <p>{t.confirmation.warning}</p>
+            <dl className="directory-import-result-grid">
+              <div><dt>{t.confirmation.create}</dt><dd>{validation.create_count}</dd></div>
+              <div><dt>{t.confirmation.update}</dt><dd>{validation.update_count}</dd></div>
+              <div><dt>{t.confirmation.restore}</dt><dd>{validation.restore_count}</dd></div>
+              <div><dt>{t.confirmation.skip}</dt><dd>{validation.skip_count}</dd></div>
+            </dl>
+            {validation.blocking_count ? (
+              <p className="form-error">
+                {t.confirmation.blocked.replace("{count}", String(validation.blocking_count))}
+              </p>
+            ) : null}
+            <label className="checkbox-label directory-import-execute-confirm">
+              <input
+                checked={executionConfirmed}
+                disabled={isBusy || !validation.can_execute}
+                onChange={(event) => setExecutionConfirmed(event.target.checked)}
+                type="checkbox"
+              />
+              {t.confirmation.checkbox}
+            </label>
+            <div className="actions">
+              <button className="secondary-link" disabled={isBusy} onClick={() => setView("reconciliation")} type="button">{t.confirmation.back}</button>
+              <button className="primary-button" disabled={isBusy || !validation.can_execute || !executionConfirmed} onClick={() => void executeImport()} type="button">
+                {isBusy ? t.confirmation.executing : t.confirmation.execute}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {executionResult && view === "result" ? (
+          <div className="directory-import-result">
+            <h4>{executionResult.status === "completed" ? t.result.success : t.result.failed}</h4>
+            <p>{executionResult.status === "completed" ? t.result.successDescription : t.result.rollbackDescription}</p>
+            <dl className="directory-import-result-grid">
+              <div><dt>{t.result.created}</dt><dd>{executionResult.created}</dd></div>
+              <div><dt>{t.result.updated}</dt><dd>{executionResult.updated}</dd></div>
+              <div><dt>{t.result.restored}</dt><dd>{executionResult.restored}</dd></div>
+              <div><dt>{t.result.skipped}</dt><dd>{executionResult.skipped}</dd></div>
+              <div><dt>{t.result.errors}</dt><dd>{executionResult.errors}</dd></div>
+              <div>
+                <dt>{t.result.duration}</dt>
+                <dd>{t.result.durationValue.replace("{value}", String(executionResult.duration_ms))}</dd>
+              </div>
+            </dl>
+            {executionResult.error_code ? <p className="form-error">{t.result.errorCode.replace("{code}", executionResult.error_code)}</p> : null}
+            <div className="actions">
+              {executionResult.status === "failed" ? (
+                <button className="secondary-link" onClick={() => setView("reconciliation")} type="button">{t.result.back}</button>
+              ) : null}
+              <button className="primary-button" onClick={onClose} type="button">{t.result.openDirectory}</button>
+              <button className="secondary-link" onClick={onClose} type="button">{t.close}</button>
             </div>
           </div>
         ) : null}
@@ -857,7 +1355,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                     <select
                       className="field-input"
                       data-editor-initial-focus
-                      disabled={isBusy}
+                      disabled={isBusy || view === "reconciliation"}
                       onChange={(event) => setEditingRow((current) => current && {
                         ...current,
                         detected_kind: event.target.value as DirectoryImportKind
@@ -876,17 +1374,27 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                       disabled={isBusy}
                       onChange={(event) => setEditingRow((current) => current && {
                         ...current,
-                        proposed_action: event.target.value as "create" | "skip",
-                        is_selected: event.target.value === "skip" ? false : current.is_selected
+                        proposed_action: event.target.value as "create" | "update" | "skip",
+                        is_selected: event.target.value !== "skip",
+                        matched_entry_id: event.target.value === "update"
+                          ? current.matched_entry_id ?? current.match_candidates[0]?.id ?? null
+                          : null,
+                        update_fields: event.target.value === "update"
+                          ? current.update_fields
+                          : [],
+                        restore_if_archived: event.target.value === "update"
+                          ? current.restore_if_archived
+                          : false
                       })}
                       value={editingRow.proposed_action}
                     >
                       <option value="create">{t.actions.create}</option>
+                      {view === "reconciliation" ? <option value="update">{t.actions.update}</option> : null}
                       <option value="skip">{t.actions.skip}</option>
                     </select>
                   </label>
                 </div>
-                <label className="checkbox-label directory-import-editor-selection">
+                {view !== "reconciliation" ? <label className="checkbox-label directory-import-editor-selection">
                   <input
                     checked={editingRow.is_selected}
                     disabled={isBusy || editingRowHasBlockingWarning}
@@ -898,8 +1406,103 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                     type="checkbox"
                   />
                   {t.includeRow}
-                </label>
-                <div className="directory-import-edit-grid">
+                </label> : null}
+                {view === "reconciliation" ? (
+                  <section className="directory-import-match-editor">
+                    <h5>{t.reconciliation.candidates}</h5>
+                    {editingRow.match_candidates.length ? (
+                      <div className="directory-import-candidates">
+                        {editingRow.match_candidates.map((candidate) => (
+                          <label className="directory-import-candidate" key={candidate.id}>
+                            <input
+                              checked={editingRow.matched_entry_id === candidate.id}
+                              disabled={isBusy || editingRow.proposed_action !== "update"}
+                              name="directory-import-candidate"
+                              onChange={() => {
+                                setEditorError("");
+                                setEditingRow((current) => current && {
+                                  ...current,
+                                  matched_entry_id: candidate.id,
+                                  expected_entry_updated_at: candidate.updated_at,
+                                  restore_if_archived: !candidate.is_active
+                                });
+                                void loadComparisonEntry(candidate.id);
+                              }}
+                              type="radio"
+                            />
+                            <span>
+                              <strong>{candidate.display_name}</strong>
+                              <small>{[candidate.department, candidate.position, candidate.email].filter(Boolean).join(" · ")}</small>
+                              <small>{candidate.is_active ? t.reconciliation.active : t.reconciliation.archived} · {Math.round(candidate.score)}%</small>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : <p className="muted">{t.reconciliation.noCandidates}</p>}
+                    {editingRow.proposed_action === "update" && editingRow.matched_entry_id ? (
+                      <div className="directory-import-comparison">
+                        <div className="directory-import-comparison-head">
+                          <strong>{t.reconciliation.existing}</strong>
+                          <strong>{t.reconciliation.imported}</strong>
+                        </div>
+                        {importFields.map((field) => {
+                          const candidate = editingRow.match_candidates.find((item) => item.id === editingRow.matched_entry_id);
+                          const imported = editingRow.normalized_data[field];
+                          const existingSource = comparisonEntry?.id === editingRow.matched_entry_id
+                            ? comparisonEntry
+                            : candidate;
+                          const existing = existingSource
+                            ? (existingSource as unknown as Record<string, unknown>)[field]
+                            : null;
+                          if (!hasImportedValue(imported)) return null;
+                          return (
+                            <label className="directory-import-comparison-row" key={field}>
+                              <span>
+                                <small>{dictionary.directory.fields[fieldLabelKey(field)]}</small>
+                                {String(existing ?? t.empty)}
+                              </span>
+                              <span>
+                                <input
+                                  aria-label={t.reconciliation.applyField.replace("{field}", dictionary.directory.fields[fieldLabelKey(field)])}
+                                  checked={editingRow.update_fields.includes(field)}
+                                  disabled={isBusy}
+                                  onChange={(event) => setEditingRow((current) => current && {
+                                    ...current,
+                                    update_fields: event.target.checked
+                                      ? [...new Set([...current.update_fields, field])]
+                                      : current.update_fields.filter((item) => item !== field)
+                                  })}
+                                  type="checkbox"
+                                />
+                                {String(imported)}
+                              </span>
+                            </label>
+                          );
+                        })}
+                        {editingRow.match_candidates.find((item) => item.id === editingRow.matched_entry_id)?.is_active === false ? (
+                          <label className="checkbox-label">
+                            <input
+                              checked={editingRow.restore_if_archived}
+                              disabled={isBusy}
+                              onChange={(event) => setEditingRow((current) => current && ({
+                                ...current,
+                                restore_if_archived: event.target.checked
+                              }))}
+                              type="checkbox"
+                            />
+                            {t.reconciliation.restoreArchived}
+                          </label>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="directory-import-match-reasons">
+                      {editingRow.match_reasons.map((reason, index) => (
+                        <span key={`${reason.code}-${index}`}>{matchReasonLabel(reason.code)}</span>
+                      ))}
+                    </div>
+                    {editorError ? <p className="form-error">{editorError}</p> : null}
+                  </section>
+                ) : <div className="directory-import-edit-grid">
                   {importFields.map((field) => (
                     <label className="field" key={field}>
                       <span className="field-label">{dictionary.directory.fields[fieldLabelKey(field)]}</span>
@@ -924,7 +1527,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                       ) : null}
                     </label>
                   ))}
-                </div>
+                </div>}
                 <section className="directory-import-warning-details">
                   <h5>{t.preview.warnings}</h5>
                   {editingRow.warnings.length ? (
@@ -946,7 +1549,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                 </details>
                 <div className="directory-import-editor-actions">
                   <button className="primary-button" disabled={isBusy} type="submit">
-                    {t.saveRow}
+                    {view === "reconciliation" ? t.reconciliation.save : t.saveRow}
                   </button>
                   <button className="secondary-link" disabled={isBusy} onClick={closeRowEditor} type="button">
                     {t.close}

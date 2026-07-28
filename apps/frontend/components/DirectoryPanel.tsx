@@ -566,6 +566,11 @@ export function DirectoryPanel({
         <DirectoryImportWizard
           dictionary={dictionary}
           onClose={() => setIsImportOpen(false)}
+          onImported={() => {
+            setPage(1);
+            void loadEntries();
+            void loadDepartments();
+          }}
         />
       ) : null}
     </div>

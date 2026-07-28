@@ -146,7 +146,12 @@ async def patch_directory_entry(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryEntryPublic:
     try:
-        entry = await get_directory_entry(session, entry_id, include_inactive=True)
+        entry = await get_directory_entry(
+            session,
+            entry_id,
+            include_inactive=True,
+            for_update=True,
+        )
         updated, changed_fields = await update_directory_entry(session, entry, payload, current_user)
         if changed_fields:
             audit_details: dict[str, object] = {"changed_fields": changed_fields}
@@ -183,7 +188,12 @@ async def post_directory_entry_archive(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryEntryPublic:
     try:
-        entry = await get_directory_entry(session, entry_id, include_inactive=True)
+        entry = await get_directory_entry(
+            session,
+            entry_id,
+            include_inactive=True,
+            for_update=True,
+        )
         archived = await set_directory_entry_active(session, entry, current_user, is_active=False)
         await record_audit_event(
             session,
@@ -214,7 +224,12 @@ async def post_directory_entry_restore(
     current_user: Annotated[User, Depends(require_can_manage_directory)],
 ) -> DirectoryEntryPublic:
     try:
-        entry = await get_directory_entry(session, entry_id, include_inactive=True)
+        entry = await get_directory_entry(
+            session,
+            entry_id,
+            include_inactive=True,
+            for_update=True,
+        )
         restored = await set_directory_entry_active(session, entry, current_user, is_active=True)
         await record_audit_event(
             session,

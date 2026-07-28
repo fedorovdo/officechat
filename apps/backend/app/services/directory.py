@@ -1,4 +1,5 @@
 import re
+import unicodedata
 import uuid
 from collections.abc import Sequence
 from uuid import UUID
@@ -50,8 +51,38 @@ class DirectoryStateConflictError(ValueError):
     pass
 
 
-def normalize_phone_search(value: str) -> str:
+def normalize_phone_digits(value: str | None) -> str:
+    if not value:
+        return ""
     return re.sub(r"\D", "", value)
+
+
+def normalize_email(value: str | None) -> str:
+    return value.strip().casefold() if value else ""
+
+
+def canonical_text(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFKC", value).casefold().strip()
+    normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+    return " ".join(normalized.split())
+
+
+def normalize_display_name(value: str | None) -> str:
+    return canonical_text(value)
+
+
+def normalize_department(value: str | None) -> str:
+    return canonical_text(value)
+
+
+def normalize_position(value: str | None) -> str:
+    return canonical_text(value)
+
+
+def normalize_phone_search(value: str) -> str:
+    return normalize_phone_digits(value)
 
 
 def escape_like_search(value: str) -> str:
@@ -133,6 +164,7 @@ async def get_directory_entry(
     entry_id: UUID,
     *,
     include_inactive: bool,
+    for_update: bool = False,
 ) -> DirectoryEntry:
     statement = (
         select(DirectoryEntry)
@@ -141,6 +173,8 @@ async def get_directory_entry(
     )
     if not include_inactive:
         statement = statement.where(DirectoryEntry.is_active.is_(True))
+    if for_update:
+        statement = statement.with_for_update()
     result = await session.execute(statement)
     entry = result.scalar_one_or_none()
     if entry is None:

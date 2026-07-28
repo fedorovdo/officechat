@@ -106,7 +106,14 @@ export type DirectoryImportKind =
   | "department_contact"
   | "organization_metadata"
   | "unknown";
-export type DirectoryImportAction = "create" | "skip";
+export type DirectoryImportAction = "create" | "update" | "skip";
+export type DirectoryImportMatchStatus =
+  | "unmatched"
+  | "exact"
+  | "probable"
+  | "ambiguous"
+  | "batch_duplicate"
+  | "archived_match";
 
 export type DirectoryImportBatch = {
   id: string;
@@ -118,11 +125,26 @@ export type DirectoryImportBatch = {
   parser_mode: DirectoryImportParserMode;
   column_mapping: Record<string, string>;
   source_columns: Array<{ index: number; label: string; samples: string[] }>;
-  status: "draft" | "analyzed" | "cancelled";
+  status:
+    | "draft"
+    | "analyzed"
+    | "reconciled"
+    | "executing"
+    | "completed"
+    | "failed"
+    | "cancelled";
   total_source_rows: number;
   detected_rows: number;
   selected_rows: number;
   warning_rows: number;
+  reconciliation_started_at: string | null;
+  reconciled_at: string | null;
+  execution_started_at: string | null;
+  executed_at: string | null;
+  execution_summary: DirectoryImportExecutionResult | null;
+  execution_error: string | null;
+  directory_snapshot_at: string | null;
+  version: number;
   created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
@@ -154,9 +176,63 @@ export type DirectoryImportRow = {
   warnings: Array<{ code: string; severity: "info" | "warning" | "blocking"; [key: string]: unknown }>;
   is_selected: boolean;
   proposed_action: DirectoryImportAction;
+  match_status: DirectoryImportMatchStatus | null;
+  matched_entry_id: string | null;
+  match_score: number | null;
+  match_reasons: Array<{ code: string; weight: number; [key: string]: unknown }>;
+  match_candidates: DirectoryImportCandidate[];
+  update_fields: string[];
+  restore_if_archived: boolean;
+  expected_entry_updated_at: string | null;
+  execution_status: "pending" | "created" | "updated" | "restored" | "skipped" | "failed";
+  result_entry_id: string | null;
+  execution_error: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
+};
+
+export type DirectoryImportCandidate = {
+  id: string;
+  display_name: string;
+  department: string | null;
+  position: string | null;
+  internal_phone: string | null;
+  work_phone: string | null;
+  mobile_phone: string | null;
+  email: string | null;
+  room: string | null;
+  location: string | null;
+  is_active: boolean;
+  updated_at: string;
+  score: number;
+  reasons: Array<{ code: string; weight: number }>;
+};
+
+export type DirectoryImportValidation = {
+  create_count: number;
+  update_count: number;
+  restore_count: number;
+  skip_count: number;
+  blocking_count: number;
+  stale_count: number;
+  invalid_count: number;
+  duplicate_count: number;
+  can_execute: boolean;
+  blocking_reasons: Array<{ row_id: string; code: string }>;
+};
+
+export type DirectoryImportExecutionResult = {
+  batch_id: string;
+  status: "completed" | "failed";
+  created: number;
+  updated: number;
+  restored: number;
+  skipped: number;
+  errors: number;
+  duration_ms: number;
+  result_entry_ids: string[];
+  error_code: string | null;
 };
 
 export type DirectoryImportBatchPage = {
@@ -1540,7 +1616,7 @@ export function updateDirectoryImportRow(
     detected_kind?: DirectoryImportKind;
     normalized_data?: Record<string, string | null>;
     is_selected?: boolean;
-    proposed_action?: DirectoryImportAction;
+    proposed_action?: "create" | "skip";
   }
 ) {
   return apiFetch<DirectoryImportRow>(`/api/directory/imports/${batchId}/rows/${rowId}`, token, {
@@ -1559,6 +1635,73 @@ export function cancelDirectoryImport(token: string, batchId: string) {
   return apiFetch<DirectoryImportBatch>(`/api/directory/imports/${batchId}`, token, {
     method: "DELETE"
   });
+}
+
+export function reconcileDirectoryImport(token: string, batchId: string) {
+  return apiFetch<DirectoryImportBatch>(`/api/directory/imports/${batchId}/reconcile`, token, {
+    method: "POST"
+  });
+}
+
+export function getDirectoryImportReconciliation(
+  token: string,
+  batchId: string,
+  page = 1,
+  limit = 200,
+  matchStatus: DirectoryImportMatchStatus | "all" = "all"
+) {
+  const filter = matchStatus === "all"
+    ? ""
+    : `&match_status=${encodeURIComponent(matchStatus)}`;
+  return apiFetch<DirectoryImportRowPage>(
+    `/api/directory/imports/${batchId}/reconciliation?page=${page}&limit=${limit}${filter}`,
+    token
+  );
+}
+
+export function updateDirectoryImportMatch(
+  token: string,
+  batchId: string,
+  rowId: string,
+  payload: {
+    proposed_action: DirectoryImportAction;
+    matched_entry_id?: string | null;
+    update_fields?: string[];
+    restore_if_archived?: boolean;
+    version: number;
+  }
+) {
+  return apiFetch<DirectoryImportRow>(
+    `/api/directory/imports/${batchId}/rows/${rowId}/match`,
+    token,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export function validateDirectoryImport(token: string, batchId: string) {
+  return apiFetch<DirectoryImportValidation>(
+    `/api/directory/imports/${batchId}/validate-execution`,
+    token,
+    { method: "POST" }
+  );
+}
+
+export function executeDirectoryImport(token: string, batchId: string, version: number) {
+  return apiFetch<DirectoryImportExecutionResult>(
+    `/api/directory/imports/${batchId}/execute`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ confirmed: true, version })
+    }
+  );
+}
+
+export function getDirectoryImportResult(token: string, batchId: string) {
+  return apiFetch<DirectoryImportExecutionResult>(
+    `/api/directory/imports/${batchId}/result`,
+    token
+  );
 }
 
 export function getAnnouncements(token: string, page = 1, limit = 20) {

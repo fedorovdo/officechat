@@ -1,8 +1,8 @@
-# Импорт корпоративного справочника: preview v0.1
+# Импорт корпоративного справочника v0.2
 
-Первый этап импорта доступен пользователям с разрешением
-`can_manage_directory`. Он анализирует `.xlsx` и `.csv`, но не создаёт и не
-изменяет записи `DirectoryEntry`.
+Импорт доступен пользователям с разрешением `can_manage_directory`. Перед
+изменением `DirectoryEntry` файл проходит preview, детерминированную сверку с
+основным справочником и отдельное подтверждение.
 
 ## Поток
 
@@ -16,12 +16,90 @@
 4. В table mode можно выбрать лист и изменить сопоставление исходных колонок.
 5. В preview можно исправить нормализованные поля, тип записи и выбор строки,
    посмотреть warnings и исходные ячейки.
-6. Batch можно отменить. При отмене preview batch и его строки физически
-   удаляются, поэтому сохранённые `raw_cells` и нормализованные контакты не
-   остаются в PostgreSQL. Endpoint выполнения импорта в этой версии отсутствует.
+6. Сверка предлагает для каждой строки `create`, `update` или `skip`, показывает
+   кандидатов и причины совпадения.
+7. Для update оператор выбирает конкретную запись и только те непустые поля,
+   которые нужно применить.
+8. Dry validation повторно проверяет конфликты, дубли и актуальность совпадений.
+9. После явного подтверждения все изменения выполняются одной транзакцией.
+10. Batch можно отменить до выполнения. При отмене batch и строки физически
+    удаляются.
 
 Batch виден его создателю и `superadmin`. Все endpoints требуют
 `can_manage_directory`.
+
+## Правила сверки
+
+Нормализация имени, подразделения, должности, email и телефонов централизована и
+используется поиском, сверкой batch и повторной проверкой перед execute.
+
+- `exact`: один кандидат найден по персональному email, достаточно длинному
+  нормализованному телефону с совместимыми признаками либо точному сочетанию
+  имени, подразделения и должности;
+- `probable`: точное имя и один дополнительный совместимый признак;
+- `ambiguous`: несколько близких кандидатов, совпадение только по имени или
+  конфликт сильных идентификаторов;
+- `archived_match`: надёжный кандидат находится в архиве;
+- `unmatched`: безопасного кандидата нет;
+- `batch_duplicate`: строка дублирует email, длинный телефон с именем,
+  identity tuple или полностью нормализованные данные другой строки batch.
+
+Общие mailbox-адреса (`info@`, `office@`, `support@` и подобные) не считаются
+персональным exact match. Короткий добавочный номер сам по себе не уникален и
+учитывается только вместе с подразделением и другими признаками. Записи
+`role`/`department_contact` не используются для автоматического обновления
+персональной записи, потому что текущая модель `DirectoryEntry` не хранит тип
+контакта.
+
+Безопасные действия по умолчанию:
+
+- unmatched → create;
+- единственный exact → update;
+- probable/ambiguous → skip до ручного решения;
+- archived → skip, оператор может выбрать новую запись либо restore + update;
+- повторная строка batch → skip.
+
+Пустое значение из файла никогда не очищает существующее поле. Импорт не меняет
+`linked_user_id`, `created_at`, `created_by_user_id` и не архивирует записи,
+отсутствующие в файле.
+
+## API и состояния
+
+Дополнительные endpoints:
+
+- `POST /api/directory/imports/{batch_id}/reconcile`;
+- `GET /api/directory/imports/{batch_id}/reconciliation`;
+- `PATCH /api/directory/imports/{batch_id}/rows/{row_id}/match`;
+- `POST /api/directory/imports/{batch_id}/validate-execution`;
+- `POST /api/directory/imports/{batch_id}/execute`;
+- `GET /api/directory/imports/{batch_id}/result`.
+
+Состояния batch: `draft`, `analyzed`, `reconciled`, `executing`, `completed`,
+`failed`, `cancelled`. Execute разрешён только из `reconciled`. Batch
+блокируется через `SELECT FOR UPDATE`; повтор completed execute возвращает
+сохранённый результат и не создаёт дубли. Конкурентные execute одного batch
+сериализуются тем же lock: второй запрос после успешного commit получает
+сохранённый результат. Уже сохранённое состояние `executing` отвечает `409`.
+Повтор failed batch требует новой reconciliation.
+
+При reconciliation сохраняется `expected_entry_updated_at`. Перед execute
+каждая update-запись блокируется и загружается повторно. Изменившийся кандидат даёт
+`stale_match`, после чего требуется новая сверка.
+
+Execute разных batches сериализуется PostgreSQL advisory transaction lock. После
+получения lock заново загружаются DirectoryEntry и проверяются create/update
+конфликты; update/restore targets дополнительно блокируются через `FOR UPDATE`.
+
+## Транзакция и audit
+
+Create, update, restore, row result и audit выполняются в одной транзакции. При
+любой validation/DB ошибке все изменения `DirectoryEntry` и успешные audit
+events откатываются. Batch получает безопасный failed result отдельной
+транзакцией после rollback.
+
+Audit содержит только batch id, агрегированные create/update/restore/skip
+счётчики, actor, duration и безопасный error code. Raw cells, телефоны, email,
+notes и полные before/after snapshots туда не записываются.
 
 ## Форматы и ограничения
 
@@ -70,17 +148,22 @@ Legacy parser использует последовательный контек
 контакта `person` и один общий `role`, объединяет многострочную должность и
 проверяет phone/fax и email без реальных персональных данных.
 
-## Audit
+События включают `directory_import_uploaded`, `directory_import_analyzed`,
+`directory_import_reconciled`, `directory_import_execution_started`,
+`directory_import_completed`, `directory_import_failed` и
+`directory_import_cancelled`, а также штатные события изменённых
+`DirectoryEntry`.
 
-События `directory_import_uploaded`, `directory_import_analyzed` и
-`directory_import_cancelled` содержат batch id, безопасное имя файла, prefix
-hash, режим и счётчики. Телефоны, email, notes, raw cells и полное содержимое
-файла в audit не записываются.
+## Жизненный цикл PII
 
-## Хранение preview
+После completed execute для всех листов batch очищаются `raw_cells`,
+`normalized_data`, причины и snapshots кандидатов, а также выбранные update
+values. Остаются result entry ids, взаимоисключающие action/status и
+агрегированный отчёт. Failed batch сохраняет preview для исправления и новой
+сверки; автоматический retention completed/failed batches пока не реализован.
+Оператор может удалить failed batch вручную. При cancel batch удаляется
+физически, строки удаляются по `ON DELETE CASCADE`.
 
-Batch существует только до явной отмены. `DELETE /api/directory/imports/{id}`
-возвращает безопасный снимок результата отмены, затем в той же транзакции
-удаляет batch; строки удаляются по FK `ON DELETE CASCADE`. Автоматический
-retention для забытых preview в v0.1 ещё не реализован, поэтому администраторам
-следует отменять больше не нужные preview.
+Текущие ограничения: нет background queue, scheduled import, AI matching,
+автоматической связи с OfficeChat user, массового архивирования, rollback
+completed import и импорта DOCX/PDF.

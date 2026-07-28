@@ -44,6 +44,16 @@ function rowRange(row: DirectoryImportRow) {
     : `${row.source_row_start}-${row.source_row_end}`;
 }
 
+function editableRowSnapshot(row: DirectoryImportRow | null) {
+  if (!row) return "";
+  return JSON.stringify({
+    detected_kind: row.detected_kind,
+    normalized_data: row.normalized_data,
+    proposed_action: row.proposed_action,
+    is_selected: row.is_selected
+  });
+}
+
 export function DirectoryImportWizard({ dictionary, onClose }: Props) {
   const t = dictionary.directoryImport;
   const [file, setFile] = useState<File | null>(null);
@@ -57,11 +67,17 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
   const [editingRow, setEditingRow] = useState<DirectoryImportRow | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [hasManualRowEdits, setHasManualRowEdits] = useState(false);
+  const [editorError, setEditorError] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const uploadBusyRef = useRef(false);
   const loadGenerationRef = useRef(0);
   const mountedRef = useRef(true);
+  const editorRef = useRef<HTMLElement | null>(null);
+  const editorTriggerRef = useRef<HTMLElement | null>(null);
+  const editingRowRef = useRef<DirectoryImportRow | null>(null);
+  const rowsRef = useRef<DirectoryImportRow[]>([]);
+  const closeEditorRef = useRef<() => void>(() => undefined);
 
   const step = batch ? (rows.length || batch.detected_rows === 0 ? 3 : 2) : 1;
   const mappingTargets = useMemo(
@@ -71,6 +87,37 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     ],
     [dictionary.directory.fields, t.mapping.skipColumn]
   );
+  editingRowRef.current = editingRow;
+  rowsRef.current = rows;
+
+  function warningLabel(row: DirectoryImportRow, index: number) {
+    const warning = row.warnings[index];
+    return t.warningCodes[warning.code as keyof typeof t.warningCodes] ?? warning.code;
+  }
+
+  function openRowEditor(row: DirectoryImportRow, trigger: HTMLElement) {
+    editorTriggerRef.current = trigger;
+    setEditorError("");
+    setEditingRow({ ...row, normalized_data: { ...row.normalized_data } });
+  }
+
+  function closeRowEditor() {
+    const current = editingRowRef.current;
+    const original = current
+      ? rowsRef.current.find((row) => row.id === current.id) ?? null
+      : null;
+    if (
+      current &&
+      original &&
+      editableRowSnapshot(current) !== editableRowSnapshot(original) &&
+      !window.confirm(t.discardChangesConfirm)
+    ) {
+      return;
+    }
+    setEditorError("");
+    setEditingRow(null);
+  }
+  closeEditorRef.current = closeRowEditor;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -89,6 +136,49 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
       loadGenerationRef.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    if (!editingRow) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    const previousFocus =
+      editorTriggerRef.current ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const focusableSelector =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+    const firstFocusable =
+      editor.querySelector<HTMLElement>("[data-editor-initial-focus]") ??
+      editor.querySelector<HTMLElement>(focusableSelector);
+    firstFocusable?.focus();
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeEditorRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = Array.from(
+        editor!.querySelectorAll<HTMLElement>(focusableSelector)
+      );
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [editingRow?.id]);
 
   async function loadRows(
     nextBatch: DirectoryImportBatch,
@@ -262,6 +352,7 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
       const cancelled = await cancelDirectoryImport(token, batch.id);
       setBatch(null);
       setRows([]);
+      setEditingRow(null);
       loadGenerationRef.current += 1;
       setHasManualRowEdits(false);
       setRecentBatches((current) => current.filter((item) => item.id !== cancelled.id));
@@ -273,15 +364,94 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
     }
   }
 
+  async function saveEditingRow(event: FormEvent) {
+    event.preventDefault();
+    if (!editingRow || isBusy) return;
+    if (
+      editingRow.proposed_action === "create" &&
+      !editingRow.normalized_data.display_name?.trim()
+    ) {
+      setEditorError(t.errors.displayNameRequired);
+      return;
+    }
+    setEditorError("");
+    const originalRow = rows.find((row) => row.id === editingRow.id) ?? editingRow;
+    const saved = await patchRow(originalRow, {
+      detected_kind: editingRow.detected_kind,
+      normalized_data: editingRow.normalized_data,
+      proposed_action: editingRow.proposed_action,
+      is_selected: editingRow.is_selected
+    });
+    if (saved) setEditingRow(null);
+  }
+
+  function renderContact(row: DirectoryImportRow) {
+    const data = row.normalized_data;
+    const details = [
+      data.position,
+      data.department,
+      data.internal_phone
+        ? `${dictionary.directory.fields.internalPhone}: ${data.internal_phone}`
+        : null,
+      data.work_phone
+        ? `${dictionary.directory.fields.workPhone}: ${data.work_phone}`
+        : null,
+      data.mobile_phone
+        ? `${dictionary.directory.fields.mobilePhone}: ${data.mobile_phone}`
+        : null,
+      data.email ? `${dictionary.directory.fields.email}: ${data.email}` : null,
+      data.room ? `${dictionary.directory.fields.room}: ${data.room}` : null
+    ].filter((value): value is string => Boolean(value));
+    return (
+      <div className="directory-import-contact">
+        {data.display_name ? <strong>{data.display_name}</strong> : null}
+        {details.map((value) => <span key={value}>{value}</span>)}
+        {!data.display_name && details.length === 0 ? <span>{t.empty}</span> : null}
+      </div>
+    );
+  }
+
+  function renderWarningSummary(row: DirectoryImportRow) {
+    const visibleWarnings = row.warnings.slice(0, 2);
+    const remaining = row.warnings.length - visibleWarnings.length;
+    return (
+      <div className="directory-import-warnings">
+        {visibleWarnings.map((warning, index) => (
+          <span
+            className={`import-warning import-warning-${warning.severity}`}
+            key={`${warning.code}-${index}`}
+            title={warningLabel(row, index)}
+          >
+            {warningLabel(row, index)}
+          </span>
+        ))}
+        {remaining > 0 ? (
+          <span
+            aria-label={t.moreWarnings.replace("{count}", String(remaining))}
+            className="import-warning import-warning-more"
+            title={row.warnings.slice(2).map((_, index) => warningLabel(row, index + 2)).join("\n")}
+          >
+            +{remaining}
+          </span>
+        ) : null}
+        {!row.warnings.length ? <span className="muted">{t.noWarnings}</span> : null}
+      </div>
+    );
+  }
+
+  const editingRowHasBlockingWarning = editingRow?.warnings.some(
+    (warning) => warning.severity === "blocking"
+  ) ?? false;
+
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="directory-import-backdrop" role="presentation">
       <section
         aria-label={t.title}
         aria-modal="true"
         className="directory-import-wizard"
         role="dialog"
       >
-        <header className="dashboard-header">
+        <header className="dashboard-header directory-import-header">
           <div>
             <p className="eyebrow">{t.eyebrow}</p>
             <h3>{t.title}</h3>
@@ -315,6 +485,11 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 type="file"
               />
+              {file ? (
+                <span className="directory-import-file-name" title={file.name}>
+                  {file.name}
+                </span>
+              ) : null}
               <small>{t.fileHelp}</small>
             </label>
             <label className="field">
@@ -463,8 +638,8 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
         {batch && rows.length > 0 ? (
           <div className="directory-import-preview">
             <div className="directory-import-preview-toolbar">
-              <div>
-                <strong>{batch.original_filename}</strong>
+              <div className="directory-import-preview-summary">
+                <strong title={batch.original_filename}>{batch.original_filename}</strong>
                 <small>
                   {t.selectedCount.replace(
                     "{count}",
@@ -472,15 +647,36 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                   )}
                 </small>
               </div>
-              <label className="checkbox-label">
-                <input
-                  checked={warningsOnly}
+              <div className="directory-import-preview-actions">
+                <label className="checkbox-label">
+                  <input
+                    checked={warningsOnly}
+                    disabled={isBusy}
+                    onChange={(event) => void toggleWarnings(event.target.checked)}
+                    type="checkbox"
+                  />
+                  {t.warningsOnly}
+                </label>
+                <button
+                  className="secondary-link"
                   disabled={isBusy}
-                  onChange={(event) => void toggleWarnings(event.target.checked)}
-                  type="checkbox"
-                />
-                {t.warningsOnly}
-              </label>
+                  onClick={() => void saveAnalysisSettings()}
+                  type="button"
+                >
+                  {isBusy ? t.reanalyzing : t.reanalyze}
+                </button>
+                <button
+                  className="secondary-link"
+                  disabled={isBusy}
+                  onClick={() => void cancelBatch()}
+                  type="button"
+                >
+                  {t.cancelBatch}
+                </button>
+                <button className="secondary-link" disabled={isBusy} onClick={onClose} type="button">
+                  {t.close}
+                </button>
+              </div>
             </div>
 
             <div className="directory-import-table-wrap">
@@ -490,21 +686,20 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                     <th>{t.preview.select}</th>
                     <th>{t.preview.source}</th>
                     <th>{t.preview.kind}</th>
-                    <th>{dictionary.directory.fields.displayName}</th>
-                    <th>{dictionary.directory.fields.position}</th>
-                    <th>{dictionary.directory.fields.department}</th>
-                    <th>{dictionary.directory.fields.internalPhone}</th>
-                    <th>{dictionary.directory.fields.workPhone}</th>
-                    <th>{dictionary.directory.fields.mobilePhone}</th>
-                    <th>{dictionary.directory.fields.email}</th>
-                    <th>{dictionary.directory.fields.room}</th>
+                    <th>{t.preview.contact}</th>
                     <th>{t.preview.warnings}</th>
                     <th>{t.preview.action}</th>
+                    <th>{t.preview.details}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={row.id}>
+                    <tr
+                      className={row.warnings.some((warning) => warning.severity === "blocking")
+                        ? "directory-import-row-blocking"
+                        : undefined}
+                      key={row.id}
+                    >
                       <td>
                         <input
                           aria-label={t.preview.selectRow.replace("{row}", rowRange(row))}
@@ -517,30 +712,20 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                           type="checkbox"
                         />
                       </td>
+                      <td>{row.source_sheet} · {rowRange(row)}</td>
+                      <td>{t.kinds[row.detected_kind]}</td>
+                      <td>{renderContact(row)}</td>
+                      <td>{renderWarningSummary(row)}</td>
+                      <td>{t.actions[row.proposed_action]}</td>
                       <td>
-                        <button className="table-action" onClick={() => setEditingRow(row)} type="button">
-                          {row.source_sheet} · {rowRange(row)}
+                        <button
+                          className="table-action"
+                          onClick={(event) => openRowEditor(row, event.currentTarget)}
+                          type="button"
+                        >
+                          {t.openDetails}
                         </button>
                       </td>
-                      <td>{t.kinds[row.detected_kind]}</td>
-                      <td>{row.normalized_data.display_name || t.empty}</td>
-                      <td>{row.normalized_data.position || t.empty}</td>
-                      <td>{row.normalized_data.department || t.empty}</td>
-                      <td>{row.normalized_data.internal_phone || t.empty}</td>
-                      <td>{row.normalized_data.work_phone || t.empty}</td>
-                      <td>{row.normalized_data.mobile_phone || t.empty}</td>
-                      <td>{row.normalized_data.email || t.empty}</td>
-                      <td>{row.normalized_data.room || t.empty}</td>
-                      <td>
-                        <div className="directory-import-warnings">
-                          {row.warnings.map((warning, index) => (
-                            <span className={`import-warning import-warning-${warning.severity}`} key={`${warning.code}-${index}`}>
-                              {t.warningCodes[warning.code as keyof typeof t.warningCodes] ?? warning.code}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td>{t.actions[row.proposed_action]}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -549,7 +734,14 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
 
             <div className="directory-import-cards">
               {rows.map((row) => (
-                <article className="directory-import-card" key={row.id}>
+                <article
+                  className={`directory-import-card${
+                    row.warnings.some((warning) => warning.severity === "blocking")
+                      ? " directory-import-card-blocking"
+                      : ""
+                  }`}
+                  key={row.id}
+                >
                   <header>
                     <label className="checkbox-label">
                       <input
@@ -565,24 +757,18 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
                     </label>
                     <span>{t.kinds[row.detected_kind]}</span>
                   </header>
-                  <strong>{row.normalized_data.display_name || t.empty}</strong>
-                  <span>{row.normalized_data.position || t.empty}</span>
-                  <span>{row.normalized_data.department || t.empty}</span>
-                  <span>{[
-                    row.normalized_data.internal_phone,
-                    row.normalized_data.work_phone,
-                    row.normalized_data.mobile_phone,
-                    row.normalized_data.email,
-                    row.normalized_data.room
-                  ].filter(Boolean).join(" · ") || t.empty}</span>
-                  <div className="directory-import-warnings">
-                    {row.warnings.map((warning, index) => (
-                      <span className={`import-warning import-warning-${warning.severity}`} key={`${warning.code}-${index}`}>
-                        {t.warningCodes[warning.code as keyof typeof t.warningCodes] ?? warning.code}
-                      </span>
-                    ))}
+                  {renderContact(row)}
+                  <div className="directory-import-card-footer">
+                    {renderWarningSummary(row)}
+                    <span className="directory-import-action">{t.actions[row.proposed_action]}</span>
                   </div>
-                  <button className="table-action" onClick={() => setEditingRow(row)} type="button">{t.editRow}</button>
+                  <button
+                    className="table-action"
+                    onClick={(event) => openRowEditor(row, event.currentTarget)}
+                    type="button"
+                  >
+                    {t.openDetails}
+                  </button>
                 </article>
               ))}
             </div>
@@ -620,86 +806,154 @@ export function DirectoryImportWizard({ dictionary, onClose }: Props) {
 
             <div className="actions">
               <button className="secondary-link" disabled={isBusy} onClick={() => setRows([])} type="button">{t.backToMapping}</button>
-              <button className="secondary-link" disabled={isBusy} onClick={() => void cancelBatch()} type="button">{t.cancelBatch}</button>
             </div>
           </div>
         ) : null}
 
         {editingRow ? (
-          <div className="directory-import-row-editor">
-            <header className="dashboard-header">
-              <h4>{t.editRow}</h4>
-              <button className="table-action" onClick={() => setEditingRow(null)} type="button">{t.close}</button>
-            </header>
-            <div className="directory-import-settings">
-              <label className="field">
-                <span className="field-label">{t.preview.kind}</span>
-                <select
-                  className="field-input"
-                  onChange={(event) => setEditingRow((current) => current && {
-                    ...current,
-                    detected_kind: event.target.value as DirectoryImportKind
-                  })}
-                  value={editingRow.detected_kind}
-                >
-                  {(Object.keys(t.kinds) as DirectoryImportKind[]).map((kind) => (
-                    <option key={kind} value={kind}>{t.kinds[kind]}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span className="field-label">{t.preview.action}</span>
-                <select
-                  className="field-input"
-                  onChange={(event) => setEditingRow((current) => current && {
-                    ...current,
-                    proposed_action: event.target.value as "create" | "skip",
-                    is_selected: event.target.value === "create" && current.is_selected
-                  })}
-                  value={editingRow.proposed_action}
-                >
-                  <option value="create">{t.actions.create}</option>
-                  <option value="skip">{t.actions.skip}</option>
-                </select>
-              </label>
-            </div>
-            <div className="directory-import-edit-grid">
-              {importFields.map((field) => (
-                <label className="field" key={field}>
-                  <span className="field-label">{dictionary.directory.fields[fieldLabelKey(field)]}</span>
+          <div
+            className="directory-import-detail-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeRowEditor();
+            }}
+            role="presentation"
+          >
+            <section
+              aria-label={t.detailsTitle}
+              aria-modal="true"
+              className="directory-import-row-editor"
+              ref={editorRef}
+              role="dialog"
+            >
+              <header className="directory-import-editor-header">
+                <div>
+                  <h4>{t.detailsTitle}</h4>
+                  <p className="muted">
+                    {editingRow.source_sheet} · {rowRange(editingRow)}
+                  </p>
+                </div>
+                <button className="table-action" onClick={closeRowEditor} type="button">
+                  {t.close}
+                </button>
+              </header>
+              <form className="directory-import-editor-form" onSubmit={saveEditingRow}>
+                <dl className="directory-import-row-metadata">
+                  <div>
+                    <dt>{t.sourceRows}</dt>
+                    <dd>{rowRange(editingRow)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t.confidence}</dt>
+                    <dd>
+                      {editingRow.confidence === null
+                        ? t.notAvailable
+                        : `${Math.round(editingRow.confidence * 100)}%`}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="directory-import-settings">
+                  <label className="field">
+                    <span className="field-label">{t.preview.kind}</span>
+                    <select
+                      className="field-input"
+                      data-editor-initial-focus
+                      disabled={isBusy}
+                      onChange={(event) => setEditingRow((current) => current && {
+                        ...current,
+                        detected_kind: event.target.value as DirectoryImportKind
+                      })}
+                      value={editingRow.detected_kind}
+                    >
+                      {(Object.keys(t.kinds) as DirectoryImportKind[]).map((kind) => (
+                        <option key={kind} value={kind}>{t.kinds[kind]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span className="field-label">{t.preview.action}</span>
+                    <select
+                      className="field-input"
+                      disabled={isBusy}
+                      onChange={(event) => setEditingRow((current) => current && {
+                        ...current,
+                        proposed_action: event.target.value as "create" | "skip",
+                        is_selected: event.target.value === "skip" ? false : current.is_selected
+                      })}
+                      value={editingRow.proposed_action}
+                    >
+                      <option value="create">{t.actions.create}</option>
+                      <option value="skip">{t.actions.skip}</option>
+                    </select>
+                  </label>
+                </div>
+                <label className="checkbox-label directory-import-editor-selection">
                   <input
-                    className="field-input"
+                    checked={editingRow.is_selected}
+                    disabled={isBusy || editingRowHasBlockingWarning}
                     onChange={(event) => setEditingRow((current) => current && {
                       ...current,
-                      normalized_data: { ...current.normalized_data, [field]: event.target.value }
+                      is_selected: event.target.checked,
+                      proposed_action: event.target.checked ? "create" : "skip"
                     })}
-                    value={editingRow.normalized_data[field] ?? ""}
+                    type="checkbox"
                   />
+                  {t.includeRow}
                 </label>
-              ))}
-            </div>
-            <details className="directory-import-raw">
-              <summary>{t.rawCells}</summary>
-              <pre>{JSON.stringify(editingRow.raw_cells, null, 2)}</pre>
-            </details>
-            <div className="actions">
-              <button
-                className="primary-button"
-                disabled={isBusy}
-                onClick={() => void patchRow(editingRow, {
-                  detected_kind: editingRow.detected_kind,
-                  normalized_data: editingRow.normalized_data,
-                  proposed_action: editingRow.proposed_action,
-                  is_selected: editingRow.is_selected
-                }).then((saved) => {
-                  if (saved) setEditingRow(null);
-                })}
-                type="button"
-              >
-                {t.saveRow}
-              </button>
-              <button className="secondary-link" onClick={() => setEditingRow(null)} type="button">{t.close}</button>
-            </div>
+                <div className="directory-import-edit-grid">
+                  {importFields.map((field) => (
+                    <label className="field" key={field}>
+                      <span className="field-label">{dictionary.directory.fields[fieldLabelKey(field)]}</span>
+                      <input
+                        aria-describedby={field === "display_name" && editorError ? "directory-import-display-name-error" : undefined}
+                        aria-invalid={field === "display_name" && Boolean(editorError)}
+                        className="field-input"
+                        disabled={isBusy}
+                        onChange={(event) => {
+                          if (field === "display_name") setEditorError("");
+                          setEditingRow((current) => current && {
+                            ...current,
+                            normalized_data: { ...current.normalized_data, [field]: event.target.value }
+                          });
+                        }}
+                        value={editingRow.normalized_data[field] ?? ""}
+                      />
+                      {field === "display_name" && editorError ? (
+                        <small className="form-error" id="directory-import-display-name-error">
+                          {editorError}
+                        </small>
+                      ) : null}
+                    </label>
+                  ))}
+                </div>
+                <section className="directory-import-warning-details">
+                  <h5>{t.preview.warnings}</h5>
+                  {editingRow.warnings.length ? (
+                    <div className="directory-import-warnings">
+                      {editingRow.warnings.map((warning, index) => (
+                        <span
+                          className={`import-warning import-warning-${warning.severity}`}
+                          key={`${warning.code}-${index}`}
+                        >
+                          {warningLabel(editingRow, index)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : <p className="muted">{t.noWarnings}</p>}
+                </section>
+                <details className="directory-import-raw">
+                  <summary>{t.rawCells}</summary>
+                  <pre>{JSON.stringify(editingRow.raw_cells, null, 2)}</pre>
+                </details>
+                <div className="directory-import-editor-actions">
+                  <button className="primary-button" disabled={isBusy} type="submit">
+                    {t.saveRow}
+                  </button>
+                  <button className="secondary-link" disabled={isBusy} onClick={closeRowEditor} type="button">
+                    {t.close}
+                  </button>
+                </div>
+              </form>
+            </section>
           </div>
         ) : null}
       </section>

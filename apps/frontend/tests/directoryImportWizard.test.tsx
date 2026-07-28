@@ -162,6 +162,24 @@ describe("directory import wizard", () => {
     expect(await screen.findByText(batch.original_filename)).toBeInTheDocument();
   });
 
+  it("keeps the upload step inside a responsive container and exposes long filenames", async () => {
+    renderWizard();
+    const file = new File(
+      ["name,phone"],
+      "a-very-long-corporate-directory-filename-that-must-not-expand-the-page.csv",
+      { type: "text/csv" }
+    );
+    fireEvent.change(screen.getByLabelText(en.directoryImport.file), {
+      target: { files: [file] }
+    });
+
+    expect(document.querySelector(".directory-import-backdrop")).toBeInTheDocument();
+    expect(document.querySelector(".directory-import-wizard")).toBeInTheDocument();
+    expect(screen.getByTitle(file.name)).toHaveTextContent(file.name);
+    expect(document.querySelector(".directory-import-upload")).toBeInTheDocument();
+    await waitFor(() => expect(apiMocks.getDirectoryImports).toHaveBeenCalled());
+  });
+
   it("keeps async wizard state active after the StrictMode effect replay", async () => {
     apiMocks.getDirectoryImports.mockResolvedValue({
       items: [batch],
@@ -278,10 +296,75 @@ describe("directory import wizard", () => {
     );
   });
 
+  it("renders a compact desktop preview and omits empty normalized fields", async () => {
+    await uploadValidFile();
+    fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(7);
+    expect(
+      within(table).queryByRole("columnheader", { name: en.directory.fields.displayName })
+    ).not.toBeInTheDocument();
+    expect(within(table).getByText("Test User")).toBeInTheDocument();
+    expect(within(table).getByText(`${en.directory.fields.workPhone}: 3 11 11`)).toBeInTheDocument();
+    expect(screen.queryByText(en.directoryImport.empty)).not.toBeInTheDocument();
+  });
+
+  it("summarizes warnings with two badges and a remaining count", async () => {
+    const rowWithWarnings = {
+      ...previewRow,
+      warnings: [
+        { code: "multiline_position", severity: "info" as const },
+        { code: "phone_type_uncertain", severity: "warning" as const },
+        { code: "multiple_phone_values", severity: "warning" as const }
+      ]
+    };
+    apiMocks.getDirectoryImportRows.mockResolvedValue({
+      items: [rowWithWarnings],
+      total: 1,
+      page: 1,
+      limit: 200
+    });
+
+    await uploadValidFile();
+    fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
+    await screen.findByRole("table");
+
+    expect(screen.getAllByText("+1")).toHaveLength(2);
+    expect(
+      screen.getAllByLabelText(en.directoryImport.moreWarnings.replace("{count}", "1"))
+    ).toHaveLength(2);
+  });
+
+  it("keeps blocking rows unavailable for selection", async () => {
+    apiMocks.getDirectoryImportRows.mockResolvedValue({
+      items: [{
+        ...previewRow,
+        is_selected: false,
+        proposed_action: "skip",
+        warnings: [{ code: "missing_display_name", severity: "blocking" }]
+      }],
+      total: 1,
+      page: 1,
+      limit: 200
+    });
+
+    await uploadValidFile();
+    fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
+    await screen.findByRole("table");
+
+    const rowSelectors = screen.getAllByRole("checkbox").filter((element) =>
+      element.getAttribute("aria-label")?.includes("2-3") ||
+      element.closest(".directory-import-card")
+    );
+    expect(rowSelectors).toHaveLength(2);
+    rowSelectors.forEach((selector) => expect(selector).toBeDisabled());
+  });
+
   it("edits normalized fields, record type and exposes raw cells", async () => {
     await uploadValidFile();
     fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
-    fireEvent.click((await screen.findAllByRole("button", { name: en.directoryImport.editRow }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: en.directoryImport.openDetails }))[0]);
 
     const editor = screen.getByText(en.directoryImport.rawCells).closest(".directory-import-row-editor");
     expect(editor).not.toBeNull();
@@ -309,11 +392,65 @@ describe("directory import wizard", () => {
     );
   });
 
+  it("validates and saves the selected row in one detail drawer", async () => {
+    await uploadValidFile();
+    fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
+    fireEvent.click((await screen.findAllByRole("button", { name: en.directoryImport.openDetails }))[0]);
+
+    const dialog = screen.getByRole("dialog", { name: en.directoryImport.detailsTitle });
+    const scope = within(dialog);
+    expect(scope.getByText("2-3")).toBeInTheDocument();
+    expect(scope.getByText("88%")).toBeInTheDocument();
+    const displayName = scope.getByLabelText(en.directory.fields.displayName);
+    fireEvent.change(displayName, { target: { value: "" } });
+    fireEvent.click(scope.getByRole("button", { name: en.directoryImport.saveRow }));
+    expect(await scope.findByText(en.directoryImport.errors.displayNameRequired)).toBeInTheDocument();
+    expect(apiMocks.updateDirectoryImportRow).not.toHaveBeenCalled();
+
+    fireEvent.change(displayName, { target: { value: "Updated User" } });
+    fireEvent.click(scope.getByRole("button", { name: en.directoryImport.saveRow }));
+    await waitFor(() =>
+      expect(apiMocks.updateDirectoryImportRow).toHaveBeenCalledWith(
+        "token",
+        batch.id,
+        previewRow.id,
+        expect.objectContaining({
+          normalized_data: expect.objectContaining({ display_name: "Updated User" })
+        })
+      )
+    );
+    expect(screen.queryByRole("dialog", { name: en.directoryImport.detailsTitle })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Updated User").length).toBeGreaterThan(0);
+  });
+
+  it("renders raw source values as text and closes the detail drawer with Escape", async () => {
+    apiMocks.getDirectoryImportRows.mockResolvedValue({
+      items: [{
+        ...previewRow,
+        raw_cells: {
+          rows: [{ row: 2, cells: ['<img src="x" onerror="alert(1)">'] }]
+        }
+      }],
+      total: 1,
+      page: 1,
+      limit: 200
+    });
+    await uploadValidFile();
+    fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
+    fireEvent.click((await screen.findAllByRole("button", { name: en.directoryImport.openDetails }))[0]);
+    fireEvent.click(screen.getByText(en.directoryImport.rawCells));
+
+    expect(screen.getByText(/<img src=/)).toBeInTheDocument();
+    expect(document.querySelector(".directory-import-raw img")).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: en.directoryImport.detailsTitle })).not.toBeInTheDocument();
+  });
+
   it("warns before reanalysis would replace manual row changes", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     await uploadValidFile();
     fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.openPreview }));
-    fireEvent.click((await screen.findAllByRole("button", { name: en.directoryImport.editRow }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: en.directoryImport.openDetails }))[0]);
     const editor = screen.getByText(en.directoryImport.rawCells).closest(".directory-import-row-editor");
     const scope = within(editor as HTMLElement);
     fireEvent.change(scope.getByLabelText(en.directory.fields.displayName), {
@@ -321,9 +458,6 @@ describe("directory import wizard", () => {
     });
     fireEvent.click(scope.getByRole("button", { name: en.directoryImport.saveRow }));
     await waitFor(() => expect(apiMocks.updateDirectoryImportRow).toHaveBeenCalled());
-    fireEvent.click(
-      scope.getAllByRole("button", { name: en.directoryImport.close })[0]
-    );
     fireEvent.click(screen.getByRole("button", { name: en.directoryImport.backToMapping }));
     fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reanalyze }));
 
@@ -380,5 +514,9 @@ describe("directory import wizard", () => {
     expect(ru.directoryImport.warningCodes.missing_display_name).toBeTruthy();
     expect(en.directoryImport.warningCodes.phone_type_uncertain).toBeTruthy();
     expect(ru.directoryImport.warningCodes.phone_type_uncertain).toBeTruthy();
+    expect(en.directoryImport.openDetails).toBeTruthy();
+    expect(ru.directoryImport.openDetails).toBeTruthy();
+    expect(en.directoryImport.errors.displayNameRequired).toBeTruthy();
+    expect(ru.directoryImport.errors.displayNameRequired).toBeTruthy();
   });
 });

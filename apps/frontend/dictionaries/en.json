@@ -700,6 +700,15 @@
     "warningsOnly": "Only rows with warnings",
     "backToMapping": "Back to structure",
     "editRow": "Review and edit",
+    "openDetails": "Open",
+    "detailsTitle": "Preview row details",
+    "sourceRows": "Source rows",
+    "confidence": "Detection confidence",
+    "notAvailable": "Not available",
+    "includeRow": "Include this row",
+    "noWarnings": "No warnings",
+    "moreWarnings": "{count} more warnings",
+    "discardChangesConfirm": "Discard unsaved row changes?",
     "saveRow": "Save preview row",
     "rawCells": "Raw source cells",
     "empty": "Not detected",
@@ -715,9 +724,11 @@
       "selectRow": "Select source row {row}",
       "source": "Source",
       "kind": "Record type",
+      "contact": "Contact",
       "contacts": "Phones and email",
       "warnings": "Warnings",
-      "action": "Proposed action"
+      "action": "Proposed action",
+      "details": "Details"
     },
     "kinds": {
       "person": "Person",
@@ -757,6 +768,7 @@
       "reanalyze": "Could not reanalyze the import preview.",
       "rows": "Could not load preview rows.",
       "row": "Could not update the preview row.",
+      "displayNameRequired": "Display name is required for rows proposed for creation.",
       "cancel": "Could not cancel the import preview."
     }
   },

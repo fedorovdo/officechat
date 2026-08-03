@@ -5,12 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   archiveDirectoryEntry,
   createDirectoryEntry,
+  deleteDirectoryEntryPermanently,
   getDirectoryDepartments,
   getDirectoryEntries,
   getStoredAccessToken,
   hasPermission,
+  ApiResponseError,
+  PermissionError,
   restoreDirectoryEntry,
   updateDirectoryEntry,
+  type DirectoryEntryDeleteReason,
   type DirectoryEntryPayload,
   type OfficeChatDirectoryEntry,
   type OfficeChatDirectoryLinkedUser,
@@ -42,6 +46,8 @@ type DirectoryForm = {
   notes: string;
   linked_user_id: string;
 };
+
+type DirectoryStatusFilter = "active" | "all" | "archived";
 
 const pageSize = 30;
 
@@ -142,12 +148,13 @@ export function DirectoryPanel({
 }: DirectoryPanelProps) {
   const t = dictionary.directory;
   const canManage = hasPermission(currentUser, "can_manage_directory");
+  const canPermanentlyDelete = currentUser.role === "superadmin";
   const [entries, setEntries] = useState<OfficeChatDirectoryEntry[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"active" | "all">("active");
+  const [statusFilter, setStatusFilter] = useState<DirectoryStatusFilter>("active");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [selectedEntry, setSelectedEntry] = useState<OfficeChatDirectoryEntry | null>(null);
@@ -155,6 +162,11 @@ export function DirectoryPanel({
   const [form, setForm] = useState<DirectoryForm>(emptyDirectoryForm);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [deleteEntry, setDeleteEntry] = useState<OfficeChatDirectoryEntry | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteReason, setDeleteReason] = useState<DirectoryEntryDeleteReason | "">("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [actionEntryId, setActionEntryId] = useState<string | null>(null);
@@ -210,7 +222,7 @@ export function DirectoryPanel({
     if (!token) return;
     const requestId = ++departmentsRequestId.current;
     try {
-      const result = await getDirectoryDepartments(token, canManage && statusFilter === "all");
+      const result = await getDirectoryDepartments(token, canManage && statusFilter !== "active");
       if (requestId !== departmentsRequestId.current) return;
       setDepartments(result.items);
     } catch {
@@ -225,6 +237,18 @@ export function DirectoryPanel({
   useEffect(() => {
     void loadDepartments();
   }, [loadDepartments]);
+
+  useEffect(() => {
+    if (!deleteEntry || isDeleting) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setDeleteEntry(null);
+        setDeleteError("");
+      }
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [deleteEntry, isDeleting]);
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
@@ -318,6 +342,61 @@ export function DirectoryPanel({
     if (linkedUser && canMessage(entry)) onStartDirect(linkedUser.id);
   }
 
+  function openPermanentDelete(entry: OfficeChatDirectoryEntry) {
+    setDeleteEntry(entry);
+    setDeleteConfirmation("");
+    setDeleteReason("");
+    setDeleteError("");
+  }
+
+  function permanentDeleteErrorMessage(error: unknown) {
+    const code =
+      error instanceof ApiResponseError || error instanceof PermissionError
+        ? error.message
+        : "";
+    const messages: Record<string, string> = {
+      directory_entry_must_be_archived: t.deleteErrors.mustBeArchived,
+      directory_entry_linked_user: t.deleteErrors.linkedUser,
+      directory_entry_stale: t.deleteErrors.stale,
+      confirmation_name_mismatch: t.deleteErrors.confirmationMismatch,
+      directory_entry_delete_restricted: t.deleteErrors.restricted,
+      directory_entry_not_found: t.deleteErrors.notFound,
+      directory_entry_delete_forbidden: t.deleteErrors.forbidden
+    };
+    return messages[code] ?? t.deleteErrors.generic;
+  }
+
+  async function submitPermanentDelete(event: FormEvent) {
+    event.preventDefault();
+    if (
+      !deleteEntry ||
+      isDeleting ||
+      !deleteReason ||
+      deleteConfirmation.trim() !== deleteEntry.display_name
+    ) {
+      return;
+    }
+    const token = getStoredAccessToken();
+    if (!token) return;
+    setIsDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteDirectoryEntryPermanently(token, deleteEntry.id, {
+        confirmation_name: deleteConfirmation.trim(),
+        reason: deleteReason,
+        expected_updated_at: deleteEntry.updated_at
+      });
+      setDeleteEntry(null);
+      setSelectedEntry(null);
+      setMessage(t.deleteSuccess);
+      await Promise.all([loadEntries(), loadDepartments()]);
+    } catch (deleteFailure) {
+      setDeleteError(permanentDeleteErrorMessage(deleteFailure));
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
     <div className="directory-panel">
       <header className="user-app-chat-heading directory-heading">
@@ -367,11 +446,12 @@ export function DirectoryPanel({
               <span className="field-label">{t.activity}</span>
               <select
                 className="field-input"
-                onChange={(event) => { setStatusFilter(event.target.value as "active" | "all"); setPage(1); }}
+                onChange={(event) => { setStatusFilter(event.target.value as DirectoryStatusFilter); setPage(1); }}
                 value={statusFilter}
               >
                 <option value="active">{t.activeOnly}</option>
                 <option value="all">{t.allEntries}</option>
+                <option value="archived">{t.archivedOnly}</option>
               </select>
             </label>
           ) : null}
@@ -402,6 +482,7 @@ export function DirectoryPanel({
                     <tr className={entry.is_active ? "" : "directory-entry-inactive"} key={entry.id}>
                       <td>
                         <strong>{entry.display_name}</strong>
+                        {!entry.is_active ? <span className="directory-archived-badge">{t.archived}</span> : null}
                         {resolveLinkedUser(entry) ? (
                           <LinkedUserIndicator
                             currentUserId={currentUser.id}
@@ -430,6 +511,7 @@ export function DirectoryPanel({
                 <article className={entry.is_active ? "directory-card" : "directory-card directory-entry-inactive"} key={entry.id}>
                   <button className="directory-card-open" onClick={() => setSelectedEntry(entry)} type="button">
                     <strong>{entry.display_name}</strong>
+                    {!entry.is_active ? <span className="directory-archived-badge">{t.archived}</span> : null}
                     <span>{[entry.position, entry.department].filter(Boolean).join(" · ") || t.emptyValue}</span>
                     {resolveLinkedUser(entry) ? (
                       <LinkedUserIndicator
@@ -460,7 +542,7 @@ export function DirectoryPanel({
       </div>
 
       {selectedEntry ? (
-        <div className="modal-backdrop" role="presentation">
+        <div className="settings-backdrop" role="presentation">
           <section aria-label={selectedEntry.display_name} aria-modal="true" className="directory-detail-panel" role="dialog">
             <header className="dashboard-header">
               <div>
@@ -506,13 +588,27 @@ export function DirectoryPanel({
                   {selectedEntry.is_active ? t.archive : t.restore}
                 </button>
               ) : null}
+              {canPermanentlyDelete &&
+              !selectedEntry.is_active &&
+              !selectedEntry.linked_user_id &&
+              !resolveLinkedUser(selectedEntry) ? (
+                <div className="directory-destructive-zone">
+                  <button
+                    className="danger-button"
+                    onClick={() => openPermanentDelete(selectedEntry)}
+                    type="button"
+                  >
+                    {t.deletePermanently}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </section>
         </div>
       ) : null}
 
       {isEditorOpen ? (
-        <div className="modal-backdrop" role="presentation">
+        <div className="settings-backdrop" role="presentation">
           <form aria-label={editingEntry ? t.editTitle : t.createTitle} aria-modal="true" className="directory-editor" onSubmit={saveEntry} role="dialog">
             <header className="dashboard-header">
               <h3>{editingEntry ? t.editTitle : t.createTitle}</h3>
@@ -557,6 +653,95 @@ export function DirectoryPanel({
             <div className="actions">
               <button className="primary-button" disabled={isSaving} type="submit">{isSaving ? t.saving : t.save}</button>
               <button className="secondary-link" disabled={isSaving} onClick={() => setIsEditorOpen(false)} type="button">{t.cancel}</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {deleteEntry ? (
+        <div className="settings-backdrop" role="presentation">
+          <form
+            aria-label={t.deleteTitle}
+            aria-modal="true"
+            className="directory-delete-dialog"
+            onSubmit={submitPermanentDelete}
+            role="dialog"
+          >
+            <header className="dashboard-header">
+              <div>
+                <p className="eyebrow">{t.deletePermanentEyebrow}</p>
+                <h3>{t.deleteTitle}</h3>
+              </div>
+              <button
+                className="table-action"
+                disabled={isDeleting}
+                onClick={() => setDeleteEntry(null)}
+                type="button"
+              >
+                {t.close}
+              </button>
+            </header>
+            <p className="directory-delete-warning">{t.deleteWarning}</p>
+            <dl className="directory-delete-summary">
+              <dt>{t.fields.displayName}</dt>
+              <dd>{deleteEntry.display_name}</dd>
+              <dt>{t.entryKind}</dt>
+              <dd>{t.directoryEntryKind}</dd>
+              <dt>{t.activity}</dt>
+              <dd><span className="status-badge status-inactive">{t.archived}</span></dd>
+            </dl>
+            <label className="field">
+              <span className="field-label">{t.deleteReason}</span>
+              <select
+                className="field-input"
+                disabled={isDeleting}
+                onChange={(event) =>
+                  setDeleteReason(event.target.value as DirectoryEntryDeleteReason | "")
+                }
+                required
+                value={deleteReason}
+              >
+                <option value="">{t.selectDeleteReason}</option>
+                <option value="test_data">{t.deleteReasons.test_data}</option>
+                <option value="duplicate">{t.deleteReasons.duplicate}</option>
+                <option value="incorrect_entry">{t.deleteReasons.incorrect_entry}</option>
+                <option value="privacy_request">{t.deleteReasons.privacy_request}</option>
+                <option value="other">{t.deleteReasons.other}</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">
+                {t.deleteConfirmation.replace("{name}", deleteEntry.display_name)}
+              </span>
+              <input
+                autoComplete="off"
+                className="field-input"
+                disabled={isDeleting}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                value={deleteConfirmation}
+              />
+            </label>
+            {deleteError ? <p className="form-error">{deleteError}</p> : null}
+            <div className="actions">
+              <button
+                className="danger-button"
+                disabled={
+                  isDeleting ||
+                  !deleteReason ||
+                  deleteConfirmation.trim() !== deleteEntry.display_name
+                }
+                type="submit"
+              >
+                {isDeleting ? t.deleting : t.deletePermanently}
+              </button>
+              <button
+                className="secondary-link"
+                disabled={isDeleting}
+                onClick={() => setDeleteEntry(null)}
+                type="button"
+              >
+                {t.cancel}
+              </button>
             </div>
           </form>
         </div>

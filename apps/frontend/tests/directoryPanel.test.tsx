@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DirectoryPanel } from "../components/DirectoryPanel";
 import { getDictionary } from "../lib/i18n";
-import type { OfficeChatDirectoryEntry } from "../lib/api";
+import { ApiResponseError, type OfficeChatDirectoryEntry, type UserRole } from "../lib/api";
 import { userFactory } from "./factories";
 
 const apiMocks = vi.hoisted(() => ({
   archiveDirectoryEntry: vi.fn(),
   createDirectoryEntry: vi.fn(),
+  deleteDirectoryEntryPermanently: vi.fn(),
   getDirectoryDepartments: vi.fn(),
   getDirectoryEntries: vi.fn(),
   getStoredAccessToken: vi.fn(() => "token"),
@@ -57,11 +58,13 @@ const entry: OfficeChatDirectoryEntry = {
 function renderPanel({
   currentUserId = "user-1",
   manager = false,
+  role = "user",
   dictionary = en,
   onStartDirect = vi.fn()
 }: {
   currentUserId?: string;
   manager?: boolean;
+  role?: UserRole;
   dictionary?: typeof en;
   onStartDirect?: (userId: string) => void;
 } = {}) {
@@ -69,6 +72,7 @@ function renderPanel({
     <DirectoryPanel
       currentUser={userFactory({
         id: currentUserId,
+        role,
         permissions: manager ? ["can_manage_directory"] : []
       })}
       dictionary={dictionary}
@@ -91,6 +95,7 @@ describe("directory panel", () => {
     });
     apiMocks.getDirectoryDepartments.mockResolvedValue({ items: ["IT", "Operations"] });
     apiMocks.createDirectoryEntry.mockResolvedValue(entry);
+    apiMocks.deleteDirectoryEntryPermanently.mockResolvedValue(undefined);
     apiMocks.updateDirectoryEntry.mockResolvedValue(entry);
     apiMocks.archiveDirectoryEntry.mockResolvedValue({ ...entry, is_active: false });
     apiMocks.restoreDirectoryEntry.mockResolvedValue(entry);
@@ -301,6 +306,205 @@ describe("directory panel", () => {
     expect(screen.getAllByRole("button", { name: en.directory.edit }).length).toBeGreaterThan(0);
   });
 
+  it("uses active status by default and lets managers filter archived entries", async () => {
+    renderPanel({ manager: true });
+    await screen.findAllByText("Dmitrii Fedorov");
+    expect(apiMocks.getDirectoryEntries).toHaveBeenCalledWith(
+      "token",
+      expect.objectContaining({ status: "active" })
+    );
+
+    fireEvent.change(screen.getByLabelText(en.directory.activity), {
+      target: { value: "archived" }
+    });
+    await waitFor(() =>
+      expect(apiMocks.getDirectoryEntries).toHaveBeenCalledWith(
+        "token",
+        expect.objectContaining({ status: "archived", page: 1 })
+      )
+    );
+    expect(apiMocks.getDirectoryDepartments).toHaveBeenCalledWith("token", true);
+  });
+
+  it("shows permanent delete only to superadmin for archived unlinked entries", async () => {
+    const archived = {
+      ...entry,
+      linked_user_id: null,
+      linked_user: null,
+      is_active: false
+    };
+    apiMocks.getDirectoryEntries.mockResolvedValue({
+      items: [archived],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+
+    const managerView = renderPanel({ manager: true, role: "admin" });
+    await screen.findAllByText(archived.display_name);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    expect(
+      screen.queryByRole("button", { name: en.directory.deletePermanently })
+    ).not.toBeInTheDocument();
+    managerView.unmount();
+
+    renderPanel({ manager: true, role: "superadmin" });
+    await screen.findAllByText(archived.display_name);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    expect(
+      screen.getByRole("button", { name: en.directory.deletePermanently })
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(en.directory.archived).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("never offers permanent delete for active or linked entries", async () => {
+    renderPanel({ manager: true, role: "superadmin" });
+    await screen.findAllByText(entry.display_name);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    expect(
+      screen.queryByRole("button", { name: en.directory.deletePermanently })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.directory.close }));
+
+    apiMocks.getDirectoryEntries.mockResolvedValue({
+      items: [{ ...entry, is_active: false }],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    fireEvent.change(screen.getByLabelText(en.directory.activity), {
+      target: { value: "archived" }
+    });
+    await waitFor(() => expect(screen.getAllByText(en.directory.archived).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    expect(
+      screen.queryByRole("button", { name: en.directory.deletePermanently })
+    ).not.toBeInTheDocument();
+  });
+
+  it("requires a reason and exact name, blocks double submit, then refreshes", async () => {
+    const archived = {
+      ...entry,
+      linked_user_id: null,
+      linked_user: null,
+      is_active: false
+    };
+    apiMocks.getDirectoryEntries.mockResolvedValue({
+      items: [archived],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    let resolveDelete!: () => void;
+    apiMocks.deleteDirectoryEntryPermanently.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveDelete = resolve;
+      })
+    );
+    renderPanel({ manager: true, role: "superadmin" });
+    await screen.findAllByText(archived.display_name);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    fireEvent.click(screen.getByRole("button", { name: en.directory.deletePermanently }));
+
+    const dialog = screen.getByRole("dialog", { name: en.directory.deleteTitle });
+    const submit = within(dialog).getByRole("button", { name: en.directory.deletePermanently });
+    expect(submit).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(en.directory.deleteReason), {
+      target: { value: "duplicate" }
+    });
+    fireEvent.change(
+      within(dialog).getByLabelText(
+        en.directory.deleteConfirmation.replace("{name}", archived.display_name)
+      ),
+      { target: { value: `  ${archived.display_name}  ` } }
+    );
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(apiMocks.deleteDirectoryEntryPermanently).toHaveBeenCalledTimes(1);
+    expect(apiMocks.deleteDirectoryEntryPermanently).toHaveBeenCalledWith(
+      "token",
+      archived.id,
+      {
+        confirmation_name: archived.display_name,
+        reason: "duplicate",
+        expected_updated_at: archived.updated_at
+      }
+    );
+    resolveDelete();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: en.directory.deleteTitle })).not.toBeInTheDocument()
+    );
+    expect(await screen.findByText(en.directory.deleteSuccess)).toBeInTheDocument();
+    expect(apiMocks.getDirectoryEntries.mock.calls.length).toBeGreaterThan(1);
+    expect(apiMocks.getDirectoryDepartments.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it.each([
+    ["directory_entry_stale", en.directory.deleteErrors.stale],
+    ["directory_entry_linked_user", en.directory.deleteErrors.linkedUser],
+    ["directory_entry_delete_restricted", en.directory.deleteErrors.restricted]
+  ] as const)("shows localized permanent-delete error %s without raw backend text", async (code, message) => {
+    const archived = {
+      ...entry,
+      linked_user_id: null,
+      linked_user: null,
+      is_active: false
+    };
+    apiMocks.getDirectoryEntries.mockResolvedValue({
+      items: [archived],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    apiMocks.deleteDirectoryEntryPermanently.mockRejectedValueOnce(
+      new ApiResponseError(409, code)
+    );
+    renderPanel({ manager: true, role: "superadmin" });
+    await screen.findAllByText(archived.display_name);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    fireEvent.click(screen.getByRole("button", { name: en.directory.deletePermanently }));
+    const dialog = screen.getByRole("dialog", { name: en.directory.deleteTitle });
+    fireEvent.change(within(dialog).getByLabelText(en.directory.deleteReason), {
+      target: { value: "test_data" }
+    });
+    fireEvent.change(
+      within(dialog).getByLabelText(
+        en.directory.deleteConfirmation.replace("{name}", archived.display_name)
+      ),
+      { target: { value: archived.display_name } }
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: en.directory.deletePermanently })
+    );
+    expect(await within(dialog).findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(code)).not.toBeInTheDocument();
+  });
+
+  it("closes the permanent-delete dialog with Escape before submission", async () => {
+    const archived = {
+      ...entry,
+      linked_user_id: null,
+      linked_user: null,
+      is_active: false
+    };
+    apiMocks.getDirectoryEntries.mockResolvedValue({
+      items: [archived],
+      total: 1,
+      page: 1,
+      limit: 30
+    });
+    renderPanel({ manager: true, role: "superadmin" });
+    await screen.findAllByText(archived.display_name);
+    fireEvent.click(screen.getAllByRole("button", { name: en.directory.open })[0]);
+    fireEvent.click(screen.getByRole("button", { name: en.directory.deletePermanently }));
+    expect(screen.getByRole("dialog", { name: en.directory.deleteTitle })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: en.directory.deleteTitle })
+    ).not.toBeInTheDocument();
+    expect(apiMocks.deleteDirectoryEntryPermanently).not.toHaveBeenCalled();
+  });
+
   it("creates and edits entries through localized forms", async () => {
     renderPanel({ manager: true });
     await screen.findAllByText("Dmitrii Fedorov");
@@ -427,6 +631,10 @@ describe("directory panel", () => {
     expect(ru.directory.thisIsYou).toBeTruthy();
     expect(en.directory.accountDisabled).toBeTruthy();
     expect(ru.directory.accountDisabled).toBeTruthy();
+    expect(en.directory.archivedOnly).toBeTruthy();
+    expect(ru.directory.archivedOnly).toBeTruthy();
+    expect(en.directory.deleteReasons.privacy_request).toBeTruthy();
+    expect(ru.directory.deleteReasons.privacy_request).toBeTruthy();
     expect(ru.directory.title).toBe("Справочник");
     expect(en.adminUsers.permissions.items.can_manage_directory.label).toBeTruthy();
     expect(ru.adminUsers.permissions.items.can_manage_directory.label).toBeTruthy();

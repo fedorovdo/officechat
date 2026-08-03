@@ -7,12 +7,18 @@ from uuid import uuid4
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from app.api import deps
 from app.api.routes import directory as directory_routes
 from app.core.permissions import CAN_MANAGE_DIRECTORY, PERMISSION_CATALOG
 from app.models.directory import DirectoryEntry
-from app.schemas.directory import DirectoryEntryCreate, DirectoryEntryPublic, DirectoryEntryUpdate
+from app.schemas.directory import (
+    DirectoryEntryCreate,
+    DirectoryEntryPermanentDelete,
+    DirectoryEntryPublic,
+    DirectoryEntryUpdate,
+)
 from app.services import directory
 
 
@@ -197,6 +203,7 @@ class DirectoryPermissionTests(unittest.IsolatedAsyncioTestCase):
             search=None,
             department=None,
             include_inactive=False,
+            only_inactive=False,
             page=1,
             limit=30,
         )
@@ -224,7 +231,32 @@ class DirectoryPermissionTests(unittest.IsolatedAsyncioTestCase):
             search="Dmitrii",
             department="IT",
             include_inactive=True,
+            only_inactive=False,
             page=3,
+            limit=30,
+        )
+
+    async def test_manager_can_list_only_archived_entries(self):
+        session = AsyncMock()
+        with (
+            patch.object(directory_routes, "can_manage_directory", AsyncMock(return_value=True)),
+            patch.object(
+                directory_routes,
+                "list_directory_entries",
+                AsyncMock(return_value=([], 2)),
+            ) as listing,
+        ):
+            result = await directory_routes.get_directory_entries(
+                session, user(), None, None, "archived", 1, 30
+            )
+        self.assertEqual(result.total, 2)
+        listing.assert_awaited_once_with(
+            session,
+            search=None,
+            department=None,
+            include_inactive=True,
+            only_inactive=True,
+            page=1,
             limit=30,
         )
 
@@ -249,6 +281,15 @@ class DirectoryPermissionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DirectoryMutationTests(unittest.IsolatedAsyncioTestCase):
+    def delete_payload(self, current, **overrides):
+        values = {
+            "confirmation_name": current.display_name,
+            "reason": "test_data",
+            "expected_updated_at": current.updated_at,
+        }
+        values.update(overrides)
+        return DirectoryEntryPermanentDelete(**values)
+
     async def test_missing_linked_user_is_rejected(self):
         session = AsyncMock()
         session.get.return_value = None
@@ -507,6 +548,252 @@ class DirectoryMutationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session.commits, 4)
         self.assertEqual(session.rollbacks, 0)
+
+    async def test_only_superadmin_can_permanently_delete(self):
+        current = entry(is_active=False)
+        for role in ("admin", "user"):
+            session = AsyncMock()
+            with self.assertRaises(directory.DirectoryPermanentDeleteError) as raised:
+                await directory.permanently_delete_directory_entry(
+                    session,
+                    current.id,
+                    self.delete_payload(current),
+                    user(role=role),
+                    request(),
+                )
+            self.assertEqual(raised.exception.code, "directory_entry_delete_forbidden")
+            session.execute.assert_not_awaited()
+            session.delete.assert_not_awaited()
+
+    async def test_permanent_delete_requires_archived_unlinked_current_entry(self):
+        actor = user(role="superadmin")
+        cases = (
+            (entry(is_active=True), "directory_entry_must_be_archived"),
+            (entry(is_active=False, linked_user_id=uuid4()), "directory_entry_linked_user"),
+        )
+        for current, expected_code in cases:
+            session = AsyncMock()
+            with (
+                patch.object(
+                    directory,
+                    "get_directory_entry",
+                    AsyncMock(return_value=current),
+                ),
+                patch.object(directory, "record_audit_event", AsyncMock()) as audit,
+            ):
+                with self.assertRaises(directory.DirectoryPermanentDeleteError) as raised:
+                    await directory.permanently_delete_directory_entry(
+                        session,
+                        current.id,
+                        self.delete_payload(current),
+                        actor,
+                        request(),
+                    )
+            self.assertEqual(raised.exception.code, expected_code)
+            audit.assert_not_awaited()
+            session.delete.assert_not_awaited()
+
+    async def test_permanent_delete_checks_timestamp_and_exact_trimmed_name(self):
+        current = entry(is_active=False)
+        actor = user(role="superadmin")
+        stale = current.updated_at.replace(hour=11)
+        cases = (
+            (
+                self.delete_payload(current, expected_updated_at=stale),
+                "directory_entry_stale",
+            ),
+            (
+                self.delete_payload(current, confirmation_name="Different name"),
+                "confirmation_name_mismatch",
+            ),
+        )
+        for payload, expected_code in cases:
+            session = AsyncMock()
+            with (
+                patch.object(directory, "get_directory_entry", AsyncMock(return_value=current)),
+                patch.object(directory, "record_audit_event", AsyncMock()) as audit,
+            ):
+                with self.assertRaises(directory.DirectoryPermanentDeleteError) as raised:
+                    await directory.permanently_delete_directory_entry(
+                        session, current.id, payload, actor, request()
+                    )
+            self.assertEqual(raised.exception.code, expected_code)
+            audit.assert_not_awaited()
+
+        trimmed = self.delete_payload(
+            current,
+            confirmation_name=f"  {current.display_name}  ",
+        )
+        self.assertEqual(trimmed.confirmation_name, current.display_name)
+
+    async def test_restore_or_link_after_confirmation_is_reported_as_stale(self):
+        actor = user(role="superadmin")
+        dialog_timestamp = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+        changed_timestamp = datetime(2026, 7, 25, 10, 1, tzinfo=timezone.utc)
+        for current in (
+            entry(is_active=True, updated_at=changed_timestamp),
+            entry(
+                is_active=False,
+                linked_user_id=uuid4(),
+                updated_at=changed_timestamp,
+            ),
+        ):
+            session = AsyncMock()
+            with (
+                patch.object(directory, "get_directory_entry", AsyncMock(return_value=current)),
+                patch.object(directory, "record_audit_event", AsyncMock()) as audit,
+            ):
+                with self.assertRaises(directory.DirectoryPermanentDeleteError) as raised:
+                    await directory.permanently_delete_directory_entry(
+                        session,
+                        current.id,
+                        self.delete_payload(
+                            current,
+                            expected_updated_at=dialog_timestamp,
+                        ),
+                        actor,
+                        request(),
+                    )
+            self.assertEqual(raised.exception.code, "directory_entry_stale")
+            audit.assert_not_awaited()
+
+    async def test_permanent_delete_writes_safe_audit_then_deletes(self):
+        current = entry(is_active=False)
+        actor = user(role="superadmin")
+        session = AsyncMock()
+        with (
+            patch.object(directory, "get_directory_entry", AsyncMock(return_value=current)) as getter,
+            patch.object(directory, "record_audit_event", AsyncMock()) as audit,
+        ):
+            deleted_id = await directory.permanently_delete_directory_entry(
+                session,
+                current.id,
+                self.delete_payload(current, reason="duplicate"),
+                actor,
+                request(),
+            )
+        self.assertEqual(deleted_id, current.id)
+        getter.assert_awaited_once_with(
+            session,
+            current.id,
+            include_inactive=True,
+            for_update=True,
+        )
+        session.delete.assert_awaited_once_with(current)
+        session.flush.assert_awaited_once()
+        audit_details = audit.await_args.kwargs["details"]
+        self.assertEqual(
+            audit_details,
+            {
+                "deleted_entry_id": str(current.id),
+                "entry_kind": "directory_entry",
+                "reason": "duplicate",
+                "was_archived": True,
+                "had_linked_user": False,
+            },
+        )
+        self.assertIsNone(audit.await_args.kwargs["target_label"])
+        serialized = repr(audit.await_args.kwargs)
+        for personal_value in (
+            current.display_name,
+            current.department,
+            current.email,
+            current.work_phone,
+        ):
+            self.assertNotIn(personal_value, serialized)
+
+    async def test_permanent_delete_route_commits_once_and_restricts_safely(self):
+        current = entry(is_active=False)
+        actor = user(role="superadmin")
+        payload = self.delete_payload(current)
+        session = MutationSession()
+        with patch.object(
+            directory_routes,
+            "permanently_delete_directory_entry",
+            AsyncMock(return_value=current.id),
+        ):
+            response = await directory_routes.post_directory_entry_delete_permanently(
+                current.id, payload, request(), session, actor
+            )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(session.commits, 1)
+        self.assertEqual(session.rollbacks, 0)
+
+        with patch.object(
+            directory_routes,
+            "permanently_delete_directory_entry",
+            AsyncMock(
+                side_effect=directory.DirectoryPermanentDeleteError(
+                    "directory_entry_not_found"
+                )
+            ),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await directory_routes.post_directory_entry_delete_permanently(
+                    current.id, payload, request(), session, actor
+                )
+        self.assertEqual(raised.exception.status_code, 404)
+        self.assertEqual(raised.exception.detail, "directory_entry_not_found")
+
+    async def test_permanent_delete_failure_rolls_back_without_partial_success(self):
+        current = entry(is_active=False)
+        actor = user(role="superadmin")
+        payload = self.delete_payload(current)
+        session = MutationSession()
+        with patch.object(
+            directory_routes,
+            "permanently_delete_directory_entry",
+            AsyncMock(side_effect=RuntimeError("audit persistence failed")),
+        ):
+            with self.assertRaises(RuntimeError):
+                await directory_routes.post_directory_entry_delete_permanently(
+                    current.id, payload, request(), session, actor
+                )
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(session.rollbacks, 1)
+
+        restricted_session = MutationSession()
+        with patch.object(
+            directory_routes,
+            "permanently_delete_directory_entry",
+            AsyncMock(
+                side_effect=IntegrityError(
+                    "DELETE FROM directory_entries",
+                    {},
+                    RuntimeError("foreign key restriction"),
+                )
+            ),
+        ):
+            with self.assertRaises(HTTPException) as restricted:
+                await directory_routes.post_directory_entry_delete_permanently(
+                    current.id,
+                    payload,
+                    request(),
+                    restricted_session,
+                    actor,
+                )
+        self.assertEqual(restricted.exception.status_code, 409)
+        self.assertEqual(
+            restricted.exception.detail,
+            "directory_entry_delete_restricted",
+        )
+        self.assertEqual(restricted_session.commits, 0)
+        self.assertEqual(restricted_session.rollbacks, 1)
+
+    def test_permanent_delete_schema_rejects_empty_unknown_and_extra_fields(self):
+        current = entry(is_active=False)
+        base = {
+            "confirmation_name": current.display_name,
+            "reason": "test_data",
+            "expected_updated_at": current.updated_at,
+        }
+        for invalid in (
+            {**base, "confirmation_name": "  "},
+            {**base, "reason": "free-form reason"},
+            {**base, "unexpected": "value"},
+        ):
+            with self.assertRaises(ValidationError):
+                DirectoryEntryPermanentDelete.model_validate(invalid)
 
 
 if __name__ == "__main__":

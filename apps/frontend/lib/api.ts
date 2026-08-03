@@ -99,6 +99,19 @@ export type DirectoryEntryPayload = {
   is_active?: boolean;
 };
 
+export type DirectoryEntryDeleteReason =
+  | "test_data"
+  | "duplicate"
+  | "incorrect_entry"
+  | "privacy_request"
+  | "other";
+
+export type DirectoryEntryPermanentDeletePayload = {
+  confirmation_name: string;
+  reason: DirectoryEntryDeleteReason;
+  expected_updated_at: string;
+};
+
 export type DirectoryImportParserMode = "auto" | "table" | "legacy_layout";
 export type DirectoryImportKind =
   | "person"
@@ -1491,7 +1504,7 @@ export function getDirectoryEntries(
   query: {
     search?: string;
     department?: string;
-    status?: "active" | "all";
+    status?: "active" | "all" | "archived";
     page?: number;
     limit?: number;
   } = {}
@@ -1538,6 +1551,17 @@ export function archiveDirectoryEntry(token: string, entryId: string) {
 export function restoreDirectoryEntry(token: string, entryId: string) {
   return apiFetch<OfficeChatDirectoryEntry>(`/api/directory/${entryId}/restore`, token, {
     method: "POST"
+  });
+}
+
+export function deleteDirectoryEntryPermanently(
+  token: string,
+  entryId: string,
+  payload: DirectoryEntryPermanentDeletePayload
+) {
+  return apiFetch<void>(`/api/directory/${entryId}/delete-permanently`, token, {
+    method: "POST",
+    body: JSON.stringify(payload)
   });
 }
 

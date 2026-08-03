@@ -2,15 +2,22 @@ import re
 import unicodedata
 import uuid
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from uuid import UUID
 
+from fastapi import Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.directory import DirectoryEntry
 from app.models.user import User
-from app.schemas.directory import DirectoryEntryCreate, DirectoryEntryUpdate
+from app.schemas.directory import (
+    DirectoryEntryCreate,
+    DirectoryEntryPermanentDelete,
+    DirectoryEntryUpdate,
+)
+from app.services.audit import record_audit_event
 
 SEARCHABLE_TEXT_FIELDS = (
     DirectoryEntry.display_name,
@@ -49,6 +56,12 @@ class DirectoryLinkedUserNotFoundError(ValueError):
 
 class DirectoryStateConflictError(ValueError):
     pass
+
+
+class DirectoryPermanentDeleteError(ValueError):
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 def normalize_phone_digits(value: str | None) -> str:
@@ -121,9 +134,12 @@ async def list_directory_entries(
     include_inactive: bool,
     page: int,
     limit: int,
+    only_inactive: bool = False,
 ) -> tuple[list[DirectoryEntry], int]:
     conditions: list[object] = []
-    if not include_inactive:
+    if only_inactive:
+        conditions.append(DirectoryEntry.is_active.is_(False))
+    elif not include_inactive:
         conditions.append(DirectoryEntry.is_active.is_(True))
     if department and department.strip():
         conditions.append(func.lower(DirectoryEntry.department) == department.strip().lower())
@@ -244,3 +260,65 @@ async def set_directory_entry_active(
     await session.flush()
     await session.refresh(entry)
     return await get_directory_entry(session, entry.id, include_inactive=True)
+
+
+def _normalized_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+async def permanently_delete_directory_entry(
+    session: AsyncSession,
+    entry_id: UUID,
+    payload: DirectoryEntryPermanentDelete,
+    actor: User,
+    request: Request | None,
+) -> UUID:
+    if actor.role != "superadmin":
+        raise DirectoryPermanentDeleteError("directory_entry_delete_forbidden")
+
+    try:
+        entry = await get_directory_entry(
+            session,
+            entry_id,
+            include_inactive=True,
+            for_update=True,
+        )
+    except DirectoryEntryNotFoundError as exc:
+        raise DirectoryPermanentDeleteError("directory_entry_not_found") from exc
+
+    if _normalized_timestamp(entry.updated_at) != _normalized_timestamp(
+        payload.expected_updated_at
+    ):
+        raise DirectoryPermanentDeleteError("directory_entry_stale")
+    if entry.is_active:
+        raise DirectoryPermanentDeleteError("directory_entry_must_be_archived")
+    if entry.linked_user_id is not None:
+        raise DirectoryPermanentDeleteError("directory_entry_linked_user")
+    if payload.confirmation_name != entry.display_name:
+        raise DirectoryPermanentDeleteError("confirmation_name_mismatch")
+
+    deleted_entry_id = entry.id
+    await record_audit_event(
+        session,
+        event_type="directory_entry_deleted_permanently",
+        category="directory",
+        action="delete_permanently",
+        status="success",
+        actor=actor,
+        target_type="directory_entry",
+        target_id=deleted_entry_id,
+        target_label=None,
+        details={
+            "deleted_entry_id": str(deleted_entry_id),
+            "entry_kind": "directory_entry",
+            "reason": payload.reason,
+            "was_archived": True,
+            "had_linked_user": False,
+        },
+        request=request,
+    )
+    await session.delete(entry)
+    await session.flush()
+    return deleted_entry_id

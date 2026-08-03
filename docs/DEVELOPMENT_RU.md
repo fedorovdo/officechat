@@ -388,3 +388,26 @@ docker compose exec backend env RUN_POSTGRES_INTEGRATION_TESTS=1 python -m pytes
 ```
 
 Подробности: `docs/DIRECTORY_IMPORT_RU.md`.
+
+## Физическое удаление записей справочника
+
+Обычный режим справочника показывает только активные записи. Пользователи с
+`can_manage_directory` могут выбрать все записи или только архивные. Архивирование
+обратимо, а `POST /api/directory/{entry_id}/delete-permanently` доступен только
+`superadmin` для уже архивной записи без связи с OfficeChat user.
+
+Запрос требует точное отображаемое имя, причину из фиксированного enum и
+`expected_updated_at`. Сервис повторно загружает запись через `SELECT FOR UPDATE`;
+audit и удаление фиксируются одним commit. Import-ссылки `matched_entry_id` и
+`result_entry_id` используют `ON DELETE SET NULL`, поэтому batch и результат
+импорта сохраняются.
+
+Проверка:
+
+```powershell
+docker compose exec backend python -m pytest -q tests/test_directory.py
+docker compose exec backend env RUN_POSTGRES_INTEGRATION_TESTS=1 python -m pytest -q tests/test_directory_delete_postgres.py
+docker compose exec frontend npm run test:run -- tests/directoryPanel.test.tsx
+```
+
+Подробности: `docs/DIRECTORY_RU.md`.

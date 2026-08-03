@@ -168,6 +168,8 @@ The user app includes a profile panel. Authenticated active users can review acc
 
 The user sidebar uses `GET /api/users`, an authenticated endpoint that returns active users with public directory fields only.
 
+The corporate directory shows active entries by default. Managers can view all or only archived entries; archiving is reversible. A `superadmin` may permanently delete one archived entry at a time only when it is not linked to an OfficeChat account, after confirming the exact display name and a fixed deletion reason. Permanent deletion is audited without copying contact PII into the audit payload and can be recovered only from a backup. See [docs/DIRECTORY_RU.md](docs/DIRECTORY_RU.md).
+
 Direct/private messages are available in the user app shell:
 
 - `GET /api/direct/conversations`

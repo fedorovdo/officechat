@@ -1,7 +1,8 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_can_manage_directory
@@ -11,6 +12,7 @@ from app.schemas.directory import (
     DirectoryDepartmentsPublic,
     DirectoryEntryCreate,
     DirectoryEntryPage,
+    DirectoryEntryPermanentDelete,
     DirectoryEntryPublic,
     DirectoryEntryUpdate,
 )
@@ -18,11 +20,13 @@ from app.services.audit import record_audit_event
 from app.services.directory import (
     DirectoryEntryNotFoundError,
     DirectoryLinkedUserNotFoundError,
+    DirectoryPermanentDeleteError,
     DirectoryStateConflictError,
     create_directory_entry,
     get_directory_entry,
     list_departments,
     list_directory_entries,
+    permanently_delete_directory_entry,
     set_directory_entry_active,
     update_directory_entry,
 )
@@ -45,24 +49,42 @@ async def can_manage_directory(session: AsyncSession, user: User) -> bool:
     return await has_permission(session, user, CAN_MANAGE_DIRECTORY)
 
 
+def permanent_delete_http_error(exc: DirectoryPermanentDeleteError) -> HTTPException:
+    statuses = {
+        "directory_entry_delete_forbidden": status.HTTP_403_FORBIDDEN,
+        "directory_entry_not_found": status.HTTP_404_NOT_FOUND,
+        "directory_entry_must_be_archived": status.HTTP_409_CONFLICT,
+        "directory_entry_linked_user": status.HTTP_409_CONFLICT,
+        "directory_entry_stale": status.HTTP_409_CONFLICT,
+        "confirmation_name_mismatch": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    }
+    return HTTPException(
+        status_code=statuses.get(exc.code, status.HTTP_400_BAD_REQUEST),
+        detail=exc.code,
+    )
+
+
 @router.get("", response_model=DirectoryEntryPage)
 async def get_directory_entries(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     search: str | None = Query(default=None, max_length=200),
     department: str | None = Query(default=None, max_length=160),
-    status_filter: Annotated[Literal["active", "all"], Query(alias="status")] = "active",
+    status_filter: Annotated[
+        Literal["active", "all", "archived"], Query(alias="status")
+    ] = "active",
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> DirectoryEntryPage:
     manager = await can_manage_directory(session, current_user)
-    if status_filter == "all" and not manager:
+    if status_filter != "active" and not manager:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission required")
     rows, total = await list_directory_entries(
         session,
         search=search,
         department=department,
-        include_inactive=status_filter == "all",
+        include_inactive=status_filter != "active",
+        only_inactive=status_filter == "archived",
         page=page,
         limit=limit,
     )
@@ -250,3 +272,35 @@ async def post_directory_entry_restore(
     except Exception as exc:
         await session.rollback()
         raise directory_http_error(exc) from exc
+
+
+@router.post("/{entry_id}/delete-permanently", status_code=status.HTTP_204_NO_CONTENT)
+async def post_directory_entry_delete_permanently(
+    entry_id: UUID,
+    payload: DirectoryEntryPermanentDelete,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    try:
+        await permanently_delete_directory_entry(
+            session,
+            entry_id,
+            payload,
+            current_user,
+            request,
+        )
+        await session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except DirectoryPermanentDeleteError as exc:
+        await session.rollback()
+        raise permanent_delete_http_error(exc) from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="directory_entry_delete_restricted",
+        ) from exc
+    except Exception:
+        await session.rollback()
+        raise

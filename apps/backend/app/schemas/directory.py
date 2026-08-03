@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationInfo, field_validator
@@ -77,6 +78,31 @@ class DirectoryEntryUpdate(BaseModel):
         if info.field_name == "display_name" and not stripped:
             raise ValueError("Display name is required")
         return stripped or None
+
+
+DirectoryEntryDeleteReason = Literal[
+    "test_data",
+    "duplicate",
+    "incorrect_entry",
+    "privacy_request",
+    "other",
+]
+
+
+class DirectoryEntryPermanentDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation_name: str = Field(min_length=1, max_length=160)
+    reason: DirectoryEntryDeleteReason
+    expected_updated_at: datetime
+
+    @field_validator("confirmation_name")
+    @classmethod
+    def strip_confirmation_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Confirmation name is required")
+        return stripped
 
 
 class DirectoryLinkedUserPublic(BaseModel):

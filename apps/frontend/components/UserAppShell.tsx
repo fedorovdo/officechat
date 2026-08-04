@@ -92,7 +92,7 @@ import {
   type NotificationCenterFilter
 } from "./NotificationCenter";
 import { SidebarAccountFooter } from "./SidebarAccountFooter";
-import { SidebarConversationRow } from "./SidebarConversationRow";
+import { resolveDirectConversationName, SidebarConversationRow } from "./SidebarConversationRow";
 
 type UserAppShellProps = {
   dictionary: Dictionary;
@@ -2127,7 +2127,9 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
               const activity = isGroup
                 ? sidebarActivity.groups[item.group.id]
                 : sidebarActivity.directUsers[item.user.id];
-              const name = isGroup ? item.group.name : item.user.display_name;
+              const name = isGroup
+                ? item.group.name
+                : resolveDirectConversationName(item.user.display_name, item.user.username);
               const secondary = isGroup ? item.group.slug : `@${item.user.username}`;
               const isSelected = isGroup
                 ? selected.type === "group" && selected.groupId === item.group.id

@@ -22,6 +22,10 @@ type SidebarConversationRowProps = {
   unreadCount: number;
 };
 
+export function resolveDirectConversationName(displayName: string, username: string) {
+  return displayName.trim() || `@${username}`;
+}
+
 export function SidebarConversationRow({
   avatar,
   dictionary,
@@ -38,6 +42,7 @@ export function SidebarConversationRow({
   timestamp,
   unreadCount
 }: SidebarConversationRowProps) {
+  const accessibleName = name === secondary ? name : `${name}, ${secondary}`;
   const itemClassName = [
     "user-app-nav-item",
     isSelected ? "user-app-nav-item-active" : "",
@@ -47,7 +52,7 @@ export function SidebarConversationRow({
 
   return (
     <button
-      aria-label={`${name}, ${secondary}`}
+      aria-label={accessibleName}
       className={itemClassName}
       disabled={disabled}
       onClick={onClick}
@@ -60,7 +65,6 @@ export function SidebarConversationRow({
           <strong>{name}</strong>
         </span>
         <span className="sidebar-item-preview">{preview}</span>
-        <span className="sidebar-item-meta">{secondary}</span>
       </span>
       <span className="sidebar-item-right-meta">
         {timestamp ? <span className="sidebar-item-time">{timestamp}</span> : null}

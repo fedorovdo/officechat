@@ -2,7 +2,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SidebarAccountFooter } from "../components/SidebarAccountFooter";
-import { SidebarConversationRow } from "../components/SidebarConversationRow";
+import {
+  resolveDirectConversationName,
+  SidebarConversationRow
+} from "../components/SidebarConversationRow";
 import en from "../dictionaries/en.json";
 import ru from "../dictionaries/ru.json";
 import { userFactory } from "./factories";
@@ -28,6 +31,59 @@ function renderConversationRow(unreadCount: number, mentionCount = 0) {
 }
 
 describe("sidebar conversation rows", () => {
+  it("uses display name or a trimmed username fallback for direct chats", () => {
+    expect(resolveDirectConversationName(" Dmitrii ", "dmitrii")).toBe("Dmitrii");
+    expect(resolveDirectConversationName("   ", "dmitrii")).toBe("@dmitrii");
+  });
+
+  it("keeps the username accessible without rendering a separate visual row", () => {
+    render(
+      <SidebarConversationRow
+        avatar={<span>A</span>}
+        dictionary={en}
+        isCollapsed={false}
+        isMentioned={false}
+        isSelected={false}
+        isUnread={false}
+        mentionCount={0}
+        name="Dmitrii"
+        onClick={vi.fn()}
+        preview="Last message"
+        secondary="@dmitrii"
+        unreadCount={0}
+      />
+    );
+
+    const row = screen.getByRole("button", { name: "Dmitrii, @dmitrii" });
+    expect(within(row).getByText("Dmitrii")).toBeInTheDocument();
+    expect(within(row).getByText("Last message")).toBeInTheDocument();
+    expect(within(row).queryByText("@dmitrii")).not.toBeInTheDocument();
+    expect(row.querySelector(".sidebar-item-meta")).toBeNull();
+  });
+
+  it("renders username as the primary fallback without adding another row", () => {
+    render(
+      <SidebarConversationRow
+        avatar={<span>A</span>}
+        dictionary={en}
+        isCollapsed={false}
+        isMentioned={false}
+        isSelected={false}
+        isUnread={false}
+        mentionCount={0}
+        name="@dmitrii"
+        onClick={vi.fn()}
+        preview="No recent messages"
+        secondary="@dmitrii"
+        unreadCount={0}
+      />
+    );
+
+    const row = screen.getByRole("button", { name: "@dmitrii" });
+    expect(within(row).getAllByText("@dmitrii")).toHaveLength(1);
+    expect(within(row).getByText("No recent messages")).toBeInTheDocument();
+  });
+
   it("keeps a group unread badge in the right meta column and outside the avatar", () => {
     const { container } = renderConversationRow(8);
     const row = screen.getByRole("button", { name: "Alarming messages, alerts" });

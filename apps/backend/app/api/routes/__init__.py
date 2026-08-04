@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes.admin_bots import router as admin_bots_router
 from app.api.routes.admin_audit import router as admin_audit_router
+from app.api.routes.admin_backups import router as admin_backups_router
 from app.api.routes.admin_permissions import router as admin_permissions_router
 from app.api.routes.admin_users import router as admin_users_router
 from app.api.routes.admin_retention import router as admin_retention_router
@@ -43,6 +44,7 @@ api_router.include_router(directory_router, prefix="/directory", tags=["director
 api_router.include_router(discussions_router, prefix="/discussions", tags=["discussions"])
 api_router.include_router(admin_bots_router, prefix="/admin/bots", tags=["admin"])
 api_router.include_router(admin_audit_router, prefix="/admin/audit", tags=["admin", "audit"])
+api_router.include_router(admin_backups_router, prefix="/admin/backups", tags=["admin", "backups"])
 api_router.include_router(admin_permissions_router, prefix="/admin", tags=["admin", "permissions"])
 api_router.include_router(admin_users_router, prefix="/admin/users", tags=["admin"])
 api_router.include_router(admin_retention_router, prefix="/admin", tags=["admin", "retention"])

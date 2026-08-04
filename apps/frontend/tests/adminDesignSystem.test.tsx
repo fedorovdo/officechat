@@ -73,6 +73,22 @@ describe("admin design system", () => {
     expect(within(grid).queryByRole("link", { name: /About/i })).not.toBeInTheDocument();
   });
 
+  it("renders six administration cards for superadmin including Backup Center", async () => {
+    apiMocks.getCurrentUser.mockResolvedValue(userFactory({
+      display_name: "Root Administrator",
+      role: "superadmin",
+      username: "root"
+    }));
+    const { container } = render(<Dashboard dictionary={en} locale="en" />);
+    await screen.findByText("Root Administrator");
+
+    const grid = container.querySelector(".admin-action-grid") as HTMLElement;
+    const cards = within(grid).getAllByRole("link");
+    expect(cards).toHaveLength(6);
+    expect(cards.map((link) => link.getAttribute("href"))).toContain("/en/admin/backups");
+    expect(within(grid).getByRole("link", { name: new RegExp(en.backups.title, "i") })).toBeInTheDocument();
+  });
+
   it("preserves account identity, primary app action, and secondary logout", async () => {
     render(<Dashboard dictionary={en} locale="en" />);
     await screen.findByText("OfficeChat Admin");

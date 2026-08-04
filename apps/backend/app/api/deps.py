@@ -75,6 +75,21 @@ async def require_admin_user(
     return current_user
 
 
+async def require_superadmin_user(
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if current_user.role != "superadmin":
+        if should_record_security_event(f"superadmin-denied:{current_user.id}:{request.url.path}"):
+            await record_audit_event_best_effort(
+                event_type="security.access_denied", category="security", action="superadmin_access", status="denied",
+                actor=current_user, target_type="endpoint", target_label=request.url.path,
+                details={"method": request.method}, error_code="superadmin_role_required", request=request,
+            )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin role required")
+    return current_user
+
+
 async def require_can_broadcast(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],

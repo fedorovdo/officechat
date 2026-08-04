@@ -278,6 +278,9 @@ export function SidebarAccountFooter({
                 <Link href={`/${locale}/admin/storage`} onClick={() => closeAdminMenu()} role="menuitem">
                   {dictionary.retention.title}
                 </Link>
+                {currentUser?.role === "superadmin" ? <Link href={`/${locale}/admin/backups`} onClick={() => closeAdminMenu()} role="menuitem">
+                  {dictionary.backups.title}
+                </Link> : null}
                 <Link href={`/${locale}/admin/audit`} onClick={() => closeAdminMenu()} role="menuitem">
                   {dictionary.audit.title}
                 </Link>

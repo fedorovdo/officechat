@@ -10,6 +10,7 @@ CONFIG_FILE="${OFFICECHAT_BACKUP_CONFIG:-/etc/officechat/backup.conf}"
 MODE="refuse"
 CONFIRM_HOSTNAME=""
 CONFIRM_BACKUP=""
+BACKUP_ID=""
 CONFIRMED=0
 NON_INTERACTIVE=0
 TEMP_CONTAINER=""
@@ -31,6 +32,7 @@ usage() {
   cat <<'EOF'
 Usage:
   restore-production.sh [--config FILE] --verify-only BACKUP_PATH
+  restore-production.sh [--config FILE] --verify-only --backup-id BACKUP_ID
   restore-production.sh [--config FILE] --production \
     --confirm-hostname HOSTNAME --confirm-backup BACKUP_ID --yes \
     [--non-interactive] BACKUP_PATH
@@ -67,6 +69,12 @@ while (($# > 0)); do
       CONFIRM_BACKUP="$2"
       shift 2
       ;;
+    --backup-id)
+      (($# >= 2)) || fail "--backup-id requires a value"
+      [[ -z "$BACKUP_ID" ]] || fail "--backup-id may be supplied only once"
+      BACKUP_ID="$2"
+      shift 2
+      ;;
     --yes)
       CONFIRMED=1
       shift
@@ -91,11 +99,20 @@ while (($# > 0)); do
 done
 
 [[ "$MODE" != "refuse" ]] || fail "Choose --verify-only or provide all production restore safeguards"
-[[ -n "${BACKUP_PATH:-}" ]] || fail "Backup path is required"
 require_command stat
 require_command realpath
 require_command id
 load_backup_config "$CONFIG_FILE"
+if [[ -n "$BACKUP_ID" ]]; then
+  [[ -z "${BACKUP_PATH:-}" ]] || fail "Use either BACKUP_PATH or --backup-id, not both"
+  [[ "$BACKUP_ID" =~ ^officechat-backup-[0-9]{8}-[0-9]{6}Z$ ]] || fail "Invalid backup identifier"
+  backup_root_resolved="$(realpath -m -- "$BACKUP_ROOT")"
+  BACKUP_PATH="$(realpath -m -- "${BACKUP_ROOT%/}/${BACKUP_ID}")"
+  [[ "$(dirname "$BACKUP_PATH")" == "$backup_root_resolved" && "$(basename "$BACKUP_PATH")" == "$BACKUP_ID" ]] ||
+    fail "Backup identifier resolved outside BACKUP_ROOT"
+  [[ -d "$BACKUP_PATH" && ! -L "$BACKUP_PATH" ]] || fail "Backup not found"
+fi
+[[ -n "${BACKUP_PATH:-}" ]] || fail "Backup path or --backup-id is required"
 validate_hook "$POST_RESTORE_HOOK"
 require_command docker
 require_command python3

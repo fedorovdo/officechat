@@ -108,6 +108,10 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3100"]
     )
     uploads_dir: str = "/data/uploads"
+    backup_agent_socket: str = "/run/officechat-backup-agent/agent.sock"
+    backup_agent_connect_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30)
+    backup_agent_read_timeout_seconds: float = Field(default=5.0, ge=0.1, le=60)
+    backup_agent_max_response_bytes: int = Field(default=1048576, ge=4096, le=4194304)
 
     @model_validator(mode="after")
     def require_persistent_production_secret(self) -> "Settings":

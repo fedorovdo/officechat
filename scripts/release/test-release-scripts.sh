@@ -71,6 +71,18 @@ grep -Fq 'deploy/caddy/Caddyfile.example' "${SCRIPT_DIR}/create-release-bundle.s
   echo "Release bundle does not include the Caddy template" >&2
   exit 1
 }
+grep -Fq "s/^OFFICECHAT_VERSION=.*/OFFICECHAT_VERSION=\${VERSION}/" "${SCRIPT_DIR}/create-release-bundle.sh" || {
+  echo "Release bundle does not pin its image version in .env.example" >&2
+  exit 1
+}
+grep -Fq "s/^NEXT_PUBLIC_OFFICECHAT_VERSION=.*/NEXT_PUBLIC_OFFICECHAT_VERSION=\${VERSION}/" "${SCRIPT_DIR}/create-release-bundle.sh" || {
+  echo "Release bundle does not pin its frontend version in .env.example" >&2
+  exit 1
+}
+grep -Fq 'bundled_version_file=' "${SCRIPT_DIR}/lib.sh" || {
+  echo "Release helpers do not read the bundled VERSION file" >&2
+  exit 1
+}
 grep -Fq 'Caddyfile.example' "${SCRIPT_DIR}/install-linux.sh" || {
   echo "Installer does not copy the Caddy template" >&2
   exit 1
@@ -79,14 +91,71 @@ for backup_asset in \
   scripts/backup-production.sh \
   scripts/verify-backup.sh \
   scripts/restore-production.sh \
+  scripts/backup_agent.py \
   deploy/backup/officechat-backup.conf.example \
+  deploy/backup/officechat-backup-agent.conf.example \
   deploy/systemd/officechat-backup.service \
-  deploy/systemd/officechat-backup.timer; do
+  deploy/systemd/officechat-backup.timer \
+  deploy/systemd/officechat-backup-agent.service; do
   grep -Fq "$backup_asset" "${SCRIPT_DIR}/create-release-bundle.sh" || {
     echo "Release bundle does not include ${backup_asset}" >&2
     exit 1
   }
 done
+grep -Fq '[[ ! -f /etc/officechat/backup-agent.conf ]]' "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not preserve an existing backup-agent.conf" >&2
+  exit 1
+}
+grep -Fq 'ensure_backup_agent_group' "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not create the backup agent group" >&2
+  exit 1
+}
+grep -Fq 'enable --now officechat-backup-agent.service' "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not start the backup agent" >&2
+  exit 1
+}
+grep -Fq '[[ ! -f /etc/officechat/backup-agent.conf' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not preserve an existing backup-agent.conf" >&2
+  exit 1
+}
+grep -Fq 'docker-compose.release.yml' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not refresh the versioned release Compose file" >&2
+  exit 1
+}
+grep -Fq 'BACKUP_CENTER_RU.md' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not install Backup Center documentation" >&2
+  exit 1
+}
+grep -Fq 'rm -f /etc/systemd/system/officechat-backup-agent.service' "${SCRIPT_DIR}/uninstall-linux.sh" || {
+  echo "Uninstaller does not remove the stopped backup agent unit" >&2
+  exit 1
+}
+grep -Fq 'Backups preserved' "${SCRIPT_DIR}/uninstall-linux.sh" || {
+  echo "Uninstaller does not preserve backup data" >&2
+  exit 1
+}
+grep -Fq 'RestrictAddressFamilies=AF_UNIX' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent unit is not restricted to Unix sockets" >&2
+  exit 1
+}
+grep -Fq 'CapabilityBoundingSet=' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent unit does not clear its capability bounding set" >&2
+  exit 1
+}
+backend_block="$(sed -n '/^  backend:/,/^  calendar-worker:/p' "$COMPOSE_FILE")"
+worker_block="$(sed -n '/^  calendar-worker:/,/^  frontend:/p' "$COMPOSE_FILE")"
+[[ "$backend_block" == *'BACKUP_AGENT_SOCKET'* && "$backend_block" == *'group_add:'* && "$backend_block" == *'officechat-backup-agent'* ]] || {
+  echo "Backend does not receive the backup agent socket and group" >&2
+  exit 1
+}
+[[ "$worker_block" != *'BACKUP_AGENT_SOCKET'* && "$worker_block" != *'officechat-backup-agent'* && "$worker_block" != *'group_add:'* ]] || {
+  echo "Calendar worker must not receive backup agent access" >&2
+  exit 1
+}
+grep -Fq -- '--backup-id)' "${ROOT_DIR}/scripts/restore-production.sh" || {
+  echo "Restore CLI does not support the documented backup-id selector" >&2
+  exit 1
+}
 grep -Fq '[[ ! -f /etc/officechat/backup.conf ]]' "${SCRIPT_DIR}/install-linux.sh" || {
   echo "Installer does not preserve an existing backup.conf" >&2
   exit 1
@@ -112,6 +181,16 @@ bash "${SCRIPT_DIR}/uninstall-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/verify-install.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/officechatctl" --help >/dev/null
 bash "${SCRIPT_DIR}/create-release-bundle.sh" --dry-run >/dev/null
+
+bundle_lib_dir="${TMP_DIR}/bundle-lib"
+mkdir -p "$bundle_lib_dir"
+cp "${SCRIPT_DIR}/lib.sh" "${bundle_lib_dir}/lib.sh"
+printf '9.8.7-bundle-test\n' >"${bundle_lib_dir}/VERSION"
+bundled_version="$(env -u OFFICECHAT_RELEASE_VERSION bash -c ". \"\$1\"; printf \"%s\" \"\$OFFICECHAT_RELEASE_VERSION\"" _ "${bundle_lib_dir}/lib.sh")"
+[[ "$bundled_version" == "9.8.7-bundle-test" ]] || {
+  echo "Release helpers did not use the bundled VERSION file" >&2
+  exit 1
+}
 
 if bash "${SCRIPT_DIR}/install-linux.sh" --bad-argument >/dev/null 2>&1; then
   echo "install-linux.sh accepted an invalid argument" >&2

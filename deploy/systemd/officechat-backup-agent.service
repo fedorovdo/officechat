@@ -1,0 +1,42 @@
+[Unit]
+Description=OfficeChat read-only backup metadata agent
+Documentation=file:/opt/officechat/docs/BACKUP_CENTER_RU.md
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+SupplementaryGroups=officechat-backup
+UMask=0007
+RuntimeDirectory=officechat-backup-agent
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/python3 /opt/officechat/backup-agent.py --config /etc/officechat/backup-agent.conf
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/var/backups/officechat /etc/officechat/backup.conf /etc/officechat/backup-agent.conf
+ReadWritePaths=/run/officechat-backup-agent
+InaccessiblePaths=/var/lib/officechat /opt/officechat/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-type AdminIconName = "about" | "audit" | "back" | "bots" | "download" | "groups" | "storage" | "users";
+type AdminIconName = "about" | "audit" | "back" | "backup" | "bots" | "download" | "groups" | "storage" | "users";
 
 const iconPaths: Record<AdminIconName, ReactNode> = {
   about: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
   audit: <><path d="M9 5h6M9 9h6M9 13h4" /><path d="M7 3h10a2 2 0 0 1 2 2v14H5V5a2 2 0 0 1 2-2Z" /></>,
+  backup: <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M8 19h8M12 14v5" /></>,
   back: <><path d="m15 18-6-6 6-6" /><path d="M9 12h10" /></>,
   bots: <><rect x="5" y="7" width="14" height="11" rx="3" /><path d="M12 3v4M8.5 12h.01M15.5 12h.01M9 15h6" /></>,
   download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" /></>,

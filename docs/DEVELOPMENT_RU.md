@@ -411,3 +411,9 @@ docker compose exec frontend npm run test:run -- tests/directoryPanel.test.tsx
 ```
 
 Подробности: `docs/DIRECTORY_RU.md`.
+
+## Backup Center
+
+Read-only Backup Center доступен `superadmin` по `/ru/admin/backups`. Backend обращается к host-side agent через `/run/officechat-backup-agent/agent.sock`; backup root, Docker socket и systemd D-Bus в backend не монтируются. В обычном local development agent не требуется: status показывает `unavailable`, а остальные функции OfficeChat продолжают работать.
+
+Production installer устанавливает `backup-agent.py`, root-owned `/etc/officechat/backup-agent.conf`, systemd unit и group `officechat-backup`. Существующий agent config при update сохраняется. Установка agent не запускает backup и не включает backup timer автоматически. Подробности и диагностика: `docs/BACKUP_CENTER_RU.md`.

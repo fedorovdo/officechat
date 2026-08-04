@@ -94,9 +94,22 @@ services:
   backend:
     image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:-0.1.0-rc2}
     restart: unless-stopped
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      BACKUP_AGENT_SOCKET: /run/officechat-backup-agent/agent.sock
+      BACKUP_AGENT_CONNECT_TIMEOUT_SECONDS: ${BACKUP_AGENT_CONNECT_TIMEOUT_SECONDS:-2}
+      BACKUP_AGENT_READ_TIMEOUT_SECONDS: ${BACKUP_AGENT_READ_TIMEOUT_SECONDS:-5}
+      BACKUP_AGENT_MAX_RESPONSE_BYTES: ${BACKUP_AGENT_MAX_RESPONSE_BYTES:-1048576}
+    group_add:
+      - "${OFFICECHAT_BACKUP_GID:-65530}"
     volumes:
       - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads
+      - type: bind
+        source: ${BACKUP_AGENT_RUNTIME_DIR:-/run/officechat-backup-agent}
+        target: /run/officechat-backup-agent
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_HOST_PORT:-8100}:8000"
     networks:

@@ -31,6 +31,8 @@ Key docs:
 - [docs/RELEASE_CHECKLIST_RU.md](docs/RELEASE_CHECKLIST_RU.md)
 - [Production backup and restore (RU)](docs/BACKUP_RESTORE_RU.md)
 - [Production backup and restore (EN)](docs/BACKUP_RESTORE.md)
+- [Backup Center (RU)](docs/BACKUP_CENTER_RU.md)
+- [Backup Center (EN)](docs/BACKUP_CENTER.md)
 
 Production backups use PostgreSQL custom dumps, validated uploads archives,
 strict checksums, GFS retention, isolated restore drills, and staged production
@@ -38,6 +40,8 @@ restore with retained rollback database/uploads. Plaintext private configuration
 Caddy CA, and extra-path archives stay out of off-site copies by default; use an
 `age` recipient for encrypted off-site private data. The systemd timer is
 installed disabled unless the administrator explicitly opts in.
+
+The superadmin-only Backup Center at `/ru/admin/backups` or `/en/admin/backups` displays read-only backup health, history, capacity, verification, retention, and timer metadata through a hardened host agent. It cannot create, verify, delete, prune, reconfigure, or restore backups.
 
 ## Production / Internal HTTPS
 

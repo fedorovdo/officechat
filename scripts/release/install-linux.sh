@@ -91,6 +91,11 @@ for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; 
     as_root cp "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
   fi
 done
+if [[ -f "${SCRIPT_DIR}/../../scripts/backup_agent.py" ]]; then
+  as_root cp "${SCRIPT_DIR}/../../scripts/backup_agent.py" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+elif [[ -f "${SCRIPT_DIR}/backup-agent.py" ]]; then
+  as_root cp "${SCRIPT_DIR}/backup-agent.py" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+fi
 if [[ -f "${SCRIPT_DIR}/../../scripts/backup/lib.sh" ]]; then
   as_root cp "${SCRIPT_DIR}/../../scripts/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
 elif [[ -f "${SCRIPT_DIR}/backup/lib.sh" ]]; then
@@ -120,7 +125,23 @@ if [[ ! -f /etc/officechat/backup.conf ]]; then
 fi
 as_root chown root:root /etc/officechat/backup.conf
 as_root chmod 600 /etc/officechat/backup.conf
-for backup_doc in BACKUP_RESTORE_RU.md BACKUP_RESTORE.md; do
+agent_config_source=""
+if [[ -f "${SCRIPT_DIR}/../../deploy/backup/officechat-backup-agent.conf.example" ]]; then
+  agent_config_source="${SCRIPT_DIR}/../../deploy/backup/officechat-backup-agent.conf.example"
+elif [[ -f "${SCRIPT_DIR}/backup/officechat-backup-agent.conf.example" ]]; then
+  agent_config_source="${SCRIPT_DIR}/backup/officechat-backup-agent.conf.example"
+fi
+if [[ -L /etc/officechat/backup-agent.conf ]]; then
+  fail "Refusing symlink backup agent configuration"
+fi
+if [[ ! -f /etc/officechat/backup-agent.conf ]]; then
+  [[ -n "$agent_config_source" ]] || fail "Backup agent configuration template not found"
+  as_root install -o root -g root -m 0600 "$agent_config_source" /etc/officechat/backup-agent.conf
+  as_root sed -i "s|/var/backups/officechat|${OFFICECHAT_BACKUP_DIR}|g" /etc/officechat/backup-agent.conf
+fi
+as_root chown root:root /etc/officechat/backup-agent.conf
+as_root chmod 600 /etc/officechat/backup-agent.conf
+for backup_doc in BACKUP_RESTORE_RU.md BACKUP_RESTORE.md BACKUP_CENTER_RU.md BACKUP_CENTER.md; do
   if [[ -f "${SCRIPT_DIR}/../../docs/${backup_doc}" ]]; then
     as_root cp "${SCRIPT_DIR}/../../docs/${backup_doc}" "${OFFICECHAT_INSTALL_DIR}/docs/${backup_doc}"
   elif [[ -f "${SCRIPT_DIR}/deployment/${backup_doc}" ]]; then
@@ -136,6 +157,7 @@ fi
 if [[ -n "$systemd_source" ]]; then
   as_root install -m 0644 "${systemd_source}/officechat-backup.service" /etc/systemd/system/officechat-backup.service
   as_root install -m 0644 "${systemd_source}/officechat-backup.timer" /etc/systemd/system/officechat-backup.timer
+  as_root install -m 0644 "${systemd_source}/officechat-backup-agent.service" /etc/systemd/system/officechat-backup-agent.service
 fi
 if [[ -d "${SCRIPT_DIR}/../../deploy/caddy" ]]; then
   as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
@@ -146,10 +168,23 @@ elif [[ -d "${SCRIPT_DIR}/caddy" ]]; then
   as_root cp "${SCRIPT_DIR}/caddy/Caddyfile.example" "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
   as_root cp "${SCRIPT_DIR}/caddy/docker-compose.caddy.yml" "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
 fi
-as_root chmod +x "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl" "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh"
+as_root chmod +x "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl" "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
 as_root chmod 644 "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
 as_root chmod 755 "$OFFICECHAT_INSTALL_DIR"
+ensure_backup_agent_group
 write_env_if_missing "$OFFICECHAT_ENV_FILE"
+ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
+ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
+
+[[ -n "$systemd_source" ]] || fail "Backup systemd units not found"
+if is_dry_run; then
+  log "DRY-RUN: enable and start officechat-backup-agent.service"
+elif command -v systemctl >/dev/null 2>&1; then
+  as_root systemctl daemon-reload
+  as_root systemctl enable --now officechat-backup-agent.service
+else
+  fail "systemd is required for the read-only backup agent"
+fi
 
 if is_dry_run; then
   run_cmd compose config
@@ -171,7 +206,6 @@ run_cmd compose up -d postgres valkey backend calendar-worker frontend
 wait_for_ready || fail "Backend readiness check failed"
 record_version "$OFFICECHAT_RELEASE_VERSION"
 if command -v systemctl >/dev/null 2>&1 && [[ -n "$systemd_source" ]]; then
-  as_root systemctl daemon-reload
   if [[ "$ENABLE_BACKUP_TIMER" == "1" ]]; then
     as_root systemctl enable --now officechat-backup.timer
   else

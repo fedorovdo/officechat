@@ -21,6 +21,72 @@ export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partial
 export type CalendarEventType = "meeting" | "video_conference" | "office_event" | "training" | "maintenance" | "other";
 export type CalendarEventStatus = "scheduled" | "rescheduled" | "cancelled" | "completed";
 export type CalendarAudienceType = "all_active_users" | "selected_groups" | "selected_users";
+export type BackupType = "manual" | "scheduled" | "pre_upgrade" | "unknown";
+export type BackupVerificationStatus = "not_requested" | "pending" | "passed" | "failed" | "unknown";
+export type BackupOffsiteStatus = "not_configured" | "copied" | "skipped_not_mounted" | "failed" | "unknown";
+
+export type OfficeChatBackup = {
+  backup_id: string;
+  created_at: string | null;
+  backup_type: BackupType;
+  size_bytes: number | null;
+  verification_status: BackupVerificationStatus;
+  verified_at: string | null;
+  offsite_status: BackupOffsiteStatus;
+  officechat_version: string | null;
+  build_sha: string | null;
+  alembic_revision: string | null;
+  postgresql_version: string | null;
+  pre_upgrade: boolean;
+  protected: boolean;
+  warnings: string[];
+  components: string[];
+};
+
+export type OfficeChatBackupPage = {
+  items: OfficeChatBackup[];
+  page: number;
+  limit: number;
+  total: number;
+  has_next: boolean;
+};
+
+export type OfficeChatBackupRun = {
+  timestamp: string | null;
+  success: boolean | null;
+  backup_id: string | null;
+  backup_size_bytes: number | null;
+  duration_seconds: number | null;
+  offsite_status: BackupOffsiteStatus;
+  verification_status: BackupVerificationStatus;
+  last_error: string | null;
+};
+
+export type OfficeChatBackupStatus = {
+  agent_status: "available" | "unavailable";
+  backup_health: "healthy" | "degraded" | "failed" | "never_run" | "unknown";
+  current_result: "success" | "failure" | "unknown";
+  last_run: OfficeChatBackupRun | null;
+  last_success: OfficeChatBackupRun | null;
+  backup_root_capacity: {
+    total_bytes: number | null;
+    used_bytes: number | null;
+    free_bytes: number | null;
+    usage_percent: number | null;
+  };
+  timer: {
+    installed: boolean;
+    enabled: boolean;
+    active: boolean;
+    next_run_at: string | null;
+    last_trigger_at: string | null;
+    unit_name: "officechat-backup.timer";
+  };
+  retention: { daily: number | null; weekly: number | null; monthly: number | null };
+  offsite: { configured: boolean; required: boolean; status: BackupOffsiteStatus };
+  warnings: string[];
+  error_code?: string | null;
+};
 
 export type OfficeChatUser = {
   id: string;
@@ -1493,6 +1559,18 @@ export function runRetentionCleanup(token: string) {
 
 export function getStorageStats(token: string) {
   return apiFetch<StorageStats>("/api/admin/storage/stats", token);
+}
+
+export function getBackupStatus(token: string) {
+  return apiFetch<OfficeChatBackupStatus>("/api/admin/backups/status", token);
+}
+
+export function getBackups(token: string, page = 1, limit = 25) {
+  return apiFetch<OfficeChatBackupPage>(`/api/admin/backups?page=${page}&limit=${limit}`, token);
+}
+
+export function getBackup(token: string, backupId: string) {
+  return apiFetch<OfficeChatBackup>(`/api/admin/backups/${encodeURIComponent(backupId)}`, token);
 }
 
 export function getUsers(token: string) {

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { BrandLogo } from "./Brand";
+import { AdminPageHeader, AdminPageShell } from "./AdminUI";
 import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { buildApiUrl } from "../lib/public-url";
@@ -113,27 +114,25 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
   }
 
   return (
-    <main className="about-page">
-      <section className="about-shell" aria-label={about.title}>
-        <div className="about-hero">
-          <BrandLogo tagline={localizedBrand.tagline} />
-          <div>
-            <p className="eyebrow">{about.officeChat}</p>
-            <h1 className="dashboard-title">{about.title}</h1>
-            <p className="about-description">{localizedBrand.description}</p>
-          </div>
-          <div className="about-actions">
+    <AdminPageShell ariaLabel={about.title} className="admin-about-page">
+        <AdminPageHeader
+          actions={<>
             <Link className="primary-button" href={`/${locale}/app`}>
               {about.toApp}
             </Link>
             <Link className="secondary-link" href={`/${locale}/login`}>
               {about.toLogin}
             </Link>
-          </div>
-        </div>
+          </>}
+          backHref={`/${locale}/dashboard`}
+          backLabel={dictionary.adminUi.backToDashboard}
+          description={dictionary.adminUi.pageDescriptions.about}
+          title={about.title}
+        />
 
         <div className="about-grid">
           <section className="about-card">
+            <BrandLogo tagline={localizedBrand.tagline} />
             <h2>{about.version}</h2>
             <dl className="about-facts">
               <div>
@@ -256,7 +255,6 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
           {officeChatBrand.productName} · {officeChatBrand.version || "development"} · ©{" "}
           {officeChatBrand.copyrightYear} {officeChatBrand.authorName}
         </footer>
-      </section>
-    </main>
+    </AdminPageShell>
   );
 }

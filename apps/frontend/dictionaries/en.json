@@ -36,6 +36,30 @@
     "loadError": "Could not load data",
     "accessDenied": "Access denied"
   },
+  "adminUi": {
+    "backToDashboard": "Back to dashboard",
+    "dashboardSubtitle": "Administration and system management",
+    "account": "Administrator account",
+    "sectionsTitle": "Administration sections",
+    "additionalTitle": "Additional",
+    "open": "Open",
+    "sectionDescriptions": {
+      "groups": "Create, configure, and archive group chats.",
+      "users": "Accounts, roles, access, and user status.",
+      "bots": "Integration bots, tokens, and access management.",
+      "storage": "Disk usage, retention policy, and file cleanup.",
+      "audit": "Security events and administrator actions.",
+      "about": "Version, service status, and project information."
+    },
+    "pageDescriptions": {
+      "groups": "Create and manage the group spaces available in OfficeChat.",
+      "users": "Manage accounts, access levels, permissions, and user status.",
+      "bots": "Create integration bots and manage their access tokens safely.",
+      "storage": "Review disk usage and configure message and file retention.",
+      "audit": "Review security events and administrator activity.",
+      "about": "Application version, service health, and project details."
+    }
+  },
   "dashboard": {
     "ariaLabel": "OfficeChat dashboard",
     "title": "Dashboard",

@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -26,6 +25,7 @@ import {
   type UserRole
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { AdminCard, AdminPageHeader, AdminPageShell, AdminTableContainer } from "./AdminUI";
 
 type AdminUsersProps = {
   dictionary: Dictionary;
@@ -480,28 +480,15 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
   }
 
   return (
-    <main className="admin-page admin-users-page">
-      <section className="admin-shell admin-users-shell" aria-label={dictionary.adminUsers.ariaLabel}>
-        <div className="dashboard-header admin-users-header">
-          <div>
-            <Link className="locale-link" href={`/${locale}/dashboard`}>
-              {dictionary.adminUsers.backToDashboard}
-            </Link>
-            <h1 className="dashboard-title admin-title">{dictionary.adminUsers.title}</h1>
-            {currentUser ? (
-              <p className="admin-current">
-                {currentUser.display_name} · {currentUser.username} · {currentUser.role}
-              </p>
-            ) : null}
-          </div>
-        </div>
+    <AdminPageShell ariaLabel={dictionary.adminUsers.ariaLabel} className="admin-users-page" wide>
+        <AdminPageHeader backHref={`/${locale}/dashboard`} backLabel={dictionary.adminUi.backToDashboard} description={dictionary.adminUi.pageDescriptions.users} meta={currentUser ? `${currentUser.display_name} · @${currentUser.username} · ${currentUser.role}` : undefined} title={dictionary.adminUsers.title} />
 
         {isLoading ? <p className="muted">{dictionary.adminUsers.loading}</p> : null}
         {accessDenied ? <p className="access-denied">{dictionary.adminUsers.accessDenied}</p> : null}
 
         {!isLoading && !accessDenied ? (
           <>
-            <div className="admin-users-toolbar">
+            <AdminCard className="admin-toolbar-card"><div className="admin-users-toolbar">
               <h2 className="section-title">{dictionary.adminUsers.usersTitle}</h2>
               <label className="admin-users-control">
                 <span className="field-label">{dictionary.adminUsers.filterLabel}</span>
@@ -539,13 +526,13 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
               >
                 {dictionary.adminUsers.createTitle}
               </button>
-            </div>
+            </div></AdminCard>
 
             {success ? <p className="form-success admin-users-feedback">{success}</p> : null}
             {error && !isCreateOpen && !selectedUser ? <p className="form-error admin-users-feedback">{error}</p> : null}
 
-            <div className="admin-table-wrap admin-users-table-wrap">
-              <div className="table-scroll admin-users-table-scroll">
+            <AdminCard className="admin-table-wrap admin-users-table-wrap">
+              <AdminTableContainer className="admin-users-table-scroll">
                 <table className="users-table admin-users-table">
                   <thead>
                     <tr>
@@ -602,7 +589,7 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
                   </tbody>
                 </table>
                 {filteredUsers.length === 0 ? <p className="sidebar-empty-state">{dictionary.adminUsers.noResults}</p> : null}
-              </div>
+              </AdminTableContainer>
 
               <div className="admin-user-cards">
                 {filteredUsers.map((user) => (
@@ -623,11 +610,9 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
                 ))}
                 {filteredUsers.length === 0 ? <p className="sidebar-empty-state">{dictionary.adminUsers.noResults}</p> : null}
               </div>
-            </div>
+            </AdminCard>
           </>
         ) : null}
-      </section>
-
       {isCreateOpen ? (
         <div className="admin-user-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsCreateOpen(false); }} role="presentation">
           <section aria-labelledby="create-user-title" aria-modal="true" className="admin-user-drawer" ref={createDrawerRef} role="dialog">
@@ -681,6 +666,6 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
           </section>
         </div>
       ) : null}
-    </main>
+    </AdminPageShell>
   );
 }

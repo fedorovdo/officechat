@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -22,6 +21,7 @@ import {
 } from "../lib/api";
 import { formatFileSize } from "../lib/files";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { AdminPageHeader, AdminPageShell, AdminStatCard } from "./AdminUI";
 
 type AdminStorageProps = { dictionary: Dictionary; locale: Locale };
 
@@ -149,21 +149,13 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
   }
 
   return (
-    <main className="dashboard admin-storage-page">
-      <section className="dashboard-shell admin-storage-shell">
-        <div className="dashboard-header">
-          <div>
-            <p className="eyebrow">OfficeChat</p>
-            <h1 className="dashboard-title">{dictionary.retention.title}</h1>
-            <p className="muted">{dictionary.retention.subtitle}</p>
-          </div>
-          <Link className="secondary-link" href={`/${locale}/dashboard`}>{dictionary.retention.back}</Link>
-        </div>
+    <AdminPageShell ariaLabel={dictionary.retention.title} className="admin-storage-page">
+        <AdminPageHeader backHref={`/${locale}/dashboard`} backLabel={dictionary.adminUi.backToDashboard} description={dictionary.adminUi.pageDescriptions.storage} title={dictionary.retention.title} />
         {error ? <p className="form-error">{error}</p> : null}
         {success ? <p className="form-success">{success}</p> : null}
 
         {stats ? (
-          <section className="retention-section">
+          <section className="retention-section admin-card">
             <h2>{dictionary.retention.overview}</h2>
             <div className="storage-stat-grid">
               {[
@@ -178,14 +170,14 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
                 [dictionary.retention.archivedMessages, String(stats.message_counts.archived)],
                 [dictionary.retention.deletedMessages, String(stats.message_counts.soft_deleted)]
               ].map(([label, value]) => (
-                <div className="storage-stat" key={label}><span>{label}</span><strong>{value}</strong></div>
+                <AdminStatCard key={label} label={label} value={value} />
               ))}
             </div>
           </section>
         ) : null}
 
         {form && settings ? (
-          <form className="retention-section retention-form" onSubmit={saveSettings}>
+          <form className="retention-section retention-form admin-card" onSubmit={saveSettings}>
             <h2>{dictionary.retention.policy}</h2>
             <p className={form.retention_enabled ? "form-success" : "note"}>
               {form.retention_enabled ? dictionary.retention.enabled : dictionary.retention.disabled}
@@ -203,7 +195,7 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
           </form>
         ) : null}
 
-        <section className="retention-section">
+        <section className="retention-section admin-card admin-cleanup-card">
           <h2>{dictionary.retention.preview}</h2>
           <div className="actions">
             <button className="secondary-link" disabled={busy || !settings} onClick={() => void previewCleanup()} type="button">{dictionary.retention.preview}</button>
@@ -213,8 +205,6 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
           {result ? summaryView(result) : null}
           {settings?.last_cleanup_status ? <p className="note">{dictionary.retention.lastCleanup}: {settings.last_cleanup_status}</p> : null}
         </section>
-      </section>
-
       {confirmRun ? (
         <div className="settings-backdrop" role="presentation">
           <section aria-modal="true" className="settings-panel retention-confirm" role="dialog">
@@ -228,6 +218,6 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
           </section>
         </div>
       ) : null}
-    </main>
+    </AdminPageShell>
   );
 }

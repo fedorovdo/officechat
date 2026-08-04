@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { AdminCard, AdminPageHeader, AdminPageShell } from "./AdminUI";
+
 import {
   createGroup,
   getCurrentUser,
@@ -127,25 +129,16 @@ export function Groups({ dictionary, locale }: GroupsProps) {
   }
 
   return (
-    <main className="admin-page">
-      <section className="admin-shell" aria-label={dictionary.groups.ariaLabel}>
-        <div className="dashboard-header">
-          <div>
-            <Link className="locale-link" href={`/${locale}/dashboard`}>
-              {dictionary.groups.backToDashboard}
-            </Link>
-            <h1 className="dashboard-title admin-title">{dictionary.groups.title}</h1>
-          </div>
-        </div>
+    <AdminPageShell ariaLabel={dictionary.groups.ariaLabel}>
+        <AdminPageHeader backHref={`/${locale}/dashboard`} backLabel={dictionary.adminUi.backToDashboard} description={dictionary.adminUi.pageDescriptions.groups} title={dictionary.groups.title} />
 
         {isLoading ? <p className="muted">{dictionary.groups.loading}</p> : null}
 
         {!isLoading ? (
-          <div className="admin-grid">
-            <div className="admin-side">
+          <div className="admin-content-split">
+            <AdminCard className="admin-side" title={dictionary.groups.createTitle}>
               {currentUser && isAdminRole(currentUser.role) ? (
                 <form className="admin-form" onSubmit={handleCreate}>
-                  <h2 className="section-title">{dictionary.groups.createTitle}</h2>
                   <label className="field">
                     <span className="field-label">{dictionary.groups.fields.name}</span>
                     <input
@@ -200,10 +193,9 @@ export function Groups({ dictionary, locale }: GroupsProps) {
 
               {success ? <p className="form-success">{success}</p> : null}
               {error ? <p className="form-error">{error}</p> : null}
-            </div>
+            </AdminCard>
 
-            <div className="admin-table-wrap">
-              <h2 className="section-title">{dictionary.groups.listTitle}</h2>
+            <AdminCard className="admin-table-wrap" title={dictionary.groups.listTitle}>
               <div className="groups-list">
                 {groups.map((group) => (
                   <article className={group.is_active ? "group-card" : "group-card muted-card"} key={group.id}>
@@ -213,16 +205,16 @@ export function Groups({ dictionary, locale }: GroupsProps) {
                       <p className="muted">{group.description ?? dictionary.groups.emptyDescription}</p>
                     </div>
                     <div className="group-meta">
-                      <span>{group.is_private ? dictionary.groups.private : dictionary.groups.public}</span>
-                      <span>{group.is_active ? dictionary.groups.active : dictionary.groups.inactive}</span>
+                      <span className="admin-badge admin-badge-info">{group.is_private ? dictionary.groups.private : dictionary.groups.public}</span>
+                      <span className={`admin-badge ${group.is_active ? "admin-badge-success" : "admin-badge-muted"}`}>{group.is_active ? dictionary.groups.active : dictionary.groups.inactive}</span>
                     </div>
                     <div className="table-actions">
-                      <Link className="secondary-link" href={`/${locale}/groups/${group.id}`}>
+                      <Link className="admin-button admin-button-secondary admin-button-compact" href={`/${locale}/groups/${group.id}`}>
                         {dictionary.groups.open}
                       </Link>
                       {currentUser && isAdminRole(currentUser.role) ? (
                         <button
-                          className="table-action"
+                          className="admin-button admin-button-warning admin-button-compact"
                           disabled={updatingGroupId === group.id}
                           onClick={() => void handleToggleGroupActive(group)}
                           type="button"
@@ -234,10 +226,9 @@ export function Groups({ dictionary, locale }: GroupsProps) {
                   </article>
                 ))}
               </div>
-            </div>
+            </AdminCard>
           </div>
         ) : null}
-      </section>
-    </main>
+    </AdminPageShell>
   );
 }

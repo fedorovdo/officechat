@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -21,6 +20,7 @@ import {
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { getIncomingBotWebhookUrl } from "../lib/public-url";
+import { AdminPageHeader, AdminPageShell, AdminTableContainer } from "./AdminUI";
 
 type AdminBotsProps = {
   dictionary: Dictionary;
@@ -230,29 +230,16 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
   }
 
   return (
-    <main className="admin-page">
-      <section className="admin-shell" aria-label={dictionary.adminBots.ariaLabel}>
-        <div className="dashboard-header">
-          <div>
-            <Link className="locale-link" href={`/${locale}/dashboard`}>
-              {dictionary.adminBots.backToDashboard}
-            </Link>
-            <h1 className="dashboard-title admin-title">{dictionary.adminBots.title}</h1>
-            {currentUser ? (
-              <p className="admin-current">
-                {currentUser.display_name} / {currentUser.username} / {currentUser.role}
-              </p>
-            ) : null}
-          </div>
-        </div>
+    <AdminPageShell ariaLabel={dictionary.adminBots.ariaLabel}>
+        <AdminPageHeader backHref={`/${locale}/dashboard`} backLabel={dictionary.adminUi.backToDashboard} description={dictionary.adminUi.pageDescriptions.bots} meta={currentUser ? `${currentUser.display_name} · @${currentUser.username} · ${currentUser.role}` : undefined} title={dictionary.adminBots.title} />
 
         {isLoading ? <p className="muted">{dictionary.adminBots.loading}</p> : null}
         {accessDenied ? <p className="access-denied">{dictionary.adminBots.accessDenied}</p> : null}
 
         {!isLoading && !accessDenied ? (
-          <div className="admin-grid">
+          <div className="admin-bots-grid">
             <div className="admin-side">
-              <form className="admin-form" onSubmit={handleCreateSubmit}>
+              <form className="admin-card admin-form admin-bot-create-card" onSubmit={handleCreateSubmit}>
                 <h2 className="section-title">{dictionary.adminBots.createTitle}</h2>
                 <label className="field">
                   <span className="field-label">{dictionary.adminBots.fields.name}</span>
@@ -278,7 +265,7 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
               </form>
 
               {oneTimeToken ? (
-                <section className="token-panel" aria-label={dictionary.adminBots.tokenTitle}>
+                <section className="admin-card token-panel" aria-label={dictionary.adminBots.tokenTitle}>
                   <h2 className="section-title">{dictionary.adminBots.tokenTitle}</h2>
                   <p className="muted">
                     {dictionary.adminBots.tokenWarning} {oneTimeTokenBotName}
@@ -289,7 +276,7 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
                 </section>
               ) : null}
 
-              <section className="admin-form edit-panel" aria-label={dictionary.adminBots.editTitle}>
+              <section className="admin-card admin-form edit-panel" aria-label={dictionary.adminBots.editTitle}>
                 <h2 className="section-title">{dictionary.adminBots.editTitle}</h2>
                 {!selectedBot ? <p className="muted">{dictionary.adminBots.selectBotHelp}</p> : null}
                 {selectedBot ? (
@@ -334,9 +321,9 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
               {error ? <p className="form-error">{error}</p> : null}
             </div>
 
-            <div className="admin-table-wrap">
+            <section className="admin-card admin-table-wrap admin-bot-list-card">
               <h2 className="section-title">{dictionary.adminBots.botsTitle}</h2>
-              <div className="table-scroll">
+              <AdminTableContainer>
                 <table className="users-table">
                   <thead>
                     <tr>
@@ -390,11 +377,10 @@ export function AdminBots({ dictionary, locale }: AdminBotsProps) {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
+              </AdminTableContainer>
+            </section>
           </div>
         ) : null}
-      </section>
-    </main>
+    </AdminPageShell>
   );
 }

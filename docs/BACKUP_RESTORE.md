@@ -18,6 +18,11 @@ It discovers services through configurable Docker Compose files and
 names, container IDs, image IDs, a fixed PostgreSQL table list, or a fixed
 Alembic revision.
 
+Current installations use the base Compose file plus optional HTTPS and final
+version overrides. `COMPOSE_OPTIONAL_FILES` discovers both optional layers without
+failing when either is absent. The generated version override is included in
+public deployment metadata; private `.env` content remains protected.
+
 ## Data classification
 
 PostgreSQL and uploads are required. PostgreSQL is authoritative for users,

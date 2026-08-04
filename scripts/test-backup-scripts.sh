@@ -13,6 +13,8 @@ UPLOADS_DIR="${DATA_DIR}/uploads"
 BACKUP_ROOT="${TMP_DIR}/backups"
 ENV_FILE="${INSTALL_DIR}/.env"
 COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
+HTTPS_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.https-override.yml"
+VERSION_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.version-override.yml"
 CONFIG_FILE="${TMP_DIR}/backup.conf"
 STATUS_FILE="${TMP_DIR}/status/latest.json"
 LOCK_FILE="${TMP_DIR}/backup.lock"
@@ -20,6 +22,8 @@ LOCK_FILE="${TMP_DIR}/backup.lock"
 mkdir -p "$FAKE_BIN" "$INSTALL_DIR" "$UPLOADS_DIR"
 printf '0.1.0-rc2\n' >"${INSTALL_DIR}/VERSION"
 printf 'services: {}\n' >"$COMPOSE_FILE"
+printf 'services: {}\n' >"$HTTPS_COMPOSE_FILE"
+printf 'services: {}\n' >"$VERSION_COMPOSE_FILE"
 printf '%s\n' \
   'POSTGRES_PASSWORD=CANARY_SECRET_DO_NOT_LEAK' \
   'APP_SECRET_KEY=CANARY_SECRET_DO_NOT_LEAK' \
@@ -146,6 +150,7 @@ OFFSITE_ROOT=
 REQUIRE_OFFSITE=no
 COMPOSE_ENV_FILE=${ENV_FILE}
 COMPOSE_FILES=${COMPOSE_FILE}
+COMPOSE_OPTIONAL_FILES=${HTTPS_COMPOSE_FILE}:${VERSION_COMPOSE_FILE}
 COMPOSE_PROJECT_NAME=officechat-test
 POSTGRES_SERVICE=postgres
 BACKEND_SERVICE=backend
@@ -155,7 +160,7 @@ VALKEY_SERVICE=valkey
 VALKEY_DATA_PATH=/data/dump.rdb
 UPLOADS_DIR=${UPLOADS_DIR}
 BACKUP_EXTRA_PATHS=
-PUBLIC_CONFIG_PATHS=docker-compose.yml
+PUBLIC_CONFIG_PATHS=docker-compose.yml:docker-compose.https-override.yml:docker-compose.version-override.yml
 BACKUP_VALKEY=no
 BACKUP_CADDY_CA=no
 BACKUP_DEPLOYMENT_CONFIG=no
@@ -236,6 +241,12 @@ if grep -Eq 'pg_dump|valkey-cli SAVE| compose cp | save -o | compose stop | comp
   echo "dry-run invoked a Docker mutation" >&2
   exit 1
 fi
+compose_services_call="$(grep 'config --services' "$FAKE_LOG" | tail -n 1)"
+expected_compose_layers="-f ${COMPOSE_FILE} -f ${HTTPS_COMPOSE_FILE} -f ${VERSION_COMPOSE_FILE} config --services"
+[[ "$compose_services_call" == *"$expected_compose_layers"* ]] || {
+  echo "backup did not resolve Compose layers in base, HTTPS, version order" >&2
+  exit 1
+}
 
 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" >/dev/null
 backup_path="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-*' | head -n 1)"

@@ -8,7 +8,8 @@ OFFSITE_ROOT=
 REQUIRE_OFFSITE=no
 
 COMPOSE_ENV_FILE=/opt/officechat/.env
-COMPOSE_FILES=/opt/officechat/docker-compose.yml:/opt/officechat/docker-compose.https-override.yml
+COMPOSE_FILES=/opt/officechat/docker-compose.yml
+COMPOSE_OPTIONAL_FILES=/opt/officechat/docker-compose.https-override.yml:/opt/officechat/docker-compose.version-override.yml
 COMPOSE_PROJECT_NAME=officechat
 POSTGRES_SERVICE=postgres
 BACKEND_SERVICE=backend
@@ -19,7 +20,7 @@ VALKEY_DATA_PATH=/data/dump.rdb
 
 UPLOADS_DIR=/var/lib/officechat/uploads
 BACKUP_EXTRA_PATHS=
-PUBLIC_CONFIG_PATHS=docker-compose.yml:docker-compose.https-override.yml:caddy/docker-compose.caddy.yml:caddy/Caddyfile.example
+PUBLIC_CONFIG_PATHS=docker-compose.yml:docker-compose.https-override.yml:docker-compose.version-override.yml:caddy/docker-compose.caddy.yml:caddy/Caddyfile.example
 
 BACKUP_VALKEY=auto
 BACKUP_CADDY_CA=yes

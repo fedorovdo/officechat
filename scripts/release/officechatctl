@@ -19,7 +19,7 @@ Commands:
   backup [ARGS]         Create verified production backup
   verify-backup PATH    Verify an existing production backup
   restore-drill PATH    Restore into an isolated temporary environment
-  update VERSION        Update images to VERSION
+  update VERSION        Update using RELEASE.json beside this command
   rollback VERSION      Roll back images to VERSION
   version               Show installed version
   integrity-check       Run compose config and alembic current
@@ -52,6 +52,7 @@ case "$command_name" in
   rollback) "${SCRIPT_DIR}/rollback-linux.sh" "$@" ;;
   version) read_installed_version ;;
   integrity-check)
+    print_compose_files
     compose config >/dev/null
     compose exec -T backend alembic current
     ;;

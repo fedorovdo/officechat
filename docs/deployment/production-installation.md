@@ -45,6 +45,21 @@ Backup timer также не включается автоматически. П
 `/etc/officechat/backup.conf` включите его вручную либо передайте installer
 `--enable-backup-timer`.
 
+## Слои Compose и обновления
+
+Release-команды используют base Compose, затем существующий HTTPS override и
+последним автоматически управляемый `docker-compose.version-override.yml`.
+Финальный слой содержит только публичные release metadata и точные images; secrets
+остаются в `.env`. Проверить используемые файлы и resolved stack можно командой:
+
+```bash
+sudo /opt/officechat/officechatctl integrity-check
+```
+
+Для обновления распакуйте новый bundle и запустите находящийся в нём
+`sudo ./officechatctl update VERSION`. Не редактируйте legacy HTTPS override и не
+выполняйте эксплуатационные команды с одним `-f docker-compose.yml`.
+
 ## 3. DNS и Caddy
 
 Создайте внутреннюю DNS A-запись `officechat.example.local`, указывающую на адрес сервера. После запуска основного Compose сеть `officechat_public` уже существует.

@@ -13,7 +13,8 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       cat <<'EOF_HELP'
 Usage: update-linux.sh VERSION [--dry-run] [--allow-downgrade] [--no-backup]
-Pulls the requested OfficeChat image tag, applies migrations, restarts services and records the version.
+Validates bundled release metadata and the complete layered Compose stack before
+pulling images, applying migrations, restarting services, and recording VERSION.
 EOF_HELP
       exit 0
       ;;
@@ -29,37 +30,28 @@ done
 [[ -n "$TARGET_VERSION" ]] || fail "Target version is required"
 validate_version "$TARGET_VERSION"
 require_docker_compose
+require_command mktemp
+require_command python3
+[[ "$(id -u)" -eq 0 ]] || fail "Run update-linux.sh as root"
 acquire_lock
+
+metadata_source="${OFFICECHAT_RELEASE_METADATA_FILE:-${SCRIPT_DIR}/RELEASE.json}"
+read_release_metadata "$metadata_source"
+[[ "$TARGET_VERSION" == "$RELEASE_VERSION" ]] || fail "Requested version does not match RELEASE.json"
 
 current_version="$(read_installed_version)"
 if [[ "$ALLOW_DOWNGRADE" != "1" && "$current_version" != "unknown" && "$TARGET_VERSION" < "$current_version" ]]; then
   fail "Refusing apparent downgrade from ${current_version} to ${TARGET_VERSION}; pass --allow-downgrade to override."
 fi
 
-if [[ "$NO_BACKUP" == "1" ]]; then
-  warn "Proceeding without backup by user request."
-elif [[ -x "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" && -f /etc/officechat/backup.conf ]]; then
-  run_cmd "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" --config /etc/officechat/backup.conf --pre-upgrade
-else
-  backup_now
-fi
-
-# Refresh versioned backup tooling from a release bundle, but never replace the
-# administrator-owned /etc/officechat/backup.conf.
 compose_source=""
 if [[ -f "${SCRIPT_DIR}/../../deploy/docker-compose.release.yml" ]]; then
   compose_source="${SCRIPT_DIR}/../../deploy/docker-compose.release.yml"
 elif [[ -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
   compose_source="${SCRIPT_DIR}/docker-compose.yml"
 fi
-if [[ -n "$compose_source" && "$compose_source" != "$OFFICECHAT_COMPOSE_FILE" ]]; then
-  as_root install -m 0644 "$compose_source" "$OFFICECHAT_COMPOSE_FILE"
-fi
-for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
-  if [[ -f "${SCRIPT_DIR}/${backup_tool}" && "${SCRIPT_DIR}/${backup_tool}" != "${OFFICECHAT_INSTALL_DIR}/${backup_tool}" ]]; then
-    as_root install -m 0755 "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
-  fi
-done
+[[ -n "$compose_source" ]] || fail "Release Compose file not found"
+
 agent_source=""
 if [[ -f "${SCRIPT_DIR}/../backup_agent.py" ]]; then
   agent_source="${SCRIPT_DIR}/../backup_agent.py"
@@ -67,92 +59,206 @@ elif [[ -f "${SCRIPT_DIR}/backup-agent.py" ]]; then
   agent_source="${SCRIPT_DIR}/backup-agent.py"
 fi
 [[ -n "$agent_source" ]] || fail "Backup agent executable not found"
-as_root install -m 0755 "$agent_source" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+
 agent_config_source=""
 if [[ -f "${SCRIPT_DIR}/../../deploy/backup/officechat-backup-agent.conf.example" ]]; then
   agent_config_source="${SCRIPT_DIR}/../../deploy/backup/officechat-backup-agent.conf.example"
 elif [[ -f "${SCRIPT_DIR}/backup/officechat-backup-agent.conf.example" ]]; then
   agent_config_source="${SCRIPT_DIR}/backup/officechat-backup-agent.conf.example"
 fi
-if [[ -L /etc/officechat/backup-agent.conf ]]; then
-  fail "Refusing symlink backup agent configuration"
-fi
-if [[ ! -f /etc/officechat/backup-agent.conf ]]; then
-  [[ -n "$agent_config_source" ]] || fail "Backup agent configuration template not found"
-  as_root install -o root -g root -m 0600 "$agent_config_source" /etc/officechat/backup-agent.conf
-  as_root sed -i "s|/var/backups/officechat|${OFFICECHAT_BACKUP_DIR}|g" /etc/officechat/backup-agent.conf
-fi
-as_root chown root:root /etc/officechat/backup-agent.conf
-as_root chmod 600 /etc/officechat/backup-agent.conf
-ensure_backup_agent_group
-ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
-ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
-if [[ -f "${SCRIPT_DIR}/backup/lib.sh" && "${SCRIPT_DIR}/backup/lib.sh" != "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" ]]; then
-  as_root install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/backup"
-  as_root install -m 0644 "${SCRIPT_DIR}/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
-fi
-for backup_doc in BACKUP_CENTER_RU.md BACKUP_CENTER.md BACKUP_RESTORE_RU.md BACKUP_RESTORE.md; do
-  if [[ -f "${SCRIPT_DIR}/deployment/${backup_doc}" ]]; then
-    as_root install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/docs"
-    as_root install -m 0644 "${SCRIPT_DIR}/deployment/${backup_doc}" "${OFFICECHAT_INSTALL_DIR}/docs/${backup_doc}"
-  fi
-done
+[[ -n "$agent_config_source" ]] || fail "Backup agent configuration template not found"
+
 systemd_source=""
 if [[ -d "${SCRIPT_DIR}/../../deploy/systemd" ]]; then
   systemd_source="${SCRIPT_DIR}/../../deploy/systemd"
 elif [[ -d "${SCRIPT_DIR}/systemd" ]]; then
   systemd_source="${SCRIPT_DIR}/systemd"
 fi
-if [[ -n "$systemd_source" ]]; then
-  as_root install -m 0644 "${systemd_source}/officechat-backup.service" \
-    /etc/systemd/system/officechat-backup.service
-  as_root install -m 0644 "${systemd_source}/officechat-backup.timer" \
-    /etc/systemd/system/officechat-backup.timer
-  as_root install -m 0644 "${systemd_source}/officechat-backup-agent.service" \
-    /etc/systemd/system/officechat-backup-agent.service
-  if is_dry_run; then
-    log "DRY-RUN: restart officechat-backup-agent.service"
-  elif command -v systemctl >/dev/null 2>&1; then
-    as_root systemctl daemon-reload
-    as_root systemctl enable --now officechat-backup-agent.service
-  else
-    fail "systemd is required for the read-only backup agent"
-  fi
+[[ -n "$systemd_source" ]] || fail "Backup systemd units not found"
+
+staging_dir="$(mktemp -d)"
+chmod 0700 "$staging_dir"
+cleanup() {
+  rm -rf -- "$staging_dir"
+  rmdir "$OFFICECHAT_LOCK_FILE" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+staging_env="${staging_dir}/officechat.env"
+staging_override="${staging_dir}/docker-compose.version-override.yml"
+write_env_metadata "$OFFICECHAT_ENV_FILE" "$staging_env" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
+write_version_override "$staging_override" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
+
+log "Planned release version: ${RELEASE_VERSION}"
+log "Planned revision: ${RELEASE_REVISION}"
+log "Planned build date: ${RELEASE_BUILD_DATE}"
+log "Planned backend image: ${RELEASE_BACKEND_IMAGE}"
+log "Planned frontend image: ${RELEASE_FRONTEND_IMAGE}"
+log "Preflight Compose files:"
+log "  ${compose_source}"
+[[ ! -f "$OFFICECHAT_HTTPS_OVERRIDE_FILE" ]] || log "  ${OFFICECHAT_HTTPS_OVERRIDE_FILE}"
+log "  ${staging_override} (generated final override)"
+if command -v getenforce >/dev/null 2>&1; then
+  log "SELinux mode: $(getenforce)"
 else
-  fail "Backup systemd units not found"
+  log "SELinux mode: unavailable"
 fi
 
-if is_dry_run; then
-  echo "DRY-RUN: update OFFICECHAT_VERSION in ${OFFICECHAT_ENV_FILE} to ${TARGET_VERSION}"
-else
-  cp "$OFFICECHAT_ENV_FILE" "${OFFICECHAT_ENV_FILE}.previous"
-  if grep -q '^OFFICECHAT_VERSION=' "$OFFICECHAT_ENV_FILE"; then
-    sed -i.bak "s/^OFFICECHAT_VERSION=.*/OFFICECHAT_VERSION=${TARGET_VERSION}/" "$OFFICECHAT_ENV_FILE"
-  else
-    printf '\nOFFICECHAT_VERSION=%s\n' "$TARGET_VERSION" >>"$OFFICECHAT_ENV_FILE"
-  fi
-fi
+compose_with_stack "$staging_env" "$compose_source" "$OFFICECHAT_HTTPS_OVERRIDE_FILE" \
+  "$staging_override" config --quiet
+validate_resolved_stack "$staging_env" "$compose_source" "$OFFICECHAT_HTTPS_OVERRIDE_FILE" \
+  "$staging_override" "$RELEASE_VERSION"
 
 if is_dry_run; then
-  run_cmd compose config
+  if [[ "$NO_BACKUP" == "1" ]]; then
+    warn "Dry-run: update would proceed without a backup by user request."
+  else
+    log "DRY-RUN: create protected pre-upgrade backup"
+  fi
+  log "DRY-RUN: preserve current Compose, version override, .env, agent unit/config and executable"
+  atomic_update_env_metadata "$OFFICECHAT_ENV_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
+  atomic_write_version_override "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
+  log "DRY-RUN: install release Compose and agent assets"
+  log "DRY-RUN: pull images, run Alembic upgrade, restart services and verify readiness"
+  pass "OfficeChat update preflight completed; no production files or containers were changed."
+  exit 0
+fi
+
+if [[ "$NO_BACKUP" == "1" ]]; then
+  warn "Proceeding without backup by user request."
+elif [[ -x "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" && -f "$OFFICECHAT_BACKUP_CONFIG_FILE" ]]; then
+  "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" --config "$OFFICECHAT_BACKUP_CONFIG_FILE" --pre-upgrade
 else
-  compose config >/dev/null
+  backup_now
 fi
-run_cmd compose pull backend frontend calendar-worker
-if ! run_cmd compose run --rm backend alembic upgrade head; then
-  warn "Migration failed; restoring previous image version in .env. Database downgrade is not attempted."
-  run_cmd mv "${OFFICECHAT_ENV_FILE}.previous" "$OFFICECHAT_ENV_FILE"
-  run_cmd compose up -d backend calendar-worker frontend
-  exit 1
+
+snapshot_dir="${staging_dir}/previous"
+mkdir -m 0700 "$snapshot_dir"
+snapshot_file() {
+  local path="$1"
+  local name="$2"
+  if [[ -e "$path" ]]; then
+    [[ -f "$path" && ! -L "$path" ]] || fail "Refusing non-regular update target: $path"
+    cp -a -- "$path" "${snapshot_dir}/${name}"
+  fi
+}
+restore_file() {
+  local path="$1"
+  local name="$2"
+  if [[ -f "${snapshot_dir}/${name}" ]]; then
+    cp -a -- "${snapshot_dir}/${name}" "$path"
+  else
+    rm -f -- "$path"
+  fi
+}
+
+snapshot_file "$OFFICECHAT_COMPOSE_FILE" docker-compose.yml
+snapshot_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
+snapshot_file "$OFFICECHAT_ENV_FILE" officechat.env
+snapshot_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+snapshot_file "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" backup-agent.conf
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" backup-agent.py
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
+
+rollback_update() {
+  rollback_armed=0
+  trap - ERR
+  warn "Restoring pre-update files and services; database downgrade is not attempted."
+  restore_file "$OFFICECHAT_COMPOSE_FILE" docker-compose.yml
+  restore_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
+  restore_file "$OFFICECHAT_ENV_FILE" officechat.env
+  restore_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+  restore_file "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" backup-agent.conf
+  restore_file "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" backup-agent.py
+  restore_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+    systemctl restart officechat-backup-agent.service || true
+  fi
+  compose config --quiet || warn "Restored Compose stack did not validate"
+  compose up -d backend calendar-worker frontend || warn "Previous containers could not be restarted automatically"
+}
+
+rollback_armed=1
+on_update_error() {
+  local status=$?
+  trap - ERR
+  if [[ "$rollback_armed" == "1" ]]; then
+    rollback_update
+  fi
+  exit "$status"
+}
+trap on_update_error ERR
+
+install -m 0644 "$compose_source" "$OFFICECHAT_COMPOSE_FILE"
+atomic_update_env_metadata "$OFFICECHAT_ENV_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
+atomic_write_version_override "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
+install -m 0644 "$metadata_source" "${OFFICECHAT_INSTALL_DIR}/RELEASE.json"
+
+ensure_backup_agent_group
+ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
+ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
+install -m 0755 "$agent_source" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+if [[ -L "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" ]]; then
+  rollback_update
+  fail "Refusing symlink backup agent configuration"
 fi
-run_cmd compose up -d backend calendar-worker frontend
+if [[ ! -f "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" ]]; then
+  install -o root -g root -m 0600 "$agent_config_source" "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
+  sed -i "s|/var/backups/officechat|${OFFICECHAT_BACKUP_DIR}|g" "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
+fi
+chown root:root "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
+chmod 600 "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
+install -m 0644 "${systemd_source}/officechat-backup-agent.service" \
+  "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE"
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload
+  systemctl enable --now officechat-backup-agent.service
+else
+  rollback_update
+  fail "systemd is required for the read-only backup agent"
+fi
+
+if ! validate_resolved_stack "$OFFICECHAT_ENV_FILE" "$OFFICECHAT_COMPOSE_FILE" \
+  "$OFFICECHAT_HTTPS_OVERRIDE_FILE" "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$RELEASE_VERSION"; then
+  rollback_update
+  fail "Installed Compose stack does not resolve to the requested release"
+fi
+
+compose pull backend frontend calendar-worker
+if ! compose run --rm backend alembic upgrade head; then
+  rollback_update
+  fail "Migration failed"
+fi
+compose up -d backend calendar-worker frontend
 if ! wait_for_ready; then
-  warn "Readiness failed; restoring previous image version in .env. Database downgrade is not attempted."
-  run_cmd mv "${OFFICECHAT_ENV_FILE}.previous" "$OFFICECHAT_ENV_FILE"
-  run_cmd compose up -d backend calendar-worker frontend
-  exit 1
+  rollback_update
+  fail "Readiness failed"
 fi
 
-run_cmd rm -f "${OFFICECHAT_ENV_FILE}.previous" "${OFFICECHAT_ENV_FILE}.bak"
+for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
+  if [[ -f "${SCRIPT_DIR}/${backup_tool}" && "${SCRIPT_DIR}/${backup_tool}" != "${OFFICECHAT_INSTALL_DIR}/${backup_tool}" ]]; then
+    install -m 0755 "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
+  fi
+done
+if [[ -f "${SCRIPT_DIR}/backup/lib.sh" && "${SCRIPT_DIR}/backup/lib.sh" != "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" ]]; then
+  install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/backup"
+  install -m 0644 "${SCRIPT_DIR}/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
+fi
+for backup_doc in BACKUP_CENTER_RU.md BACKUP_CENTER.md BACKUP_RESTORE_RU.md BACKUP_RESTORE.md; do
+  if [[ -f "${SCRIPT_DIR}/deployment/${backup_doc}" ]]; then
+    install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/docs"
+    install -m 0644 "${SCRIPT_DIR}/deployment/${backup_doc}" "${OFFICECHAT_INSTALL_DIR}/docs/${backup_doc}"
+  fi
+done
+for release_tool in lib.sh install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh; do
+  if [[ -f "${SCRIPT_DIR}/${release_tool}" && "${SCRIPT_DIR}/${release_tool}" != "${OFFICECHAT_INSTALL_DIR}/${release_tool}" ]]; then
+    install -m 0755 "${SCRIPT_DIR}/${release_tool}" "${OFFICECHAT_INSTALL_DIR}/${release_tool}"
+  fi
+done
+
 record_version "$TARGET_VERSION"
+rollback_armed=0
+trap - ERR
 pass "OfficeChat updated to ${TARGET_VERSION}."

@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION="${OFFICECHAT_RELEASE_VERSION:-0.1.0-rc2}"
+REVISION="${OFFICECHAT_RELEASE_REVISION:-}"
+BUILD_DATE="${OFFICECHAT_RELEASE_BUILD_DATE:-}"
 ARCH="${OFFICECHAT_RELEASE_ARCH:-linux-amd64}"
 RELEASE_DIR="${ROOT_DIR}/release"
 DIST_DIR="${ROOT_DIR}/dist"
@@ -25,6 +27,13 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=1
 fi
 
+if [[ -z "$REVISION" ]]; then
+  REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+fi
+if [[ -z "$BUILD_DATE" ]]; then
+  BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+fi
+
 run() {
   if [[ "$DRY_RUN" == "1" ]]; then
     printf '[dry-run] %q' "$1"
@@ -37,7 +46,21 @@ run() {
 }
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]] || { echo "Invalid version: $VERSION" >&2; exit 2; }
+[[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid release revision" >&2; exit 2; }
+[[ "$BUILD_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || {
+  echo "Invalid release build date" >&2
+  exit 2
+}
+[[ "$(date -u -d "$BUILD_DATE" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" == "$BUILD_DATE" ]] || {
+  echo "Invalid release build date" >&2
+  exit 2
+}
 
+[[ "$RELEASE_DIR" == "${ROOT_DIR}/release" && "$DIST_DIR" == "${ROOT_DIR}/dist" ]] || {
+  echo "Unsafe release output path" >&2
+  exit 2
+}
+run rm -rf -- "$RELEASE_DIR"
 run mkdir -p "$RELEASE_DIR" "$DIST_DIR"
 run mkdir -p "${RELEASE_DIR}/caddy"
 run mkdir -p "${RELEASE_DIR}/backup"
@@ -74,7 +97,7 @@ run cp "${ROOT_DIR}/docs/BACKUP_CENTER_RU.md" "${RELEASE_DIR}/deployment/BACKUP_
 run cp "${ROOT_DIR}/docs/BACKUP_CENTER.md" "${RELEASE_DIR}/deployment/BACKUP_CENTER.md"
 run cp "${ROOT_DIR}/deploy/caddy/Caddyfile.example" "${RELEASE_DIR}/caddy/Caddyfile.example"
 run cp "${ROOT_DIR}/deploy/caddy/docker-compose.caddy.yml" "${RELEASE_DIR}/caddy/docker-compose.caddy.yml"
-for deployment_doc in production-installation.md internal-https.md windows-certificate-installation.md caddy-ca-backup-restore.md; do
+for deployment_doc in production-installation.md production-update.md production-update_RU.md internal-https.md windows-certificate-installation.md caddy-ca-backup-restore.md; do
   run cp "${ROOT_DIR}/docs/deployment/${deployment_doc}" "${RELEASE_DIR}/deployment/${deployment_doc}"
 done
 if [[ -f "${ROOT_DIR}/docs/INSTALL_RU.md" ]]; then
@@ -82,8 +105,11 @@ if [[ -f "${ROOT_DIR}/docs/INSTALL_RU.md" ]]; then
 fi
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "[dry-run] write ${RELEASE_DIR}/VERSION"
+  echo "[dry-run] write ${RELEASE_DIR}/RELEASE.json for ${VERSION} ${REVISION} ${BUILD_DATE}"
 else
   printf '%s\n' "$VERSION" >"${RELEASE_DIR}/VERSION"
+  printf '{\n  "version": "%s",\n  "revision": "%s",\n  "build_date": "%s",\n  "backend_image": "ghcr.io/fedorovdo/officechat-backend:%s",\n  "frontend_image": "ghcr.io/fedorovdo/officechat-frontend:%s"\n}\n' \
+    "$VERSION" "$REVISION" "$BUILD_DATE" "$VERSION" "$VERSION" >"${RELEASE_DIR}/RELEASE.json"
 fi
 run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh" "${RELEASE_DIR}/backup-production.sh" "${RELEASE_DIR}/verify-backup.sh" "${RELEASE_DIR}/restore-production.sh" "${RELEASE_DIR}/backup-agent.py"
 run chmod 0644 \
@@ -97,7 +123,7 @@ run chmod 0644 \
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
     archive_stage="$(mktemp -d)"
@@ -118,7 +144,10 @@ if [[ "$DRY_RUN" != "1" ]]; then
       "${archive_stage}/release/restore-production.sh" \
       "${archive_stage}/release/backup-agent.py"
     tar -C "$archive_stage" -czf "${DIST_DIR}/${ARCHIVE_NAME}" release
-    sha256sum "${DIST_DIR}/${ARCHIVE_NAME}" >"${DIST_DIR}/${ARCHIVE_NAME}.sha256"
+    (
+      cd "$DIST_DIR"
+      sha256sum "$ARCHIVE_NAME" >"${ARCHIVE_NAME}.sha256"
+    )
   )
 fi
 

@@ -36,6 +36,14 @@ EOF_HELP
   exit 0
 fi
 
+release_metadata_source="${SCRIPT_DIR}/RELEASE.json"
+if [[ -f "$release_metadata_source" ]]; then
+  read_release_metadata "$release_metadata_source"
+  [[ "$RELEASE_VERSION" == "$OFFICECHAT_RELEASE_VERSION" ]] ||
+    fail "Bundled VERSION and RELEASE.json do not match"
+  OFFICECHAT_RELEASE_REVISION="$RELEASE_REVISION"
+  OFFICECHAT_RELEASE_BUILD_DATE="$RELEASE_BUILD_DATE"
+fi
 validate_version "$OFFICECHAT_RELEASE_VERSION"
 if [[ -n "$OFFICECHAT_HOSTNAME" && ! "$OFFICECHAT_HOSTNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   fail "Invalid OfficeChat hostname"
@@ -84,6 +92,9 @@ for release_tool in lib.sh install-linux.sh update-linux.sh rollback-linux.sh un
     as_root cp "${SCRIPT_DIR}/${release_tool}" "${OFFICECHAT_INSTALL_DIR}/${release_tool}"
   fi
 done
+if [[ -f "$release_metadata_source" ]]; then
+  as_root install -m 0644 "$release_metadata_source" "${OFFICECHAT_INSTALL_DIR}/RELEASE.json"
+fi
 for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
   if [[ -f "${SCRIPT_DIR}/../../scripts/${backup_tool}" ]]; then
     as_root cp "${SCRIPT_DIR}/../../scripts/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
@@ -175,6 +186,12 @@ ensure_backup_agent_group
 write_env_if_missing "$OFFICECHAT_ENV_FILE"
 ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
 ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
+if [[ -n "$OFFICECHAT_RELEASE_REVISION" && -n "$OFFICECHAT_RELEASE_BUILD_DATE" ]]; then
+  atomic_update_env_metadata "$OFFICECHAT_ENV_FILE" "$OFFICECHAT_RELEASE_VERSION" \
+    "$OFFICECHAT_RELEASE_REVISION" "$OFFICECHAT_RELEASE_BUILD_DATE"
+fi
+atomic_write_version_override "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$OFFICECHAT_RELEASE_VERSION" \
+  "$OFFICECHAT_RELEASE_REVISION" "$OFFICECHAT_RELEASE_BUILD_DATE"
 
 [[ -n "$systemd_source" ]] || fail "Backup systemd units not found"
 if is_dry_run; then
@@ -186,10 +203,12 @@ else
   fail "systemd is required for the read-only backup agent"
 fi
 
+print_compose_files
 if is_dry_run; then
-  run_cmd compose config
+  log "DRY-RUN: preflight Compose config and resolved image/security validation"
 else
-  compose config >/dev/null
+  validate_resolved_stack "$OFFICECHAT_ENV_FILE" "$OFFICECHAT_COMPOSE_FILE" \
+    "$OFFICECHAT_HTTPS_OVERRIDE_FILE" "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$OFFICECHAT_RELEASE_VERSION"
 fi
 run_cmd compose pull
 if ! is_dry_run; then

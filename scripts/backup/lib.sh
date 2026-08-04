@@ -117,7 +117,7 @@ set_config_value() {
     BACKUP_PRIVATE_CONFIG|REQUIRE_ENCRYPTED_PRIVATE|ALLOW_PLAINTEXT_PRIVATE_OFFSITE|AGE_RECIPIENT|\
     HOOK_TIMEOUT_SECONDS|MAX_ARCHIVE_MEMBERS|MAX_ARCHIVE_UNCOMPRESSED_BYTES|\
     VERIFY_AFTER_BACKUP|BACKUP_EXTRA_PATHS|PRE_BACKUP_HOOK|POST_BACKUP_HOOK|POST_RESTORE_HOOK|\
-    COMPOSE_ENV_FILE|COMPOSE_FILES|COMPOSE_PROJECT_NAME|POSTGRES_SERVICE|BACKEND_SERVICE|\
+    COMPOSE_ENV_FILE|COMPOSE_FILES|COMPOSE_OPTIONAL_FILES|COMPOSE_PROJECT_NAME|POSTGRES_SERVICE|BACKEND_SERVICE|\
     FRONTEND_SERVICE|WORKER_SERVICES|VALKEY_SERVICE|VALKEY_DATA_PATH|UPLOADS_DIR|PUBLIC_CONFIG_PATHS|\
     CADDY_COMPOSE_ENV_FILE|CADDY_COMPOSE_FILES|CADDY_COMPOSE_PROJECT_NAME|CADDY_SERVICE|\
     CADDY_DATA_PATH|POSTGRES_VERIFY_IMAGE|LOCK_FILE|STATUS_FILE|IMAGE_SERVICES)
@@ -162,7 +162,8 @@ load_backup_config() {
   export POST_BACKUP_HOOK=""
   export POST_RESTORE_HOOK=""
   COMPOSE_ENV_FILE="/opt/officechat/.env"
-  export COMPOSE_FILES="/opt/officechat/docker-compose.yml:/opt/officechat/docker-compose.https-override.yml"
+  export COMPOSE_FILES="/opt/officechat/docker-compose.yml"
+  export COMPOSE_OPTIONAL_FILES="/opt/officechat/docker-compose.https-override.yml:/opt/officechat/docker-compose.version-override.yml"
   export COMPOSE_PROJECT_NAME="officechat"
   export POSTGRES_SERVICE="postgres"
   export BACKEND_SERVICE="backend"
@@ -171,7 +172,7 @@ load_backup_config() {
   export VALKEY_SERVICE="valkey"
   export VALKEY_DATA_PATH="/data/dump.rdb"
   UPLOADS_DIR="/var/lib/officechat/uploads"
-  export PUBLIC_CONFIG_PATHS="docker-compose.yml:docker-compose.https-override.yml:caddy/docker-compose.caddy.yml:caddy/Caddyfile.example"
+  export PUBLIC_CONFIG_PATHS="docker-compose.yml:docker-compose.https-override.yml:docker-compose.version-override.yml:caddy/docker-compose.caddy.yml:caddy/Caddyfile.example"
   CADDY_COMPOSE_ENV_FILE="/opt/officechat/.env"
   CADDY_COMPOSE_FILES="/opt/officechat/caddy/docker-compose.caddy.yml"
   CADDY_COMPOSE_PROJECT_NAME="officechat-caddy"
@@ -255,7 +256,7 @@ build_compose_args() {
   local compose_files="$1"
   local env_file="$2"
   local project_name="$3"
-  local file
+  local file existing configured
   COMPOSE_ARGS=(docker compose --env-file "$env_file")
   [[ -z "$project_name" ]] || COMPOSE_ARGS+=(--project-name "$project_name")
   IFS=':' read -r -a compose_file_list <<<"$compose_files"
@@ -264,6 +265,19 @@ build_compose_args() {
     require_absolute_safe_path "$file"
     [[ -f "$file" && ! -L "$file" ]] || fail "Compose file must be a regular non-symlink file: $file"
     COMPOSE_ARGS+=(-f "$file")
+  done
+  IFS=':' read -r -a optional_compose_file_list <<<"${COMPOSE_OPTIONAL_FILES:-}"
+  for file in "${optional_compose_file_list[@]}"; do
+    [[ -n "$file" ]] || continue
+    require_absolute_safe_path "$file"
+    [[ ! -e "$file" || ( -f "$file" && ! -L "$file" ) ]] ||
+      fail "Optional Compose path must be a regular non-symlink file: $file"
+    [[ -f "$file" ]] || continue
+    existing=0
+    for configured in "${COMPOSE_ARGS[@]}"; do
+      [[ "$configured" != "$file" ]] || existing=1
+    done
+    [[ "$existing" == "1" ]] || COMPOSE_ARGS+=(-f "$file")
   done
 }
 

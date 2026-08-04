@@ -17,6 +17,11 @@ Production backup состоит из независимых, проверяем
 container IDs. Сервисы обнаруживаются через настроенные Compose-файлы и
 `docker compose ... ps -q SERVICE`.
 
+Текущая установка использует основной Compose и опциональные HTTPS/final version
+overrides. `COMPOSE_OPTIONAL_FILES` добавляет оба слоя, если они существуют, и не
+ломает установку при их отсутствии. Generated version override входит в публичные
+deployment metadata, а приватный `.env` остаётся защищённым.
+
 ## Критичные данные
 
 Обязательны для полноценного восстановления:

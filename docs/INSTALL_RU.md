@@ -18,6 +18,7 @@ release/
   verify-install.sh
   officechatctl
   VERSION
+  RELEASE.json
   CHECKSUMS.sha256
   README_INSTALL_RU.md
 ```
@@ -90,10 +91,26 @@ printf '%s' 'strong-password-here' | docker compose --env-file /opt/officechat/.
 ## 8. Обновление
 
 ```bash
-sudo /opt/officechat/update-linux.sh 0.1.0-rc2
+tar -xzf officechat-VERSION-linux-amd64.tar.gz
+cd release
+sudo ./officechatctl update VERSION
 ```
 
-По умолчанию перед обновлением создается backup. `--no-backup` разрешен, но выводит предупреждение. Downgrade запрещен без `--allow-downgrade`.
+Запускайте updater из распакованного bundle целевой версии: его `RELEASE.json`
+содержит доверенные version, commit SHA, UTC build date и точные image names.
+По умолчанию перед обновлением создается backup. `--no-backup` разрешен, но
+выводит предупреждение. Downgrade запрещен без `--allow-downgrade`.
+
+Updater использует Compose-файлы строго в таком порядке:
+
+1. `/opt/officechat/docker-compose.yml`;
+2. существующий `docker-compose.https-override.yml`;
+3. автоматически созданный `docker-compose.version-override.yml`.
+
+Последний файл закрепляет backend, calendar-worker и frontend на точной версии
+release и не позволяет legacy HTTPS override вернуть старые images. Пользовательский
+HTTPS override не редактируется. Не запускайте ручные `docker compose` команды с
+неполным набором `-f`; используйте `officechatctl`.
 
 ## 9. Откат
 
@@ -144,7 +161,10 @@ PostgreSQL и Valkey не публикуются наружу. Обычно на
 
 ## 14. SELinux
 
-На системах с SELinux может потребоваться корректная метка для `/var/lib/officechat`. Не отключайте SELinux глобально без отдельного решения администратора.
+Release Compose задаёт `:Z` для PostgreSQL/Valkey и shared `:z` для uploads и
+read-only runtime socket backup agent. Не используйте `label=disable`, privileged,
+`chmod 777` и не отключайте SELinux. Проверка на RED OS/RHEL-like хосте в режиме
+Enforcing описана в `deployment/production-update_RU.md`.
 
 ## 15. Offline groundwork
 

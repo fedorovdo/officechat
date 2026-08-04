@@ -66,7 +66,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-officechat}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-postgres-password}
     volumes:
-      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/postgres:/var/lib/postgresql/data
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/postgres:/var/lib/postgresql/data:Z
     networks:
       - internal
     healthcheck:
@@ -81,7 +81,7 @@ services:
     restart: unless-stopped
     command: ["valkey-server", "--appendonly", "yes"]
     volumes:
-      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/valkey:/data
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/valkey:/data:Z
     networks:
       - internal
     healthcheck:
@@ -103,13 +103,8 @@ services:
     group_add:
       - "${OFFICECHAT_BACKUP_GID:-65530}"
     volumes:
-      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads
-      - type: bind
-        source: ${BACKUP_AGENT_RUNTIME_DIR:-/run/officechat-backup-agent}
-        target: /run/officechat-backup-agent
-        read_only: true
-        bind:
-          create_host_path: false
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads:z
+      - ${BACKUP_AGENT_RUNTIME_DIR:-/run/officechat-backup-agent}:/run/officechat-backup-agent:ro,z
     ports:
       - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_HOST_PORT:-8100}:8000"
     networks:
@@ -134,7 +129,7 @@ services:
     command: ["python", "-m", "app.workers.calendar_reminders"]
     environment: *backend-env
     volumes:
-      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads
+      - ${OFFICECHAT_DATA_DIR:-/var/lib/officechat}/uploads:/data/uploads:z
     networks:
       - internal
     depends_on:

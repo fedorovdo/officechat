@@ -209,6 +209,22 @@ grep -Fq 'CapabilityBoundingSet=' "${ROOT_DIR}/deploy/systemd/officechat-backup-
   echo "Backup agent unit does not clear its capability bounding set" >&2
   exit 1
 }
+grep -Fq 'StateDirectory=officechat-backup-agent' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent unit does not persist bounded job state" >&2
+  exit 1
+}
+grep -Fq 'StateDirectoryMode=0700' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent state directory mode is not private" >&2
+  exit 1
+}
+grep -Fq '/var/backups/officechat /run/lock' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent job sandbox lacks the required backup write paths" >&2
+  exit 1
+}
+grep -Fq 'STATE_DIRECTORY=/var/lib/officechat-backup-agent' "${ROOT_DIR}/deploy/backup/officechat-backup-agent.conf.example" || {
+  echo "Backup agent config does not use the systemd state directory" >&2
+  exit 1
+}
 backend_block="$(sed -n '/^  backend:/,/^  calendar-worker:/p' "$COMPOSE_FILE")"
 worker_block="$(sed -n '/^  calendar-worker:/,/^  frontend:/p' "$COMPOSE_FILE")"
 [[ "$backend_block" == *'BACKUP_AGENT_SOCKET'* && "$backend_block" == *'group_add:'* && "$backend_block" == *'officechat-backup-agent'* ]] || {
@@ -217,6 +233,10 @@ worker_block="$(sed -n '/^  calendar-worker:/,/^  frontend:/p' "$COMPOSE_FILE")"
 }
 [[ "$worker_block" != *'BACKUP_AGENT_SOCKET'* && "$worker_block" != *'officechat-backup-agent'* && "$worker_block" != *'group_add:'* ]] || {
   echo "Calendar worker must not receive backup agent access" >&2
+  exit 1
+}
+[[ "$backend_block" != *'/var/backups/officechat'* && "$backend_block" != *'docker.sock'* && "$backend_block" != *'/var/lib/officechat-backup-agent'* ]] || {
+  echo "Backend must not receive backup storage, Docker, or agent state" >&2
   exit 1
 }
 grep -Fq '/postgres:/var/lib/postgresql/data:Z' "$COMPOSE_FILE" || {

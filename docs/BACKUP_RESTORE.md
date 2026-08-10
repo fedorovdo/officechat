@@ -1,5 +1,101 @@
 # OfficeChat Backup and Restore
 
+## Operator guide
+
+### 1. Purpose
+Backups protect authoritative PostgreSQL and uploads. A backup on the same VM does not protect against loss of that VM or disk.
+
+### 2. Included data
+The backup includes a complete PostgreSQL dump, uploads, metadata/checksums, deployment configuration, and configured optional components.
+
+### 3. Excluded data
+Backup Center job state, its runtime socket, temporary restore-drill resources, and reconstructable runtime state are not recovery data.
+
+### 4. Storage directory
+`BACKUP_ROOT` is defined in root-owned `/etc/officechat/backup.conf`; neither the backend nor browser receives that path.
+
+### 5. Backup structure
+A completed copy uses `officechat-backup-YYYYMMDD-HHMMSSZ` and contains a manifest, `SHA256SUMS`, and atomic `SUCCESS` marker.
+
+### 6. Create through Backup Center
+A `superadmin` confirms “Create backup”. One host-side job runs while the UI polls it to a terminal state.
+
+### 7. Create through CLI
+```bash
+sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+```
+
+### 8. Verify through Backup Center
+Open a completed backup and confirm “Verify backup”. The agent runs only the fixed verify-only argv for that validated backup ID.
+
+### 9. Verify through CLI
+```bash
+sudo /opt/officechat/restore-production.sh --config /etc/officechat/backup.conf --verify-only --backup-id officechat-backup-YYYYMMDD-HHMMSSZ
+```
+
+### 10. Timer status
+Use `sudo systemctl status officechat-backup.timer` and `sudo systemctl list-timers officechat-backup.timer`.
+
+### 11. Enable or disable the timer
+Use `sudo systemctl enable --now officechat-backup.timer` or `sudo systemctl disable --now officechat-backup.timer`.
+
+### 12. Current schedule
+Inspect `sudo systemctl cat officechat-backup.timer`; Backup Center does not edit schedules.
+
+### 13. GFS 14/8/12
+Defaults are `KEEP_DAILY=14`, `KEEP_WEEKLY=8`, and `KEEP_MONTHLY=12`; the UI displays them read-only.
+
+### 14. Protected pre-upgrade copies
+`backup-production.sh --config /etc/officechat/backup.conf --pre-upgrade` creates a copy with a `PROTECTED` marker.
+
+### 15. Freeing space
+Review `df -h` and GFS first. Backup Center has no delete or prune operation.
+
+### 16. Safe verify-only
+Verify-only creates isolated temporary Docker resources, validates the dump/uploads, and removes those resources without modifying production.
+
+### 17. Restore drill on a VM clone
+Exercise disaster recovery on an isolated clone without client traffic and complete post-restore acceptance.
+
+### 18. Production restore
+Only an authorized operator over SSH may run the actual CLI with all required confirmations. Backup Center never starts restore.
+
+### 19. Restore to a new VM
+Install a compatible OfficeChat/PostgreSQL environment and private configuration before transferring and restoring the backup.
+
+### 20. PostgreSQL behavior
+Restore stages the full dump, verifies Alembic revision, and atomically switches databases. It never performs an automatic database downgrade.
+
+### 21. Upload behavior
+Uploads are extracted and checked in staging, then switched while rollback uploads remain until acceptance.
+
+### 22. Valkey behavior
+Valkey is not authoritative. A best-effort RDB may be saved, while durable state remains in PostgreSQL.
+
+### 23. Deployment configuration
+Public and private configuration are archived separately; private archives must never be published.
+
+### 24. Caddy CA
+The internal CA is restored separately to retain LAN client trust and must be handled as a secret.
+
+### 25. Post-restore checks
+Check `/ready`, frontend `/api/health`, Alembic current, login, messages, uploads, and journals.
+
+### 26. Rollback and safety backup
+The actual restore script creates a protected pre-restore backup and retains rollback database/uploads until operator acceptance.
+
+### 27. Logs and diagnostics
+Use the backup agent/service journals and sanitized status APIs; never paste secrets into support reports.
+
+### 28. Common failures
+Check disk capacity, the existing lock/timer job, `SUCCESS`, checksums, Docker, SELinux, and the agent socket.
+
+### 29. SELinux
+Do not disable SELinux. Preserve `:Z` for PostgreSQL/Valkey, `:z` for uploads, and `ro,z` for the agent socket.
+
+### 30. Backup Center limitations
+It cannot edit schedules/GFS/off-site settings, delete, download, restore, inspect private content, cancel, or queue jobs. Restore remains SSH/CLI only.
+
 ## Architecture
 
 The production backup toolkit creates an atomic, verifiable backup containing:

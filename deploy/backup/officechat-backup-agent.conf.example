@@ -1,4 +1,4 @@
-# OfficeChat read-only backup agent configuration.
+# OfficeChat backup metadata and allowlisted job agent configuration.
 # Install as /etc/officechat/backup-agent.conf, owned by root:root, mode 0600.
 BACKUP_ROOT=/var/backups/officechat/production
 STATUS_DIRECTORY=/var/backups/officechat/status
@@ -11,3 +11,6 @@ MAX_LIST_LIMIT=100
 REQUEST_MAX_BYTES=65536
 RESPONSE_MAX_BYTES=1048576
 IO_TIMEOUT_SECONDS=5
+STATE_DIRECTORY=/var/lib/officechat-backup-agent
+MAX_JOB_HISTORY=100
+AUDIT_CLAIM_TTL_SECONDS=120

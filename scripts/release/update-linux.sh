@@ -217,7 +217,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl enable --now officechat-backup-agent.service
 else
   rollback_update
-  fail "systemd is required for the read-only backup agent"
+  fail "systemd is required for the backup agent"
 fi
 
 if ! validate_resolved_stack "$OFFICECHAT_ENV_FILE" "$OFFICECHAT_COMPOSE_FILE" \

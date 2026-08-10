@@ -7,16 +7,26 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from app.api.deps import require_superadmin_user
-from app.api.routes.admin_backups import get_backup, get_backup_status, get_backups
-from app.schemas.backup import BackupItemPublic, BackupPagePublic, BackupStatusPublic
+from app.api.routes.admin_backups import (
+    create_backup_job,
+    get_active_backup_job,
+    get_backup,
+    get_backup_job,
+    get_backup_status,
+    get_backups,
+    verify_backup,
+)
+from app.schemas.backup import BackupItemPublic, BackupJobCreate, BackupPagePublic, BackupStatusPublic
 from app.services.backup_agent import (
     BackupAgentClient,
     BackupAgentProtocolError,
     BackupAgentRemoteError,
     BackupAgentUnavailableError,
 )
+from app.services.backup_job_audit import reconcile_backup_job_audits
 
 
 REQUEST_ID = UUID("00000000-0000-4000-8000-000000000123")
@@ -78,6 +88,38 @@ def item_payload():
     }
 
 
+def job_payload(state="queued", operation="create_backup", backup_id=None):
+    return {
+        "job_id": "00000000-0000-4000-8000-000000000123",
+        "operation": operation,
+        "state": state,
+        "phase": state,
+        "backup_id": backup_id,
+        "requested_at": "2026-08-05T10:00:00Z",
+        "started_at": None,
+        "finished_at": None,
+        "success": None,
+        "exit_code": None,
+        "safe_message": "Backup operation is queued",
+        "last_error": None,
+    }
+
+
+def terminal_job_payload(state="succeeded", operation="create_backup"):
+    payload = job_payload(state=state, operation=operation)
+    payload.update({
+        "phase": "completed" if state == "succeeded" else "error",
+        "started_at": "2026-08-05T10:00:01Z",
+        "finished_at": "2026-08-05T10:01:00Z",
+        "success": state == "succeeded",
+        "exit_code": 0 if state == "succeeded" else 1,
+        "last_error": None if state == "succeeded" else f"JOB_{state.upper()}",
+        "requested_by_user_id": "11111111-1111-4111-8111-111111111111",
+        "requested_by_login": "original-admin",
+    })
+    return payload
+
+
 class FakeClient:
     def __init__(self, response=None, error=None):
         self.response = response
@@ -89,6 +131,41 @@ class FakeClient:
         if self.error:
             raise self.error
         return self.response
+
+
+class ReconciliationClient:
+    def __init__(self, job=None, *, fail_complete_once=False):
+        self.job = job
+        self.claim_state = "pending" if job else "empty"
+        self.claim_id = "22222222-2222-4222-8222-222222222222"
+        self.fail_complete_once = fail_complete_once
+        self.lock = asyncio.Lock()
+        self.calls = []
+
+    async def request(self, operation, params=None):
+        self.calls.append((operation, params))
+        if operation == "claim_job_audit":
+            async with self.lock:
+                if self.claim_state != "pending":
+                    return {"claim_id": None, "job": None}
+                self.claim_state = "claimed"
+                return {"claim_id": self.claim_id, "job": self.job}
+        if operation == "complete_job_audit":
+            if self.fail_complete_once:
+                self.fail_complete_once = False
+                raise BackupAgentUnavailableError("lost acknowledgement")
+            self.claim_state = "reconciled"
+            return {"job_id": params["job_id"], "audit_reconciled_at": "2026-08-05T10:02:00Z"}
+        if operation == "release_job_audit":
+            self.claim_state = "pending"
+            return {"job_id": params["job_id"], "released": True}
+        if operation == "status":
+            return status_payload()
+        raise AssertionError(f"Unexpected operation: {operation}")
+
+    def expire_claim(self):
+        if self.claim_state == "claimed":
+            self.claim_state = "pending"
 
 
 class BackupAuthorizationTests(unittest.IsolatedAsyncioTestCase):
@@ -139,6 +216,151 @@ class BackupApiTests(unittest.IsolatedAsyncioTestCase):
         serialized = BackupItemPublic.model_validate(item_payload()).model_dump()
         forbidden = {"local_path", "offsite_path", "destination", "database_url", "storage_path"}
         self.assertTrue(forbidden.isdisjoint(serialized))
+        with self.assertRaises(ValidationError):
+            BackupJobCreate.model_validate({
+                "operation": "create_backup",
+                "requested_by_login": "spoofed-admin",
+            })
+
+    @patch("app.api.routes.admin_backups.reconcile_backup_job_audits", new_callable=AsyncMock)
+    async def test_every_backup_center_get_runs_terminal_reconciliation(self, reconcile):
+        await get_backup_status(actor(), FakeClient(status_payload()))
+        await get_backups(
+            actor(),
+            FakeClient({"items": [], "page": 1, "limit": 25, "total": 0, "has_next": False}),
+            "1",
+            "25",
+        )
+        await get_backup(item_payload()["backup_id"], actor(), FakeClient(item_payload()))
+        await get_active_backup_job(actor(), FakeClient({"job": None}))
+        await get_backup_job(job_payload()["job_id"], request(), actor(), FakeClient(job_payload()))
+        self.assertEqual(reconcile.await_count, 5)
+
+    @patch("app.api.routes.admin_backups.record_audit_event_best_effort", new_callable=AsyncMock)
+    async def test_create_verify_job_status_and_active_contracts(self, audit):
+        admin = actor()
+        create_client = FakeClient(job_payload())
+        created = await create_backup_job(
+            BackupJobCreate(operation="create_backup"), request(), admin, create_client
+        )
+        self.assertEqual(created.state, "queued")
+        self.assertEqual(create_client.calls[0][0], "create_backup")
+        self.assertEqual(create_client.calls[0][1]["requested_by_login"], "superadmin")
+        self.assertEqual(create_client.calls[0][1]["requested_by_user_id"], str(admin.id))
+
+        verify_client = FakeClient(job_payload(operation="verify_backup", backup_id=item_payload()["backup_id"]))
+        verified = await verify_backup(item_payload()["backup_id"], request(), admin, verify_client)
+        self.assertEqual(verified.operation, "verify_backup")
+        self.assertEqual(verify_client.calls[0][0], "verify_backup")
+        self.assertEqual(verify_client.calls[0][1]["requested_by_login"], "superadmin")
+
+        job_client = FakeClient(job_payload(state="running"))
+        current = await get_backup_job(job_payload()["job_id"], request(), actor(), job_client)
+        self.assertEqual(current.state, "running")
+        active = await get_active_backup_job(actor(), FakeClient({"job": job_payload(state="running")}))
+        self.assertEqual(active.job.state, "running")
+        self.assertGreaterEqual(audit.await_count, 4)
+
+    @patch("app.api.routes.admin_backups.record_audit_event_best_effort", new_callable=AsyncMock)
+    async def test_job_errors_are_safe_and_mapped(self, _audit):
+        conflict = await create_backup_job(
+            BackupJobCreate(operation="create_backup"),
+            request(),
+            actor(),
+            FakeClient(error=BackupAgentRemoteError("JOB_CONFLICT")),
+        )
+        self.assertEqual(conflict.status_code, 409)
+        backlog = await create_backup_job(
+            BackupJobCreate(operation="create_backup"),
+            request(),
+            actor(),
+            FakeClient(error=BackupAgentRemoteError("AUDIT_BACKLOG_FULL")),
+        )
+        self.assertEqual(backlog.status_code, 503)
+        unavailable = await create_backup_job(
+            BackupJobCreate(operation="create_backup"),
+            request(),
+            actor(),
+            FakeClient(error=BackupAgentUnavailableError()),
+        )
+        self.assertEqual(unavailable.status_code, 503)
+        invalid = await get_backup_job("../secret", request(), actor(), FakeClient())
+        self.assertEqual(invalid.status_code, 400)
+        self.assertNotIn("secret", json.loads(invalid.body)["detail"])
+
+
+class BackupTerminalAuditTests(unittest.IsolatedAsyncioTestCase):
+    @patch("app.services.backup_job_audit.persist_terminal_audit", new_callable=AsyncMock)
+    async def test_status_reconciles_succeeded_job_without_frontend_polling(self, persist):
+        client = ReconciliationClient(terminal_job_payload("succeeded"))
+        result = await get_backup_status(actor(), client)
+
+        self.assertIsInstance(result, BackupStatusPublic)
+        persist.assert_awaited_once()
+        terminal_job = persist.await_args.args[0]
+        self.assertEqual(terminal_job.state, "succeeded")
+        self.assertEqual(terminal_job.requested_by_login, "original-admin")
+        self.assertEqual(client.claim_state, "reconciled")
+
+    @patch("app.services.backup_job_audit.persist_terminal_audit", new_callable=AsyncMock)
+    async def test_failed_and_interrupted_jobs_are_reconciled_late(self, persist):
+        for state in ("failed", "interrupted"):
+            with self.subTest(state=state):
+                client = ReconciliationClient(terminal_job_payload(state))
+                await reconcile_backup_job_audits(client)
+                self.assertEqual(client.claim_state, "reconciled")
+        self.assertEqual([call.args[0].state for call in persist.await_args_list], ["failed", "interrupted"])
+
+    @patch("app.services.backup_job_audit.persist_terminal_audit", new_callable=AsyncMock)
+    async def test_repeated_and_parallel_reconciliation_claims_write_once(self, persist):
+        async def delayed_persist(_job):
+            await asyncio.sleep(0.02)
+            return True
+
+        persist.side_effect = delayed_persist
+        client = ReconciliationClient(terminal_job_payload())
+        await asyncio.gather(
+            reconcile_backup_job_audits(client),
+            reconcile_backup_job_audits(client),
+        )
+        await reconcile_backup_job_audits(client)
+
+        persist.assert_awaited_once()
+        self.assertEqual(client.claim_state, "reconciled")
+
+    async def test_lost_ack_and_backend_restart_do_not_duplicate_audit(self):
+        client = ReconciliationClient(terminal_job_payload(), fail_complete_once=True)
+        durable_audit_ids = set()
+        insert_count = 0
+
+        async def idempotent_persist(job):
+            nonlocal insert_count
+            if job.job_id in durable_audit_ids:
+                return False
+            durable_audit_ids.add(job.job_id)
+            insert_count += 1
+            return True
+
+        with patch("app.services.backup_job_audit.persist_terminal_audit", side_effect=idempotent_persist):
+            await reconcile_backup_job_audits(client)
+            self.assertEqual(client.claim_state, "claimed")
+            client.expire_claim()
+            await reconcile_backup_job_audits(client)
+
+        self.assertEqual(insert_count, 1)
+        self.assertEqual(client.claim_state, "reconciled")
+
+    @patch("app.services.backup_job_audit.persist_terminal_audit", new_callable=AsyncMock)
+    async def test_commit_failure_releases_claim_and_retry_succeeds(self, persist):
+        persist.side_effect = [RuntimeError("database unavailable"), True]
+        client = ReconciliationClient(terminal_job_payload())
+
+        await reconcile_backup_job_audits(client)
+        self.assertEqual(client.claim_state, "pending")
+        await reconcile_backup_job_audits(client)
+
+        self.assertEqual(persist.await_count, 2)
+        self.assertEqual(client.claim_state, "reconciled")
 
 
 class BackupAgentClientTests(unittest.IsolatedAsyncioTestCase):

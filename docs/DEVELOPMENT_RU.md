@@ -35,6 +35,8 @@ docker compose exec backend python -m pytest -q
 
 Короткая команда `docker compose exec backend pytest -q` также доступна, но форма через `python -m pytest` является основной.
 
+Terminal audit Backup Center согласуется независимо от UI polling: agent выдаёт ограниченный по времени claim, backend фиксирует событие по `job_id` и подтверждает claim только после успешного commit. Для локальной конфигурации agent применяется `AUDIT_CLAIM_TTL_SECONDS=120`.
+
 ## Frontend-тесты
 
 Unit- и component-тесты frontend находятся в `apps/frontend/tests` и используют Vitest, jsdom и React Testing Library. Стандартный неинтерактивный запуск:
@@ -414,6 +416,8 @@ docker compose exec frontend npm run test:run -- tests/directoryPanel.test.tsx
 
 ## Backup Center
 
-Read-only Backup Center доступен `superadmin` по `/ru/admin/backups`. Backend обращается к host-side agent через `/run/officechat-backup-agent/agent.sock`; backup root, Docker socket и systemd D-Bus в backend не монтируются. В обычном local development agent не требуется: status показывает `unavailable`, а остальные функции OfficeChat продолжают работать.
+Backup Center доступен `superadmin` по `/ru/admin/backups`. Помимо read-only metadata, он запускает одну allowlisted `create_backup` или `verify_backup` job через host-side agent. Backend обращается к agent через `/run/officechat-backup-agent/agent.sock`; backup root, Docker socket, agent state и systemd D-Bus в backend не монтируются. В обычном local development agent не требуется: status показывает `unavailable`, а остальные функции OfficeChat продолжают работать.
+
+Job API: `POST /api/admin/backups/jobs`, `POST /api/admin/backups/{backup_id}/verify`, `GET /api/admin/backups/jobs/{job_id}` и `GET /api/admin/backups/jobs/active`. Restore endpoint отсутствует. Agent state хранится на host в `/var/lib/officechat-backup-agent`; клиент не передаёт executable, config path, argv или environment.
 
 Production installer устанавливает `backup-agent.py`, root-owned `/etc/officechat/backup-agent.conf`, systemd unit и group `officechat-backup`. Существующий agent config при update сохраняется. Установка agent не запускает backup и не включает backup timer автоматически. Подробности и диагностика: `docs/BACKUP_CENTER_RU.md`.

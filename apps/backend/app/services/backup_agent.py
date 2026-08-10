@@ -9,14 +9,25 @@ from app.core.config import settings
 PROTOCOL_VERSION = 1
 KNOWN_AGENT_ERROR_CODES = {
     "BACKUP_NOT_FOUND",
+    "BACKUP_INCOMPLETE",
     "BACKUP_ROOT_UNAVAILABLE",
     "INTERNAL_ERROR",
+    "INVALID_JOB_ID",
+    "INVALID_ACTOR",
     "INVALID_BACKUP_ID",
     "INVALID_PAGINATION",
     "INVALID_PARAMS",
     "INVALID_REQUEST",
     "INVALID_REQUEST_ID",
     "PROTOCOL_MISMATCH",
+    "JOB_CONFLICT",
+    "JOB_NOT_FOUND",
+    "JOB_EXECUTION_FAILED",
+    "JOB_START_FAILED",
+    "JOB_RESULT_UNAVAILABLE",
+    "AUDIT_CLAIM_INVALID",
+    "AUDIT_BACKLOG_FULL",
+    "AUDIT_JOB_NOT_TERMINAL",
     "RESPONSE_TOO_LARGE",
     "UNKNOWN_OPERATION",
 }
@@ -27,6 +38,10 @@ class BackupAgentUnavailableError(RuntimeError):
 
 
 class BackupAgentProtocolError(RuntimeError):
+    pass
+
+
+class BackupAgentTimeoutError(BackupAgentUnavailableError):
     pass
 
 
@@ -68,8 +83,12 @@ class BackupAgentClient:
             await asyncio.wait_for(writer.drain(), timeout=self.connect_timeout)
             try:
                 raw = await asyncio.wait_for(reader.readline(), timeout=self.read_timeout)
+            except asyncio.TimeoutError as exc:
+                raise BackupAgentTimeoutError("Backup agent response timed out") from exc
             except ValueError as exc:
                 raise BackupAgentProtocolError("Backup agent response is too large") from exc
+        except BackupAgentTimeoutError:
+            raise
         except (FileNotFoundError, ConnectionRefusedError, asyncio.TimeoutError, OSError) as exc:
             raise BackupAgentUnavailableError("Backup agent is unavailable") from exc
         finally:

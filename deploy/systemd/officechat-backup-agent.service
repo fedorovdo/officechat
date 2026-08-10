@@ -1,7 +1,8 @@
 [Unit]
-Description=OfficeChat read-only backup metadata agent
+Description=OfficeChat backup metadata and allowlisted job agent
 Documentation=file:/opt/officechat/docs/BACKUP_CENTER_RU.md
-After=local-fs.target
+Requires=docker.service
+After=local-fs.target docker.service
 
 [Service]
 Type=simple
@@ -11,6 +12,8 @@ SupplementaryGroups=officechat-backup
 UMask=0007
 RuntimeDirectory=officechat-backup-agent
 RuntimeDirectoryMode=0755
+StateDirectory=officechat-backup-agent
+StateDirectoryMode=0700
 ExecStart=/usr/bin/python3 /opt/officechat/backup-agent.py --config /etc/officechat/backup-agent.conf
 Restart=on-failure
 RestartSec=5s
@@ -32,11 +35,12 @@ MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_UNIX
 CapabilityBoundingSet=
 AmbientCapabilities=
-ReadOnlyPaths=/var/backups/officechat /etc/officechat/backup.conf /etc/officechat/backup-agent.conf
-ReadWritePaths=/run/officechat-backup-agent
-InaccessiblePaths=/var/lib/officechat /opt/officechat/.env
+ReadOnlyPaths=/etc/officechat/backup.conf /etc/officechat/backup-agent.conf
+ReadWritePaths=/run/officechat-backup-agent /var/lib/officechat-backup-agent /var/lib/officechat /var/backups/officechat /run/lock
 StandardOutput=journal
 StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=500
 
 [Install]
 WantedBy=multi-user.target

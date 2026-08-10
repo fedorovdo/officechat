@@ -1,16 +1,21 @@
 # OfficeChat Backup Center v0.1
 
-Backup Center is a read-only `superadmin` view of the existing OfficeChat production backup system. It is available at `/en/admin/backups`. The page cannot create, verify, delete, prune, or restore backups and cannot change the schedule, retention, or off-site configuration.
+Backup Center is a `superadmin` view of the OfficeChat production backup system. It can start a full local backup or an isolated verify-only job after confirmation. It cannot delete, prune, restore, or reconfigure backups, schedules, retention, or off-site storage.
 
 ## Architecture
 
 ```text
 Browser -> OfficeChat backend -> Unix socket -> officechat-backup-agent
-                                             -> backup metadata (read-only)
+                                             -> backup metadata
+                                             -> fixed allowlisted backup/verify argv
                                              -> systemd timer status
 ```
 
-The backend receives neither the backup root nor Docker access, systemd D-Bus access, dump/upload contents, or private configuration. A separate root-owned host service reads a bounded set of metadata and returns normalized JSON. Protocol v1 permits only `status`, `list_backups`, and `get_backup`.
+The backend receives neither the backup root nor Docker access, systemd D-Bus access, dump/upload contents, private configuration, or agent state directory. The root-owned host agent accepts only metadata reads, fixed `create_backup`/`verify_backup` jobs, job reads, and terminal-audit claim acknowledgements. It never accepts an executable, configuration path, environment, or free-form argv from the client.
+
+The agent persists bounded, sanitized job history atomically in `/var/lib/officechat-backup-agent` (mode `0700`). Only one operation runs at a time, an unfinished job becomes `interrupted` after restart, and subprocess output remains in journald rather than API responses or state JSON.
+
+Terminal audit is independent of the browser polling lifecycle. Each job stores only the initiating user ID/login snapshot. On any later Backup Center GET, the backend atomically claims one pending terminal job from the agent, commits an idempotent audit event correlated by `job_id`, and acknowledges the claim only after the database commit. Failed commits release the claim; lost acknowledgements recover after `AUDIT_CLAIM_TTL_SECONDS`, with the database correlation check preventing duplicate events.
 
 The default socket is `/run/officechat-backup-agent/agent.sock`, mode `0660`, owner `root`, group `officechat-backup`. Only the backend receives the supplementary numeric GID and a read-only bind of the runtime directory. The frontend and calendar worker receive no socket access.
 
@@ -43,9 +48,15 @@ sudo stat /run/officechat-backup-agent/agent.sock
 docker compose --env-file /opt/officechat/.env -f /opt/officechat/docker-compose.yml exec backend id
 ```
 
+On an SELinux Enforcing host, run a confirmed UI backup and inspect `getenforce`, the agent and backup-service journals, contexts for `/run/officechat-backup-agent`, `/var/backups/officechat`, and `/var/lib/officechat`, plus the resulting manifest, `SHA256SUMS`, `SUCCESS`, and `latest.json`. Keep the backend socket bind `ro,z`, PostgreSQL/Valkey private labels `:Z`, and shared uploads label `:z`. Do not disable SELinux.
+
 When the agent is unavailable, `/api/admin/backups/status` returns HTTP 200 with `agent_status=unavailable`; list and detail endpoints return a sanitized 503. Local development without the host agent remains usable and displays this unavailable state.
 
-Use the server-side CLI to verify a selected backup:
+Backup Center requires confirmation before creation or verification. Equivalent server-side CLI commands are:
+
+```bash
+sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+```
 
 ```bash
 /opt/officechat/restore-production.sh \
@@ -54,8 +65,8 @@ Use the server-side CLI to verify a selected backup:
   --verify-only
 ```
 
-Backup Center intentionally has no restore button. Production restore remains a separate, confirmed disaster-recovery procedure described in [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+Backup Center intentionally has no restore button. Production restore is performed only through SSH as the separate, confirmed disaster-recovery procedure described in [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
 
 ## Metadata security
 
-The API and UI never return local or off-site paths, credentials, private configuration, dump/upload filenames, usernames, or message metadata. The agent accepts no arbitrary paths, unit names, or commands. Backup IDs use strict full-match validation; request sizes and timeouts are bounded; symlink metadata and backup directories are rejected; subprocess execution uses fixed `systemctl` arguments without a shell.
+The API and UI never return local or off-site paths, credentials, private configuration, dump/upload filenames, usernames, or message metadata. Backup IDs use strict full-match and realpath validation, verification requires the `SUCCESS` marker, protocol and state sizes are bounded, symlinks are rejected, and subprocess execution uses fixed argv without a shell. The backend still receives no Docker socket, backup root, or agent state mount.

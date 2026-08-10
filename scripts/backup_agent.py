@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only host agent for OfficeChat backup metadata."""
+"""Host agent for OfficeChat backup metadata and allowlisted backup jobs."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import socketserver
 import stat
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,6 +31,31 @@ BACKUP_TYPES = {"manual", "scheduled", "pre_upgrade", "unknown"}
 VERIFICATION_STATUSES = {"not_requested", "pending", "passed", "failed", "unknown"}
 OFFSITE_STATUSES = {"not_configured", "copied", "skipped_not_mounted", "failed", "unknown"}
 CURRENT_RESULTS = {"success", "failure", "unknown"}
+JOB_OPERATIONS = {"create_backup", "verify_backup"}
+JOB_STATES = {"queued", "running", "verifying", "succeeded", "failed", "interrupted"}
+ACTIVE_JOB_STATES = {"queued", "running", "verifying"}
+TERMINAL_JOB_STATES = JOB_STATES - ACTIVE_JOB_STATES
+JOB_HISTORY_VERSION = 1
+JOB_HISTORY_MAX_BYTES = 1_048_576
+DEFAULT_AUDIT_CLAIM_TTL_SECONDS = 120
+BACKUP_COMMAND = (
+    "/opt/officechat/backup-production.sh",
+    "--config",
+    "/etc/officechat/backup.conf",
+)
+VERIFY_COMMAND_PREFIX = (
+    "/opt/officechat/restore-production.sh",
+    "--config",
+    "/etc/officechat/backup.conf",
+    "--verify-only",
+    "--backup-id",
+)
+SAFE_JOB_ENVIRONMENT = {
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "HOME": "/root",
+}
 CONFIG_KEYS = {
     "BACKUP_ROOT",
     "STATUS_DIRECTORY",
@@ -42,6 +68,9 @@ CONFIG_KEYS = {
     "REQUEST_MAX_BYTES",
     "RESPONSE_MAX_BYTES",
     "IO_TIMEOUT_SECONDS",
+    "STATE_DIRECTORY",
+    "MAX_JOB_HISTORY",
+    "AUDIT_CLAIM_TTL_SECONDS",
 }
 
 logger = logging.getLogger("officechat-backup-agent")
@@ -67,6 +96,9 @@ class AgentConfig:
     request_max_bytes: int = 65_536
     response_max_bytes: int = 1_048_576
     io_timeout_seconds: float = 5.0
+    state_directory: Path = Path("/var/lib/officechat-backup-agent")
+    max_job_history: int = 100
+    audit_claim_ttl_seconds: int = DEFAULT_AUDIT_CLAIM_TTL_SECONDS
 
 
 def _contains_control(value: str) -> bool:
@@ -129,6 +161,9 @@ def load_agent_config(path: Path, *, expected_uid: int = 0) -> AgentConfig:
         values.get("BACKUP_CONFIG_PATH", str(defaults.backup_config_path)), "BACKUP_CONFIG_PATH"
     )
     socket_path = _canonical_path(values.get("SOCKET_PATH", str(defaults.socket_path)), "SOCKET_PATH")
+    state_directory = _canonical_path(
+        values.get("STATE_DIRECTORY", str(defaults.state_directory)), "STATE_DIRECTORY"
+    )
     timer_unit = values.get("TIMER_UNIT", defaults.timer_unit)
     if timer_unit != "officechat-backup.timer":
         raise ValueError("Unsupported TIMER_UNIT")
@@ -164,6 +199,11 @@ def load_agent_config(path: Path, *, expected_uid: int = 0) -> AgentConfig:
         request_max_bytes=integer("REQUEST_MAX_BYTES", defaults.request_max_bytes, 1024, 262_144),
         response_max_bytes=integer("RESPONSE_MAX_BYTES", defaults.response_max_bytes, 4096, 4_194_304),
         io_timeout_seconds=timeout,
+        state_directory=state_directory,
+        max_job_history=integer("MAX_JOB_HISTORY", defaults.max_job_history, 10, 500),
+        audit_claim_ttl_seconds=integer(
+            "AUDIT_CLAIM_TTL_SECONDS", defaults.audit_claim_ttl_seconds, 30, 3600
+        ),
     )
 
 
@@ -538,14 +578,524 @@ class BackupInspector:
             "warnings": list(dict.fromkeys(warnings)),
         }
 
+    def completed_backup(self, backup_id: str) -> Path:
+        directory = self._backup_directory(backup_id)
+        marker = directory / "SUCCESS"
+        try:
+            info = marker.lstat()
+        except FileNotFoundError as exc:
+            raise AgentError("BACKUP_INCOMPLETE", "Backup is not complete") from exc
+        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            raise AgentError("BACKUP_INCOMPLETE", "Backup is not complete")
+        return directory
+
+    def latest_completed_backup_id(self) -> str | None:
+        try:
+            status = _read_bounded_json(
+                self.config.status_file,
+                262_144,
+                missing_code="STATUS_MISSING",
+                corrupt_code="STATUS_CORRUPT",
+            )
+        except AgentError:
+            return None
+        last_run = status.get("last_run")
+        backup_id = last_run.get("backup_id") if isinstance(last_run, dict) else None
+        try:
+            validated = validate_backup_id(backup_id)
+            self.completed_backup(validated)
+        except AgentError:
+            return None
+        return validated
+
+    def completed_backup_ids(self) -> set[str]:
+        try:
+            entries = os.scandir(self.config.backup_root)
+        except FileNotFoundError:
+            return set()
+        except OSError as exc:
+            raise AgentError("BACKUP_ROOT_UNAVAILABLE", "Backup storage is unavailable") from exc
+        completed: set[str] = set()
+        with entries:
+            for entry in entries:
+                if not BACKUP_ID_PATTERN.fullmatch(entry.name) or entry.is_symlink():
+                    continue
+                try:
+                    self.completed_backup(entry.name)
+                except AgentError:
+                    continue
+                completed.add(entry.name)
+        return completed
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def validate_job_id(value: object) -> str:
+    try:
+        parsed = str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise AgentError("INVALID_JOB_ID", "Job identifier is invalid") from exc
+    if value != parsed:
+        raise AgentError("INVALID_JOB_ID", "Job identifier is invalid")
+    return parsed
+
+
+def validate_actor_user_id(value: object) -> str:
+    try:
+        parsed = str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise AgentError("INVALID_ACTOR", "Backup job actor is invalid") from exc
+    if value != parsed:
+        raise AgentError("INVALID_ACTOR", "Backup job actor is invalid")
+    return parsed
+
+
+def validate_actor_login(value: object) -> str:
+    if not isinstance(value, str):
+        raise AgentError("INVALID_ACTOR", "Backup job actor is invalid")
+    login = value.strip()
+    if not login or len(login) > 64 or _contains_control(login):
+        raise AgentError("INVALID_ACTOR", "Backup job actor is invalid")
+    return login
+
+
+class BackupJobManager:
+    """Runs one fixed backup operation at a time and persists bounded public state."""
+
+    def __init__(
+        self,
+        config: AgentConfig,
+        inspector: BackupInspector,
+        *,
+        popen: Any = subprocess.Popen,
+        backup_command: tuple[str, ...] = BACKUP_COMMAND,
+        verify_command_prefix: tuple[str, ...] = VERIFY_COMMAND_PREFIX,
+    ) -> None:
+        self.config = config
+        self.inspector = inspector
+        self._popen = popen
+        self._backup_command = backup_command
+        self._verify_command_prefix = verify_command_prefix
+        self._lock = threading.RLock()
+        self._jobs: list[dict[str, Any]] = []
+        self._process: subprocess.Popen[Any] | None = None
+        self._stopping = False
+        self._state_file = config.state_directory / "jobs.json"
+        self._prepare_state_directory()
+        self._load_state()
+
+    def _prepare_state_directory(self) -> None:
+        try:
+            info = self.config.state_directory.lstat()
+        except FileNotFoundError:
+            self.config.state_directory.mkdir(mode=0o700, parents=True)
+            info = self.config.state_directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError("Backup agent state directory is unsafe")
+        os.chmod(self.config.state_directory, 0o700)
+
+    def _load_state(self) -> None:
+        if not self._state_file.exists():
+            return
+        try:
+            payload = _read_bounded_json(
+                self._state_file,
+                JOB_HISTORY_MAX_BYTES,
+                missing_code="JOB_STATE_MISSING",
+                corrupt_code="JOB_STATE_CORRUPT",
+            )
+            raw_jobs = payload.get("jobs")
+            if payload.get("version") != JOB_HISTORY_VERSION or not isinstance(raw_jobs, list):
+                raise AgentError("JOB_STATE_CORRUPT", "Backup job state is invalid")
+            jobs = [self._validate_stored_job(job) for job in raw_jobs]
+        except AgentError as exc:
+            logger.error("Backup job state could not be loaded: %s", exc.code)
+            jobs = []
+        changed = False
+        for job in jobs:
+            if job["state"] in ACTIVE_JOB_STATES:
+                job.update({
+                    "state": "interrupted",
+                    "phase": "interrupted",
+                    "finished_at": _utc_now(),
+                    "success": False,
+                    "exit_code": None,
+                    "safe_message": "Backup operation was interrupted by an agent restart",
+                    "last_error": "JOB_INTERRUPTED",
+                })
+                changed = True
+        self._jobs = jobs
+        self._prune_reconciled_history()
+        if changed:
+            self._save_state()
+
+    @staticmethod
+    def _validate_stored_job(value: object) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise AgentError("JOB_STATE_CORRUPT", "Backup job state is invalid")
+        job_id = validate_job_id(value.get("job_id"))
+        operation = value.get("operation")
+        state = value.get("state")
+        if operation not in JOB_OPERATIONS or state not in JOB_STATES:
+            raise AgentError("JOB_STATE_CORRUPT", "Backup job state is invalid")
+        backup_id = value.get("backup_id")
+        if backup_id is not None:
+            backup_id = validate_backup_id(backup_id)
+        requested_by_user_id = value.get("requested_by_user_id")
+        if requested_by_user_id is not None:
+            requested_by_user_id = validate_actor_user_id(requested_by_user_id)
+        requested_by_login = value.get("requested_by_login")
+        if requested_by_login is not None:
+            requested_by_login = validate_actor_login(requested_by_login)
+        audit_claim_id = value.get("audit_claim_id")
+        if audit_claim_id is not None:
+            audit_claim_id = validate_job_id(audit_claim_id)
+        result = {
+            "job_id": job_id,
+            "operation": operation,
+            "state": state,
+            "phase": str(value.get("phase") or state)[:64],
+            "backup_id": backup_id,
+            "requested_at": _safe_iso(value.get("requested_at")),
+            "started_at": _safe_iso(value.get("started_at")),
+            "finished_at": _safe_iso(value.get("finished_at")),
+            "success": value.get("success") if isinstance(value.get("success"), bool) else None,
+            "exit_code": value.get("exit_code") if isinstance(value.get("exit_code"), int) else None,
+            "safe_message": str(value.get("safe_message") or "")[:300],
+            "last_error": str(value.get("last_error") or "")[:64] or None,
+            "requested_by_user_id": requested_by_user_id,
+            "requested_by_login": requested_by_login,
+            "audit_claim_id": audit_claim_id,
+            "audit_claimed_at": _safe_iso(value.get("audit_claimed_at")),
+            "audit_reconciled_at": _safe_iso(value.get("audit_reconciled_at")),
+        }
+        if result["requested_at"] is None:
+            raise AgentError("JOB_STATE_CORRUPT", "Backup job state is invalid")
+        return result
+
+    def _save_state(self) -> None:
+        payload = json.dumps(
+            {"version": JOB_HISTORY_VERSION, "jobs": self._jobs},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(payload) > JOB_HISTORY_MAX_BYTES:
+            raise RuntimeError("Backup job state exceeds its size limit")
+        temporary = self.config.state_directory / f".jobs-{uuid.uuid4().hex}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(temporary, flags, 0o600)
+        try:
+            os.write(descriptor, payload)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.replace(temporary, self._state_file)
+            directory_fd = os.open(self.config.state_directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _public_job(job: dict[str, Any]) -> dict[str, Any]:
+        fields = (
+            "job_id", "operation", "state", "phase", "backup_id", "requested_at",
+            "started_at", "finished_at", "success", "exit_code", "safe_message", "last_error",
+        )
+        return {field: job[field] for field in fields}
+
+    @staticmethod
+    def _audit_job(job: dict[str, Any]) -> dict[str, Any]:
+        result = BackupJobManager._public_job(job)
+        result.update({
+            "requested_by_user_id": job.get("requested_by_user_id"),
+            "requested_by_login": job.get("requested_by_login"),
+        })
+        return result
+
+    def active_job(self) -> dict[str, Any] | None:
+        with self._lock:
+            job = next((item for item in reversed(self._jobs) if item["state"] in ACTIVE_JOB_STATES), None)
+            return self._public_job(job) if job else None
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        validated = validate_job_id(job_id)
+        with self._lock:
+            job = next((item for item in self._jobs if item["job_id"] == validated), None)
+            if job is None:
+                raise AgentError("JOB_NOT_FOUND", "Backup job was not found")
+            return self._public_job(job)
+
+    def _make_history_room(self) -> None:
+        while len(self._jobs) >= self.config.max_job_history:
+            removable_index = next((
+                index
+                for index, job in enumerate(self._jobs)
+                if job["state"] in TERMINAL_JOB_STATES
+                and job.get("audit_reconciled_at") is not None
+            ), None)
+            if removable_index is None:
+                raise AgentError(
+                    "AUDIT_BACKLOG_FULL",
+                    "Backup audit backlog must be reconciled before another job can start",
+                )
+            self._jobs.pop(removable_index)
+
+    def _prune_reconciled_history(self) -> None:
+        while len(self._jobs) > self.config.max_job_history:
+            removable_index = next((
+                index
+                for index, job in enumerate(self._jobs)
+                if job["state"] in TERMINAL_JOB_STATES
+                and job.get("audit_reconciled_at") is not None
+            ), None)
+            if removable_index is None:
+                return
+            self._jobs.pop(removable_index)
+
+    def create_job(
+        self,
+        operation: str,
+        *,
+        requested_by_user_id: str,
+        requested_by_login: str,
+        backup_id: str | None = None,
+    ) -> dict[str, Any]:
+        if operation not in JOB_OPERATIONS:
+            raise AgentError("UNKNOWN_OPERATION", "Backup job operation is not supported")
+        if operation == "create_backup" and backup_id is not None:
+            raise AgentError("INVALID_PARAMS", "Create backup does not accept a backup identifier")
+        if operation == "verify_backup":
+            backup_id = validate_backup_id(backup_id)
+            self.inspector.completed_backup(backup_id)
+        actor_user_id = validate_actor_user_id(requested_by_user_id)
+        actor_login = validate_actor_login(requested_by_login)
+        with self._lock:
+            if self.active_job() is not None:
+                raise AgentError("JOB_CONFLICT", "Another backup operation is already running")
+            self._make_history_room()
+            job = {
+                "job_id": str(uuid.uuid4()),
+                "operation": operation,
+                "state": "queued",
+                "phase": "queued",
+                "backup_id": backup_id,
+                "requested_at": _utc_now(),
+                "started_at": None,
+                "finished_at": None,
+                "success": None,
+                "exit_code": None,
+                "safe_message": "Backup operation is queued",
+                "last_error": None,
+                "requested_by_user_id": actor_user_id,
+                "requested_by_login": actor_login,
+                "audit_claim_id": None,
+                "audit_claimed_at": None,
+                "audit_reconciled_at": None,
+            }
+            self._jobs.append(job)
+            self._save_state()
+            accepted = self._public_job(job)
+            thread = threading.Thread(target=self._run_job, args=(job["job_id"],), daemon=True)
+            thread.start()
+            return accepted
+
+    def claim_terminal_audit(self) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            for job in self._jobs:
+                if job["state"] not in TERMINAL_JOB_STATES or job.get("audit_reconciled_at") is not None:
+                    continue
+                claimed_at = job.get("audit_claimed_at")
+                if claimed_at is not None:
+                    claimed = datetime.fromisoformat(claimed_at.replace("Z", "+00:00"))
+                    if (now - claimed).total_seconds() < self.config.audit_claim_ttl_seconds:
+                        continue
+                claim_id = str(uuid.uuid4())
+                job["audit_claim_id"] = claim_id
+                job["audit_claimed_at"] = now.isoformat()
+                self._save_state()
+                return {"claim_id": claim_id, "job": self._audit_job(job)}
+        return {"claim_id": None, "job": None}
+
+    def complete_terminal_audit(self, job_id: str, claim_id: str) -> dict[str, Any]:
+        validated_job_id = validate_job_id(job_id)
+        validated_claim_id = validate_job_id(claim_id)
+        with self._lock:
+            job = next((item for item in self._jobs if item["job_id"] == validated_job_id), None)
+            if job is None:
+                raise AgentError("JOB_NOT_FOUND", "Backup job was not found")
+            if job["state"] not in TERMINAL_JOB_STATES:
+                raise AgentError("AUDIT_JOB_NOT_TERMINAL", "Backup job is not ready for audit")
+            if job.get("audit_claim_id") != validated_claim_id:
+                raise AgentError("AUDIT_CLAIM_INVALID", "Backup audit claim is invalid")
+            if job.get("audit_reconciled_at") is None:
+                job["audit_reconciled_at"] = _utc_now()
+                self._save_state()
+            return {"job_id": validated_job_id, "audit_reconciled_at": job["audit_reconciled_at"]}
+
+    def release_terminal_audit(self, job_id: str, claim_id: str) -> dict[str, Any]:
+        validated_job_id = validate_job_id(job_id)
+        validated_claim_id = validate_job_id(claim_id)
+        with self._lock:
+            job = next((item for item in self._jobs if item["job_id"] == validated_job_id), None)
+            if job is None:
+                raise AgentError("JOB_NOT_FOUND", "Backup job was not found")
+            if job["state"] not in TERMINAL_JOB_STATES:
+                raise AgentError("AUDIT_JOB_NOT_TERMINAL", "Backup job is not ready for audit")
+            if job.get("audit_reconciled_at") is not None:
+                return {"job_id": validated_job_id, "released": False}
+            if job.get("audit_claim_id") != validated_claim_id:
+                raise AgentError("AUDIT_CLAIM_INVALID", "Backup audit claim is invalid")
+            job["audit_claim_id"] = None
+            job["audit_claimed_at"] = None
+            self._save_state()
+            return {"job_id": validated_job_id, "released": True}
+
+    def _set_job(self, job: dict[str, Any], **changes: Any) -> None:
+        with self._lock:
+            job.update(changes)
+            self._save_state()
+
+    def _run_job(self, job_id: str) -> None:
+        with self._lock:
+            job = next(item for item in self._jobs if item["job_id"] == job_id)
+            operation = job["operation"]
+            backup_id = job["backup_id"]
+        state = "verifying" if operation == "verify_backup" else "running"
+        phase = "verifying" if operation == "verify_backup" else "running"
+        self._set_job(
+            job,
+            state=state,
+            phase=phase,
+            started_at=_utc_now(),
+            safe_message="Backup verification is running" if state == "verifying" else "Backup creation is running",
+        )
+        argv = list(self._backup_command) if operation == "create_backup" else [*self._verify_command_prefix, backup_id]
+        before_backup_ids: set[str] = set()
+        agent_error: AgentError | None = None
+        process: subprocess.Popen[Any] | None = None
+        exit_code: int | None = None
+        try:
+            if operation == "create_backup":
+                before_backup_ids = self.inspector.completed_backup_ids()
+            with self._lock:
+                if self._stopping:
+                    raise AgentError("JOB_INTERRUPTED", "Backup operation was interrupted")
+                process = self._popen(
+                    argv,
+                    shell=False,
+                    env=dict(SAFE_JOB_ENVIRONMENT),
+                    stdin=subprocess.DEVNULL,
+                    stdout=None,
+                    stderr=None,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+                self._process = process
+            exit_code = process.wait()
+        except AgentError as exc:
+            agent_error = exc
+            logger.error("job_id=%s operation=%s agent_error=%s", job_id, operation, exc.code)
+        except (OSError, subprocess.SubprocessError):
+            logger.exception("job_id=%s operation=%s failed_to_start", job_id, operation)
+        finally:
+            with self._lock:
+                if self._process is process:
+                    self._process = None
+        if self._stopping or (agent_error and agent_error.code == "JOB_INTERRUPTED"):
+            self._set_job(
+                job,
+                state="interrupted",
+                phase="interrupted",
+                finished_at=_utc_now(),
+                success=False,
+                exit_code=exit_code,
+                safe_message="Backup operation was interrupted",
+                last_error="JOB_INTERRUPTED",
+            )
+            return
+        if exit_code == 0:
+            if operation == "create_backup":
+                try:
+                    created_ids = self.inspector.completed_backup_ids() - before_backup_ids
+                    latest_id = self.inspector.latest_completed_backup_id()
+                except AgentError as exc:
+                    logger.error("job_id=%s operation=%s result_error=%s", job_id, operation, exc.code)
+                    created_ids = set()
+                    latest_id = None
+                backup_id = latest_id if latest_id in created_ids else (max(created_ids) if created_ids else None)
+                if backup_id is None:
+                    self._set_job(
+                        job,
+                        state="failed",
+                        phase="error",
+                        finished_at=_utc_now(),
+                        success=False,
+                        exit_code=0,
+                        safe_message="Backup command finished without publishing a completed backup",
+                        last_error="JOB_RESULT_UNAVAILABLE",
+                    )
+                    return
+            self._set_job(
+                job,
+                state="succeeded",
+                phase="completed",
+                backup_id=backup_id,
+                finished_at=_utc_now(),
+                success=True,
+                exit_code=0,
+                safe_message="Backup verification completed" if operation == "verify_backup" else "Backup creation completed",
+                last_error=None,
+            )
+        else:
+            self._set_job(
+                job,
+                state="failed",
+                phase="error",
+                finished_at=_utc_now(),
+                success=False,
+                exit_code=exit_code,
+                safe_message="Backup operation failed or another backup is already running",
+                last_error="JOB_EXECUTION_FAILED" if exit_code is not None else "JOB_START_FAILED",
+            )
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopping = True
+            process = self._process
+        if process is not None and process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    process.kill()
+        deadline = time.monotonic() + 2
+        while self.active_job() is not None and time.monotonic() < deadline:
+            time.sleep(0.05)
+
 
 class AgentProtocol:
-    def __init__(self, inspector: BackupInspector) -> None:
+    def __init__(self, inspector: BackupInspector, jobs: BackupJobManager | None = None) -> None:
         self.inspector = inspector
+        self.jobs = jobs
 
     def handle(self, payload: object) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise AgentError("INVALID_REQUEST", "Request must be a JSON object")
+        if set(payload) != {"protocol_version", "request_id", "operation", "params"}:
+            raise AgentError("INVALID_REQUEST", "Request fields are invalid")
         if payload.get("protocol_version") != PROTOCOL_VERSION:
             raise AgentError("PROTOCOL_MISMATCH", "Unsupported backup agent protocol version")
         request_id = payload.get("request_id")
@@ -574,6 +1124,57 @@ class AgentProtocol:
             if set(params) != {"backup_id"}:
                 raise AgentError("INVALID_PARAMS", "Backup detail parameters are invalid")
             data = self.inspector.backup_item(validate_backup_id(params.get("backup_id")))
+        elif operation == "create_backup":
+            if set(params) != {"requested_by_user_id", "requested_by_login"}:
+                raise AgentError("INVALID_PARAMS", "Create backup parameters are invalid")
+            if self.jobs is None:
+                raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            data = self.jobs.create_job(
+                "create_backup",
+                requested_by_user_id=validate_actor_user_id(params.get("requested_by_user_id")),
+                requested_by_login=validate_actor_login(params.get("requested_by_login")),
+            )
+        elif operation == "verify_backup":
+            if set(params) != {"backup_id", "requested_by_user_id", "requested_by_login"}:
+                raise AgentError("INVALID_PARAMS", "Backup verification parameters are invalid")
+            if self.jobs is None:
+                raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            data = self.jobs.create_job(
+                "verify_backup",
+                backup_id=validate_backup_id(params.get("backup_id")),
+                requested_by_user_id=validate_actor_user_id(params.get("requested_by_user_id")),
+                requested_by_login=validate_actor_login(params.get("requested_by_login")),
+            )
+        elif operation == "get_job":
+            if set(params) != {"job_id"}:
+                raise AgentError("INVALID_PARAMS", "Backup job parameters are invalid")
+            if self.jobs is None:
+                raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            data = self.jobs.get_job(validate_job_id(params.get("job_id")))
+        elif operation == "get_active_job":
+            if params:
+                raise AgentError("INVALID_PARAMS", "Active backup job does not accept parameters")
+            if self.jobs is None:
+                raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            data = {"job": self.jobs.active_job()}
+        elif operation == "claim_job_audit":
+            if params:
+                raise AgentError("INVALID_PARAMS", "Backup audit claim does not accept parameters")
+            if self.jobs is None:
+                raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            data = self.jobs.claim_terminal_audit()
+        elif operation in {"complete_job_audit", "release_job_audit"}:
+            if set(params) != {"job_id", "claim_id"}:
+                raise AgentError("INVALID_PARAMS", "Backup audit acknowledgement parameters are invalid")
+            if self.jobs is None:
+                raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            job_id = validate_job_id(params.get("job_id"))
+            claim_id = validate_job_id(params.get("claim_id"))
+            data = (
+                self.jobs.complete_terminal_audit(job_id, claim_id)
+                if operation == "complete_job_audit"
+                else self.jobs.release_terminal_audit(job_id, claim_id)
+            )
         else:
             raise AgentError("UNKNOWN_OPERATION", "Backup agent operation is not supported")
         return {"protocol_version": PROTOCOL_VERSION, "request_id": parsed_request_id, "ok": True, "data": data}
@@ -625,9 +1226,14 @@ class BackupAgentServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, config: AgentConfig, inspector: BackupInspector) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        inspector: BackupInspector,
+        jobs: BackupJobManager | None = None,
+    ) -> None:
         self.config = config
-        self.protocol = AgentProtocol(inspector)
+        self.protocol = AgentProtocol(inspector, jobs)
         super().__init__(str(config.socket_path), BackupAgentRequestHandler)
 
 
@@ -650,7 +1256,8 @@ def _prepare_socket_path(config: AgentConfig) -> int:
 def serve(config: AgentConfig) -> None:
     socket_gid = _prepare_socket_path(config)
     inspector = BackupInspector(config)
-    server = BackupAgentServer(config, inspector)
+    jobs = BackupJobManager(config, inspector)
+    server = BackupAgentServer(config, inspector, jobs)
     os.chown(config.socket_path, -1, socket_gid)
     os.chmod(config.socket_path, 0o660)
     stop_event = threading.Event()
@@ -666,6 +1273,7 @@ def serve(config: AgentConfig) -> None:
         while not stop_event.is_set():
             server.handle_request()
     finally:
+        jobs.stop()
         server.server_close()
         try:
             config.socket_path.unlink()
@@ -675,7 +1283,7 @@ def serve(config: AgentConfig) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OfficeChat read-only backup metadata agent")
+    parser = argparse.ArgumentParser(description="OfficeChat backup metadata and job agent")
     parser.add_argument("--config", default="/etc/officechat/backup-agent.conf")
     parser.add_argument("--check-config", action="store_true")
     arguments = parser.parse_args()

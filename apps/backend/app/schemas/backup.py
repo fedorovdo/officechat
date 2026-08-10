@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 BackupType = Literal["manual", "scheduled", "pre_upgrade", "unknown"]
 VerificationStatus = Literal["not_requested", "pending", "passed", "failed", "unknown"]
 OffsiteStatus = Literal["not_configured", "copied", "skipped_not_mounted", "failed", "unknown"]
+BackupJobOperation = Literal["create_backup", "verify_backup"]
+BackupJobState = Literal["queued", "running", "verifying", "succeeded", "failed", "interrupted"]
 
 
 class BackupItemPublic(BaseModel):
@@ -86,3 +88,28 @@ class BackupStatusPublic(BaseModel):
     offsite: BackupOffsitePublic
     warnings: list[str] = Field(default_factory=list, max_length=50)
     error_code: str | None = None
+
+
+class BackupJobCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["create_backup"]
+
+
+class BackupJobPublic(BaseModel):
+    job_id: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    operation: BackupJobOperation
+    state: BackupJobState
+    phase: str = Field(max_length=64)
+    backup_id: str | None = Field(default=None, pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
+    requested_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    success: bool | None
+    exit_code: int | None
+    safe_message: str = Field(max_length=300)
+    last_error: str | None = Field(default=None, max_length=64)
+
+
+class ActiveBackupJobPublic(BaseModel):
+    job: BackupJobPublic | None

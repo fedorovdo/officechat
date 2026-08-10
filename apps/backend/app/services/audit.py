@@ -84,6 +84,7 @@ async def record_audit_event(
     action: str,
     status: str,
     actor: User | None = None,
+    actor_user_id: UUID | None = None,
     actor_username: str | None = None,
     target_type: str | None = None,
     target_id: UUID | str | None = None,
@@ -95,7 +96,7 @@ async def record_audit_event(
 ) -> AuditEvent:
     source_ip, user_agent, request_id = request_context(request)
     event = AuditEvent(
-        actor_user_id=actor.id if actor else None,
+        actor_user_id=actor.id if actor else actor_user_id,
         actor_username=actor.username if actor else (actor_username[:64] if actor_username else None),
         actor_display_name=actor.display_name if actor else None,
         actor_role=actor.role if actor else None,

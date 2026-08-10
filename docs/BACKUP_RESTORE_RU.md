@@ -1,5 +1,107 @@
 # Резервное копирование и восстановление OfficeChat
 
+## Последовательное руководство оператора
+
+### 1. Назначение резервного копирования
+Backup защищает authoritative PostgreSQL и uploads, но локальная копия на той же VM не защищает от потери VM или диска.
+
+### 2. Что входит в backup
+В копию входят полный PostgreSQL dump, uploads, metadata/checksums, deployment-конфигурация и настроенные дополнительные компоненты.
+
+### 3. Что не входит в backup
+Job state Backup Center, runtime socket, временные restore-drill ресурсы и пересоздаваемое состояние не являются данными восстановления.
+
+### 4. Каталог хранения
+Каталог задаётся `BACKUP_ROOT` в root-owned `/etc/officechat/backup.conf`; backend и браузер этот путь не получают.
+
+### 5. Структура backup
+Завершённая копия имеет ID `officechat-backup-YYYYMMDD-HHMMSSZ`, manifest, `SHA256SUMS` и атомарный marker `SUCCESS`.
+
+### 6. Создание backup через Backup Center
+`superadmin` нажимает «Создать резервную копию» и подтверждает запуск. Выполняется одна host-side job; UI опрашивает её до terminal state.
+
+### 7. Создание backup через CLI
+```bash
+sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+```
+
+### 8. Проверка backup через Backup Center
+В окне завершённой копии нажмите «Проверить копию». Agent запускает только фиксированный verify-only argv для выбранного безопасного backup ID.
+
+### 9. Проверка backup через CLI
+```bash
+sudo /opt/officechat/restore-production.sh --config /etc/officechat/backup.conf --verify-only --backup-id officechat-backup-YYYYMMDD-HHMMSSZ
+```
+
+### 10. Просмотр состояния timer
+```bash
+sudo systemctl status officechat-backup.timer
+sudo systemctl list-timers officechat-backup.timer
+```
+
+### 11. Включение и выключение timer
+```bash
+sudo systemctl enable --now officechat-backup.timer
+sudo systemctl disable --now officechat-backup.timer
+```
+
+### 12. Текущее расписание
+Проверьте установленный unit командой `sudo systemctl cat officechat-backup.timer`; Backup Center расписание не редактирует.
+
+### 13. Политика GFS 14/8/12
+Defaults `KEEP_DAILY=14`, `KEEP_WEEKLY=8`, `KEEP_MONTHLY=12` применяются backup-скриптом. UI показывает значения только для чтения.
+
+### 14. Защищённые pre-upgrade backups
+`backup-production.sh --config /etc/officechat/backup.conf --pre-upgrade` создаёт копию с marker `PROTECTED`.
+
+### 15. Освобождение места
+Сначала проверьте `df -h` и GFS. Backup Center не удаляет и не prune-копии; удаление выполняет оператор по утверждённой процедуре.
+
+### 16. Безопасный verify-only
+Verify-only создаёт изолированные временные Docker resources, проверяет dump/uploads и очищает их; production PostgreSQL и uploads не изменяются.
+
+### 17. Тестовое восстановление на клоне VM
+Проверяйте disaster recovery на изолированном клоне с копией конфигурации и без доступа клиентов, затем выполняйте post-restore acceptance.
+
+### 18. Production restore
+Restore запускается только через SSH локальным уполномоченным оператором с полным набором подтверждений фактического CLI. Backup Center restore не запускает.
+
+### 19. Восстановление на новой VM
+Сначала установите совместимую OfficeChat/PostgreSQL среду и приватную конфигурацию, затем перенесите backup и следуйте production restore процедуре.
+
+### 20. Что происходит с PostgreSQL
+Restore разворачивает полный dump в staged database, проверяет Alembic revision и атомарно переключает базы. Автоматический database downgrade не выполняется.
+
+### 21. Что происходит с uploads
+Uploads распаковываются в staging, проверяются и переключаются с сохранением rollback-каталога до приёмки.
+
+### 22. Что происходит с Valkey
+Valkey не authoritative; durable данные находятся в PostgreSQL. Best-effort RDB может сохраняться, но runtime state безопасно перестраивается.
+
+### 23. Что происходит с deployment config
+Публичная и приватная конфигурация архивируются отдельно. Приватный archive требует защиты и никогда не должен публиковаться.
+
+### 24. Что происходит с Caddy CA
+Внутренний Caddy CA восстанавливается отдельно, чтобы сохранить доверие LAN-клиентов; он является секретным компонентом.
+
+### 25. Проверки после restore
+Проверьте `/ready`, frontend `/api/health`, Alembic current, вход пользователей, сообщения, uploads и журналы.
+
+### 26. Rollback и safety backup
+Перед production restore фактический скрипт создаёт защищённый pre-restore backup и сохраняет rollback database/uploads до operator acceptance.
+
+### 27. Журналы и диагностика
+Используйте `journalctl -u officechat-backup-agent.service`, `journalctl -u officechat-backup.service` и безопасные status endpoints; секреты не копируйте в обращения.
+
+### 28. Типовые ошибки
+Проверяйте свободное место, активный lock/timer job, `SUCCESS`, checksums, Docker, SELinux и доступность agent socket.
+
+### 29. SELinux
+SELinux не отключается. Сохраняются `:Z` для PostgreSQL/Valkey, `:z` для uploads и `ro,z` для agent socket; после ручного переноса используйте корректные contexts.
+
+### 30. Ограничения Backup Center
+Center не меняет schedule/GFS/off-site, не удаляет, не скачивает и не восстанавливает backup, не показывает dump/config и не поддерживает cancel/queue. Restore — только SSH/CLI.
+
 ## Архитектура
 
 Production backup состоит из независимых, проверяемых компонентов:

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminBackups } from "../components/AdminBackups";
@@ -7,11 +7,15 @@ import ru from "../dictionaries/ru.json";
 import { userFactory } from "./factories";
 
 const apiMocks = vi.hoisted(() => ({
+  createBackupJob: vi.fn(),
+  getActiveBackupJob: vi.fn(),
   getBackup: vi.fn(),
+  getBackupJob: vi.fn(),
   getBackups: vi.fn(),
   getBackupStatus: vi.fn(),
   getCurrentUser: vi.fn(),
-  requireStoredAccessToken: vi.fn(() => "test-token")
+  requireStoredAccessToken: vi.fn(() => "test-token"),
+  verifyBackup: vi.fn()
 }));
 const routerReplace = vi.fn();
 
@@ -77,14 +81,33 @@ const status = {
   warnings: []
 };
 
+const job = {
+  job_id: "00000000-0000-4000-8000-000000000123",
+  operation: "create_backup" as const,
+  state: "queued" as const,
+  phase: "queued",
+  backup_id: null,
+  requested_at: "2026-08-05T10:00:00Z",
+  started_at: null,
+  finished_at: null,
+  success: null,
+  exit_code: null,
+  safe_message: "Backup operation is queued",
+  last_error: null
+};
+
 describe("Backup Center", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.requireStoredAccessToken.mockReturnValue("test-token");
     apiMocks.getCurrentUser.mockResolvedValue(userFactory({ role: "superadmin" }));
     apiMocks.getBackupStatus.mockResolvedValue(status);
+    apiMocks.getActiveBackupJob.mockResolvedValue({ job: null });
     apiMocks.getBackups.mockResolvedValue({ items: [backup], page: 1, limit: 25, total: 1, has_next: false });
     apiMocks.getBackup.mockResolvedValue(backup);
+    apiMocks.createBackupJob.mockResolvedValue(job);
+    apiMocks.verifyBackup.mockResolvedValue({ ...job, operation: "verify_backup", backup_id: backup.backup_id });
+    apiMocks.getBackupJob.mockResolvedValue({ ...job, state: "running", started_at: job.requested_at });
   });
 
   it("renders the header, seven status cards, table, and read-only sections", async () => {
@@ -97,7 +120,8 @@ describe("Backup Center", () => {
     expect(container.querySelector(".backup-table-wrap")).toHaveClass("admin-table-container");
     expect(screen.getByText(en.backups.scheduleFuture)).toBeInTheDocument();
     expect(screen.getByText(/--verify-only/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /create|delete|verify|prune|restore/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /restore/i })).not.toBeInTheDocument();
     expect(container.querySelector(".backup-secondary-grid")).toBeInTheDocument();
   });
 
@@ -145,9 +169,78 @@ describe("Backup Center", () => {
     expect(apiMocks.getBackupStatus).not.toHaveBeenCalled();
   });
 
+  it("starts a backup only after confirmation and disables duplicate actions", async () => {
+    render(<AdminBackups dictionary={en} locale="en" />);
+    const create = await screen.findByRole("button", { name: en.backups.createBackup });
+    fireEvent.click(create);
+    expect(apiMocks.createBackupJob).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: en.backups.createConfirmTitle });
+    fireEvent.click(within(dialog).getByRole("button", { name: en.backups.confirmCreate }));
+    await waitFor(() => expect(apiMocks.createBackupJob).toHaveBeenCalledWith("test-token"));
+    expect(await screen.findByText(en.backups.activeJobTitle)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeDisabled();
+  });
+
+  it("uses verify-only confirmation from details and never renders restore action", async () => {
+    render(<AdminBackups dictionary={ru} locale="ru" />);
+    fireEvent.click(await screen.findByRole("button", { name: ru.backups.details }));
+    await screen.findByRole("dialog", { name: ru.backups.detailTitle });
+    fireEvent.click(screen.getByRole("button", { name: ru.backups.verifyBackup }));
+    const dialog = screen.getByRole("dialog", { name: ru.backups.verifyConfirmTitle });
+    expect(screen.queryByRole("dialog", { name: ru.backups.detailTitle })).not.toBeInTheDocument();
+    expect(within(dialog).getByText(ru.backups.verifyProductionSafe)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: ru.backups.confirmVerify }));
+    await waitFor(() => expect(apiMocks.verifyBackup).toHaveBeenCalledWith("test-token", backup.backup_id));
+    expect(screen.queryByRole("button", { name: /restore|восстанов/i })).not.toBeInTheDocument();
+  });
+
+  it("polls an active job and clears polling when unmounted", async () => {
+    const intervals: Array<{
+      callback: TimerHandler;
+      delay: number | undefined;
+      id: ReturnType<typeof window.setInterval>;
+    }> = [];
+    let nextId = 1;
+    const intervalSpy = vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
+      const id = nextId++ as unknown as ReturnType<typeof window.setInterval>;
+      intervals.push({ callback, delay, id });
+      return id;
+    });
+    const clearSpy = vi.spyOn(window, "clearInterval").mockImplementation(() => undefined);
+    apiMocks.getActiveBackupJob.mockResolvedValue({
+      job: { ...job, state: "running", started_at: job.requested_at }
+    });
+    apiMocks.getBackupJob.mockResolvedValue({
+      ...job,
+      state: "succeeded",
+      started_at: job.requested_at,
+      finished_at: "2026-08-05T10:01:00Z",
+      success: true,
+      exit_code: 0
+    });
+
+    const { unmount } = render(<AdminBackups dictionary={en} locale="en" />);
+    await screen.findByText(en.backups.activeJobTitle);
+    const pollingInterval = intervals.find(({ delay }) => delay === 3_000);
+    expect(pollingInterval).toBeDefined();
+    const statusCallsBeforePoll = apiMocks.getBackupStatus.mock.calls.length;
+    await act(async () => {
+      if (typeof pollingInterval?.callback === "function") pollingInterval.callback();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(apiMocks.getBackupJob).toHaveBeenCalledWith("test-token", job.job_id));
+    await waitFor(() => expect(apiMocks.getBackupStatus.mock.calls.length).toBeGreaterThan(statusCallsBeforePoll));
+
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(pollingInterval?.id);
+    intervalSpy.mockRestore();
+    clearSpy.mockRestore();
+  });
+
   it("keeps RU and EN dictionary key sets aligned", () => {
     expect(Object.keys(en.backups).sort()).toEqual(Object.keys(ru.backups).sort());
     expect(Object.keys(en.backups.values).sort()).toEqual(Object.keys(ru.backups.values).sort());
     expect(Object.keys(en.backups.warnings).sort()).toEqual(Object.keys(ru.backups.warnings).sort());
+    expect(Object.keys(en.backups.jobMessages).sort()).toEqual(Object.keys(ru.backups.jobMessages).sort());
   });
 });

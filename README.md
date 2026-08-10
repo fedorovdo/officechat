@@ -41,7 +41,14 @@ Caddy CA, and extra-path archives stay out of off-site copies by default; use an
 `age` recipient for encrypted off-site private data. The systemd timer is
 installed disabled unless the administrator explicitly opts in.
 
-The superadmin-only Backup Center at `/ru/admin/backups` or `/en/admin/backups` displays read-only backup health, history, capacity, verification, retention, and timer metadata through a hardened host agent. It cannot create, verify, delete, prune, reconfigure, or restore backups.
+## Backup and restore
+
+The superadmin-only Backup Center at `/ru/admin/backups` or `/en/admin/backups` displays backup health, history, capacity, verification, retention, and timer metadata through a hardened host agent. It can start one allowlisted full local backup or isolated verify-only job at a time. It cannot restore, delete, prune, change schedules, change retention, or configure off-site storage. Production restore remains an SSH/CLI operation.
+
+- [Резервное копирование и восстановление](docs/BACKUP_RESTORE_RU.md)
+- [Backup and restore](docs/BACKUP_RESTORE.md)
+- [Production installation](docs/deployment/production-installation.md)
+- [Production update](docs/deployment/production-update_RU.md)
 
 ## Production / Internal HTTPS
 

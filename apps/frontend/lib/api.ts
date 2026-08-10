@@ -88,6 +88,21 @@ export type OfficeChatBackupStatus = {
   error_code?: string | null;
 };
 
+export type OfficeChatBackupJob = {
+  job_id: string;
+  operation: "create_backup" | "verify_backup";
+  state: "queued" | "running" | "verifying" | "succeeded" | "failed" | "interrupted";
+  phase: string;
+  backup_id: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  success: boolean | null;
+  exit_code: number | null;
+  safe_message: string;
+  last_error: string | null;
+};
+
 export type OfficeChatUser = {
   id: string;
   username: string;
@@ -1571,6 +1586,27 @@ export function getBackups(token: string, page = 1, limit = 25) {
 
 export function getBackup(token: string, backupId: string) {
   return apiFetch<OfficeChatBackup>(`/api/admin/backups/${encodeURIComponent(backupId)}`, token);
+}
+
+export function createBackupJob(token: string) {
+  return apiFetch<OfficeChatBackupJob>("/api/admin/backups/jobs", token, {
+    method: "POST",
+    body: JSON.stringify({ operation: "create_backup" })
+  });
+}
+
+export function verifyBackup(token: string, backupId: string) {
+  return apiFetch<OfficeChatBackupJob>(`/api/admin/backups/${encodeURIComponent(backupId)}/verify`, token, {
+    method: "POST"
+  });
+}
+
+export function getBackupJob(token: string, jobId: string) {
+  return apiFetch<OfficeChatBackupJob>(`/api/admin/backups/jobs/${encodeURIComponent(jobId)}`, token);
+}
+
+export function getActiveBackupJob(token: string) {
+  return apiFetch<{ job: OfficeChatBackupJob | null }>("/api/admin/backups/jobs/active", token);
 }
 
 export function getUsers(token: string) {

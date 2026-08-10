@@ -200,7 +200,7 @@ elif command -v systemctl >/dev/null 2>&1; then
   as_root systemctl daemon-reload
   as_root systemctl enable --now officechat-backup-agent.service
 else
-  fail "systemd is required for the read-only backup agent"
+  fail "systemd is required for the backup agent"
 fi
 
 print_compose_files

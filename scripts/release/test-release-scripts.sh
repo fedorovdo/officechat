@@ -404,6 +404,55 @@ bundled_version="$(env -u OFFICECHAT_RELEASE_VERSION bash -c ". \"\$1\"; printf 
   exit 1
 }
 
+production_current='0.1.0-rc13-backup-jobs'
+production_target='0.1.0-rc13.1-backup-jobs-executor-fix'
+actual_lower='0.1.0-rc12-backup-jobs'
+comparison_signature() {
+  local locale_name="$1"
+  local locale_variable="$2"
+  (
+    local signature=""
+    local pair left right
+    unset LC_ALL LC_COLLATE LANG
+    export "${locale_variable}=${locale_name}"
+    # shellcheck source=lib.sh
+    . "${SCRIPT_DIR}/lib.sh"
+    for pair in \
+      "$production_target|$production_current" \
+      "$production_target|$production_target" \
+      "$actual_lower|$production_current"; do
+      left="${pair%%|*}"
+      right="${pair#*|}"
+      if version_precedes "$left" "$right"; then
+        signature="${signature}1"
+      else
+        signature="${signature}0"
+      fi
+    done
+    printf '%s' "$signature"
+  )
+}
+
+mapfile -t tested_locales < <(
+  locale -a | awk '
+    $0 == "C" ||
+    tolower($0) == "c.utf8" ||
+    tolower($0) == "c.utf-8" ||
+    tolower($0) == "ru_ru.utf8" ||
+    tolower($0) == "ru_ru.utf-8"
+  '
+)
+for locale_name in "${tested_locales[@]}"; do
+  for locale_variable in LC_ALL LC_COLLATE LANG; do
+    signature="$(comparison_signature "$locale_name" "$locale_variable")"
+    [[ "$signature" == "001" ]] || {
+      echo "Version ordering changed under ${locale_variable}=${locale_name}: ${signature}" >&2
+      exit 1
+    }
+  done
+  printf 'version ordering locale passed: %s\n' "$locale_name"
+done
+
 if bash "${SCRIPT_DIR}/install-linux.sh" --bad-argument >/dev/null 2>&1; then
   echo "install-linux.sh accepted an invalid argument" >&2
   exit 1
@@ -445,6 +494,41 @@ grep -q 'preserve-this-secret' "$ENV_FILE" || { echo "update dry-run did not pre
   exit 1
 }
 [[ "$update_output" != *"preserve-this-secret"* ]] || { echo "update dry-run leaked an env secret" >&2; exit 1; }
+
+original_version="$(cat "$VERSION_FILE")"
+original_metadata="$(cat "$RELEASE_METADATA_FILE")"
+write_test_release_metadata() {
+  local version="$1"
+  cat >"$RELEASE_METADATA_FILE" <<EOF_RELEASE_VERSION
+{
+  "version": "${version}",
+  "revision": "3333333333333333333333333333333333333333",
+  "build_date": "2026-08-04T18:00:00Z",
+  "backend_image": "ghcr.io/fedorovdo/officechat-backend:${version}",
+  "frontend_image": "ghcr.io/fedorovdo/officechat-frontend:${version}"
+}
+EOF_RELEASE_VERSION
+}
+
+printf '%s\n' "$production_current" >"$VERSION_FILE"
+write_test_release_metadata "$production_target"
+for locale_name in "${tested_locales[@]}"; do
+  LC_ALL="$locale_name" LANG="$locale_name" \
+    bash "${SCRIPT_DIR}/update-linux.sh" --dry-run "$production_target" >/dev/null
+done
+
+write_test_release_metadata "$production_current"
+bash "${SCRIPT_DIR}/update-linux.sh" --dry-run "$production_current" >/dev/null
+
+write_test_release_metadata "$actual_lower"
+if bash "${SCRIPT_DIR}/update-linux.sh" --dry-run "$actual_lower" >/dev/null 2>&1; then
+  echo "Updater accepted an actual downgrade without --allow-downgrade" >&2
+  exit 1
+fi
+bash "${SCRIPT_DIR}/update-linux.sh" --dry-run --allow-downgrade "$actual_lower" >/dev/null
+
+printf '%s\n' "$original_version" >"$VERSION_FILE"
+printf '%s\n' "$original_metadata" >"$RELEASE_METADATA_FILE"
 
 bad_metadata="${TMP_DIR}/bad-release.json"
 sed 's/3333333333333333333333333333333333333333/not-a-sha/' "$RELEASE_METADATA_FILE" >"$bad_metadata"

@@ -737,9 +737,6 @@ class SystemdJobExecutor:
                 unit_name == SCHEDULED_BACKUP_UNIT or self._is_executor_unit(unit_name)
             ):
                 return
-        elif action == "reset-failed" and len(arguments) == 2:
-            if self._is_executor_unit(arguments[1]):
-                return
         elif action == "start" and len(arguments) == 3:
             if arguments[1] == "--no-block" and self._is_executor_unit(arguments[2]):
                 return
@@ -834,26 +831,33 @@ class SystemdJobExecutor:
         previous = create_status if unit_name == CREATE_EXECUTOR_UNIT else self._show(unit_name)
         previous_invocation = previous.get("InvocationID") or ""
         previous_start = previous.get("ExecMainStartTimestampMonotonic") or "0"
-        reset = self._systemctl("reset-failed", unit_name)
-        if reset.returncode != 0:
-            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor state could not be reset")
         started = self._systemctl("start", "--no-block", unit_name)
         if started.returncode != 0:
             raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor could not be started")
 
         deadline = self._monotonic() + timeout_seconds
-        invocation_seen = False
+        observed_invocation = ""
+        observed_start = "0"
         while self._monotonic() < deadline:
             if stop_event.is_set():
                 raise AgentError("JOB_INTERRUPTED", "Backup operation was interrupted")
             status = self._show(unit_name)
             invocation = status.get("InvocationID") or ""
             start_timestamp = status.get("ExecMainStartTimestampMonotonic") or "0"
-            if (invocation and invocation != previous_invocation) or (
-                start_timestamp not in {"0", previous_start}
-            ):
-                invocation_seen = True
-            if invocation_seen and status.get("ActiveState") in {"inactive", "failed"}:
+            invocation_is_new = bool(invocation and invocation != previous_invocation)
+            start_is_new = start_timestamp not in {"0", previous_start}
+            if not invocation_is_new and not start_is_new:
+                self._sleep(self._poll_interval_seconds)
+                continue
+            if observed_invocation and invocation and invocation != observed_invocation:
+                raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor invocation changed unexpectedly")
+            if observed_start != "0" and start_timestamp not in {"0", observed_start}:
+                raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor invocation changed unexpectedly")
+            if not observed_invocation and invocation_is_new:
+                observed_invocation = invocation
+            if observed_start == "0" and start_is_new:
+                observed_start = start_timestamp
+            if status.get("ActiveState") in {"inactive", "failed"}:
                 try:
                     exit_code = int(status.get("ExecMainStatus") or "1")
                 except ValueError:

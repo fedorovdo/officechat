@@ -40,7 +40,8 @@ read_release_metadata "$metadata_source"
 [[ "$TARGET_VERSION" == "$RELEASE_VERSION" ]] || fail "Requested version does not match RELEASE.json"
 
 current_version="$(read_installed_version)"
-if [[ "$ALLOW_DOWNGRADE" != "1" && "$current_version" != "unknown" && "$TARGET_VERSION" < "$current_version" ]]; then
+if [[ "$ALLOW_DOWNGRADE" != "1" && "$current_version" != "unknown" ]] && \
+  version_precedes "$TARGET_VERSION" "$current_version"; then
   fail "Refusing apparent downgrade from ${current_version} to ${TARGET_VERSION}; pass --allow-downgrade to override."
 fi
 

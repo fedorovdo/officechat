@@ -116,6 +116,11 @@ validate_version() {
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]] || fail "Invalid OfficeChat version: $version"
 }
 
+version_precedes() {
+  local LC_ALL=C
+  [[ "$1" < "$2" ]]
+}
+
 validate_revision() {
   [[ "$1" =~ ^[0-9a-f]{40}$ ]] || fail "Invalid release revision"
 }

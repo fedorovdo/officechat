@@ -76,6 +76,13 @@ elif [[ -d "${SCRIPT_DIR}/systemd" ]]; then
 fi
 [[ -n "$systemd_source" ]] || fail "Backup systemd units not found"
 
+agent_was_enabled=0
+agent_was_active=0
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-enabled --quiet officechat-backup-agent.service; then agent_was_enabled=1; fi
+  if systemctl is-active --quiet officechat-backup-agent.service; then agent_was_active=1; fi
+fi
+
 staging_dir="$(mktemp -d)"
 chmod 0700 "$staging_dir"
 cleanup() {
@@ -115,7 +122,7 @@ if is_dry_run; then
   else
     log "DRY-RUN: create protected pre-upgrade backup"
   fi
-  log "DRY-RUN: preserve current Compose, version override, .env, agent unit/config and executable"
+  log "DRY-RUN: preserve current Compose, version override, .env, agent/executor units, config and executables"
   atomic_update_env_metadata "$OFFICECHAT_ENV_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
   atomic_write_version_override "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
   log "DRY-RUN: install release Compose and agent assets"
@@ -156,8 +163,14 @@ snapshot_file "$OFFICECHAT_COMPOSE_FILE" docker-compose.yml
 snapshot_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
 snapshot_file "$OFFICECHAT_ENV_FILE" officechat.env
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+snapshot_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
+snapshot_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" backup-agent.conf
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" backup-agent.py
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" backup-production.sh
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
 
 rollback_update() {
@@ -168,15 +181,32 @@ rollback_update() {
   restore_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
   restore_file "$OFFICECHAT_ENV_FILE" officechat.env
   restore_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+  restore_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
+  restore_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
   restore_file "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" backup-agent.conf
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" backup-agent.py
+  restore_file "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" backup-production.sh
+  restore_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
+  restore_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
+  restore_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
-    systemctl restart officechat-backup-agent.service || true
+    if [[ "$agent_was_enabled" == "1" ]]; then
+      systemctl enable officechat-backup-agent.service || true
+    else
+      systemctl disable officechat-backup-agent.service || true
+    fi
+    if [[ "$agent_was_active" == "1" ]]; then
+      systemctl restart officechat-backup-agent.service || true
+      wait_for_backup_agent_socket || warn "Previous backup agent socket did not become ready"
+    else
+      systemctl stop officechat-backup-agent.service || true
+    fi
   fi
   compose config --quiet || warn "Restored Compose stack did not validate"
-  compose up -d backend calendar-worker frontend || warn "Previous containers could not be restarted automatically"
+  compose up -d --force-recreate backend || warn "Previous backend could not be recreated automatically"
+  compose up -d calendar-worker frontend || warn "Previous containers could not be restarted automatically"
 }
 
 rollback_armed=1
@@ -198,7 +228,16 @@ install -m 0644 "$metadata_source" "${OFFICECHAT_INSTALL_DIR}/RELEASE.json"
 ensure_backup_agent_group
 ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
 ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
-install -m 0755 "$agent_source" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+install -o root -g root -m 0755 "$agent_source" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
+  if [[ -f "${SCRIPT_DIR}/${backup_tool}" && "${SCRIPT_DIR}/${backup_tool}" != "${OFFICECHAT_INSTALL_DIR}/${backup_tool}" ]]; then
+    install -o root -g root -m 0755 "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
+  fi
+done
+if [[ -f "${SCRIPT_DIR}/backup/lib.sh" && "${SCRIPT_DIR}/backup/lib.sh" != "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" ]]; then
+  install -d -o root -g root -m 0755 "${OFFICECHAT_INSTALL_DIR}/backup"
+  install -o root -g root -m 0644 "${SCRIPT_DIR}/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
+fi
 if [[ -L "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" ]]; then
   rollback_update
   fail "Refusing symlink backup agent configuration"
@@ -209,12 +248,29 @@ if [[ ! -f "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" ]]; then
 fi
 chown root:root "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
 chmod 600 "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
-install -m 0644 "${systemd_source}/officechat-backup-agent.service" \
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-agent.service" \
   "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" \
+  "$OFFICECHAT_BACKUP_JOB_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" \
+  "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE"
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
-  systemctl enable --now officechat-backup-agent.service
+  if [[ "$agent_was_enabled" == "1" ]]; then
+    systemctl enable officechat-backup-agent.service
+  else
+    systemctl disable officechat-backup-agent.service
+  fi
+  if [[ "$agent_was_active" == "1" ]]; then
+    systemctl restart officechat-backup-agent.service
+    wait_for_backup_agent_socket || {
+      rollback_update
+      fail "Backup agent socket did not become ready after restart"
+    }
+  else
+    systemctl stop officechat-backup-agent.service
+  fi
 else
   rollback_update
   fail "systemd is required for the backup agent"
@@ -231,21 +287,13 @@ if ! compose run --rm backend alembic upgrade head; then
   rollback_update
   fail "Migration failed"
 fi
-compose up -d backend calendar-worker frontend
+compose up -d --force-recreate backend
+compose up -d calendar-worker frontend
 if ! wait_for_ready; then
   rollback_update
   fail "Readiness failed"
 fi
 
-for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
-  if [[ -f "${SCRIPT_DIR}/${backup_tool}" && "${SCRIPT_DIR}/${backup_tool}" != "${OFFICECHAT_INSTALL_DIR}/${backup_tool}" ]]; then
-    install -m 0755 "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
-  fi
-done
-if [[ -f "${SCRIPT_DIR}/backup/lib.sh" && "${SCRIPT_DIR}/backup/lib.sh" != "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" ]]; then
-  install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/backup"
-  install -m 0644 "${SCRIPT_DIR}/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
-fi
 for backup_doc in BACKUP_CENTER_RU.md BACKUP_CENTER.md BACKUP_RESTORE_RU.md BACKUP_RESTORE.md; do
   if [[ -f "${SCRIPT_DIR}/deployment/${backup_doc}" ]]; then
     install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/docs"

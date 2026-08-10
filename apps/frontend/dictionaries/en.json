@@ -159,6 +159,11 @@
       "JOB_EXECUTION_FAILED": "The operation failed or another scheduled backup is running.",
       "JOB_START_FAILED": "The host could not start the operation.",
       "JOB_RESULT_UNAVAILABLE": "The command finished, but no new completed backup was published.",
+      "BACKUP_BUSY": "Another scheduled or manual backup operation is already running.",
+      "BACKUP_EXECUTION_FAILED": "Backup creation failed. Review the host executor journal.",
+      "VERIFY_FAILED": "Backup verification failed. Review the host executor journal.",
+      "EXECUTOR_UNAVAILABLE": "The host backup executor is unavailable.",
+      "EXECUTOR_TIMEOUT": "The host backup executor timed out.",
       "UNKNOWN": "The backup operation failed. Review the agent journal."
     },
     "jobMessages": {

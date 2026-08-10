@@ -32,9 +32,11 @@ Resolved config и secrets не выводятся. Metadata в `.env` и final 
 заменяются атомарно.
 
 При ошибке migration или readiness восстанавливаются предыдущие Compose, final
-override, `.env`, unit/config/executable агента и application containers. Database
+override, `.env`, agent/executor units, config/executable агента, backup scripts и application containers. Database
 downgrade не выполняется. Backup data, `backup.conf`, HTTPS override, Caddy volumes,
 PostgreSQL data и uploads не удаляются.
+
+Updater независимо сохраняет enabled и active state backup agent. Он устанавливает фиксированные executor assets до `daemon-reload`, перезапускает agent только если тот был active, проверяет новый socket как `root:officechat-backup` mode `0660` и принудительно пересоздаёт backend, чтобы bind mount получил текущий inode socket. Timer и расписание backup не меняются. Тот же порядок применяется при rollback частично выполненного update.
 
 ## Acceptance на SELinux Enforcing
 
@@ -44,6 +46,9 @@ PostgreSQL data и uploads не удаляются.
 getenforce
 sudo systemctl restart officechat-backup-agent
 sudo stat -c '%U %G %a' /run/officechat-backup-agent/agent.sock
+sudo systemctl status officechat-backup-job.service
+sudo journalctl -u officechat-backup-job.service --since today
+sudo ausearch -m AVC,USER_AVC -ts recent
 sudo ls -Zd /run/officechat-backup-agent /var/lib/officechat/{postgres,valkey,uploads}
 sudo /opt/officechat/officechatctl restart
 sudo /opt/officechat/officechatctl health

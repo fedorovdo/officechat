@@ -27,6 +27,111 @@ ACTOR_USER_ID = "11111111-1111-4111-8111-111111111111"
 ACTOR_LOGIN = "backup_admin"
 
 
+class FakeExecutor:
+    def __init__(self, *, result=0, error=None, on_run=None, release=None):
+        self.result = result
+        self.error = error
+        self.on_run = on_run
+        self.release = release
+        self.calls = []
+
+    def run(self, operation, backup_id, **kwargs):
+        self.calls.append((operation, backup_id, kwargs))
+        if self.on_run:
+            self.on_run()
+        if self.release:
+            self.release.wait(timeout=2)
+        if self.error:
+            raise self.error
+        return self.result
+
+
+class FakeSystemctlRunner:
+    def __init__(
+        self,
+        target_unit,
+        *,
+        exit_code=0,
+        scheduled_active=False,
+        target_active=False,
+        active_executor_units=(),
+        never_finishes=False,
+    ):
+        self.target_unit = target_unit
+        self.exit_code = exit_code
+        self.scheduled_active = scheduled_active
+        self.target_active = target_active
+        self.active_executor_units = set(active_executor_units)
+        if target_active:
+            self.active_executor_units.add(target_unit)
+        self.never_finishes = never_finishes
+        self.calls = []
+        self.start_count = 0
+        self.polls_since_start = 0
+        self.current_run_exit_code = None
+
+    @staticmethod
+    def _completed(argv, stdout="", returncode=0):
+        return backup_agent.subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((argv, kwargs))
+        action = argv[1]
+        if action == "list-units":
+            lines = [
+                f"{unit} loaded active running OfficeChat backup verification"
+                for unit in sorted(self.active_executor_units)
+                if unit.startswith(backup_agent.VERIFY_EXECUTOR_UNIT_PREFIX)
+            ]
+            return self._completed(argv, "\n".join(lines) + ("\n" if lines else ""))
+        if action == "show":
+            unit = argv[2]
+            if unit == backup_agent.SCHEDULED_BACKUP_UNIT:
+                active = "active" if self.scheduled_active else "inactive"
+                return self._completed(argv, f"LoadState=loaded\nActiveState={active}\nInvocationID=scheduled\n")
+            if unit != self.target_unit:
+                if unit == backup_agent.CREATE_EXECUTOR_UNIT:
+                    active = "active" if unit in self.active_executor_units else "inactive"
+                    return self._completed(
+                        argv,
+                        f"LoadState=loaded\nActiveState={active}\nSubState=dead\nResult=success\n"
+                        "ExecMainCode=1\nExecMainStatus=0\nExecMainStartTimestampMonotonic=100\n"
+                        "InvocationID=old-create\n",
+                    )
+                return self._completed(argv, "LoadState=not-found\n", 1)
+            if self.start_count == 0:
+                active = "active" if unit in self.active_executor_units else "inactive"
+                return self._completed(
+                    argv,
+                    f"LoadState=loaded\nActiveState={active}\nSubState=dead\nResult=success\n"
+                    "ExecMainCode=1\nExecMainStatus=0\nExecMainStartTimestampMonotonic=100\n"
+                    "InvocationID=old\n",
+                )
+            invocation = f"new-{self.start_count}"
+            if self.never_finishes or self.polls_since_start == 0:
+                self.polls_since_start += 1
+                return self._completed(
+                    argv,
+                    "LoadState=loaded\nActiveState=activating\nSubState=start\nResult=success\n"
+                    f"ExecMainCode=0\nExecMainStatus=0\nExecMainStartTimestampMonotonic={100 + self.start_count}\n"
+                    f"InvocationID={invocation}\n",
+                )
+            exit_code = self.current_run_exit_code
+            result = "success" if exit_code == 0 else "exit-code"
+            active = "inactive" if exit_code == 0 else "failed"
+            return self._completed(
+                argv,
+                f"LoadState=loaded\nActiveState={active}\nSubState=dead\nResult={result}\n"
+                f"ExecMainCode=1\nExecMainStatus={exit_code}\n"
+                f"ExecMainStartTimestampMonotonic={100 + self.start_count}\nInvocationID={invocation}\n",
+            )
+        if action == "start":
+            self.start_count += 1
+            self.polls_since_start = 0
+            self.current_run_exit_code = self.exit_code
+        return self._completed(argv)
+
+
 def timestamp() -> str:
     return datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc).isoformat()
 
@@ -235,8 +340,204 @@ class BackupAgentTestCase(unittest.TestCase):
         with patch.object(backup_agent.subprocess, "run", return_value=completed) as runner:
             backup_agent.read_timer_status("officechat-backup.timer")
         argv = runner.call_args.args[0]
-        self.assertEqual(argv[:3], ["systemctl", "show", "officechat-backup.timer"])
+        self.assertEqual(argv[:3], [backup_agent.SYSTEMCTL_PATH, "show", "officechat-backup.timer"])
         self.assertFalse(runner.call_args.kwargs.get("shell", False))
+
+    def test_systemd_executor_uses_only_fixed_create_unit_and_no_docker(self) -> None:
+        runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT)
+        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+
+        result = executor.run(
+            "create_backup",
+            None,
+            timeout_seconds=60,
+            stop_event=threading.Event(),
+        )
+        repeated = executor.run(
+            "create_backup",
+            None,
+            timeout_seconds=60,
+            stop_event=threading.Event(),
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(repeated, 0)
+        argv_calls = [call[0] for call in runner.calls]
+        self.assertIn(
+            [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", backup_agent.CREATE_EXECUTOR_UNIT],
+            argv_calls,
+        )
+        self.assertFalse(any("docker" in argument for argv in argv_calls for argument in argv))
+        self.assertTrue(all(argv[0] == backup_agent.SYSTEMCTL_PATH for argv in argv_calls))
+        self.assertTrue(all(call[1]["shell"] is False for call in runner.calls))
+        self.assertEqual(
+            argv_calls.count(
+                [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", backup_agent.CREATE_EXECUTOR_UNIT]
+            ),
+            2,
+        )
+
+    def test_systemd_executor_builds_only_validated_verify_unit(self) -> None:
+        backup_id = "officechat-backup-20260804-120000Z"
+        unit = f"{backup_agent.VERIFY_EXECUTOR_UNIT_PREFIX}{backup_id}.service"
+        runner = FakeSystemctlRunner(unit)
+        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+
+        for _attempt in range(2):
+            self.assertEqual(
+                executor.run(
+                    "verify_backup",
+                    backup_id,
+                    timeout_seconds=60,
+                    stop_event=threading.Event(),
+                ),
+                0,
+            )
+        self.assertIn(
+            [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", unit],
+            [call[0] for call in runner.calls],
+        )
+        self.assertEqual(
+            [call[0] for call in runner.calls].count(
+                [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", unit]
+            ),
+            2,
+        )
+        for invalid in ("../../etc/passwd", "officechat-backup-20260804-120000Z;reboot", "bad\n.service"):
+            with self.subTest(invalid=invalid), self.assertRaises(backup_agent.AgentError) as raised:
+                backup_agent.executor_unit_name("verify_backup", invalid)
+            self.assertEqual(raised.exception.code, "INVALID_BACKUP_ID")
+
+    def test_systemd_executor_rejects_arbitrary_systemctl_commands_and_units(self) -> None:
+        runner = MagicMock()
+        executor = backup_agent.SystemdJobExecutor(runner=runner)
+
+        rejected = (
+            ("enable", backup_agent.CREATE_EXECUTOR_UNIT),
+            ("start", "--no-block", "ssh.service"),
+            ("stop", backup_agent.SCHEDULED_BACKUP_UNIT),
+            ("show", "officechat-backup-verify@../../etc/passwd.service", "--no-pager"),
+            ("list-units", "--type=service", "officechat-backup-verify@evil*.service"),
+            ("set-property", backup_agent.CREATE_EXECUTOR_UNIT, "Environment=EVIL=1"),
+        )
+        for arguments in rejected:
+            with self.subTest(arguments=arguments), self.assertRaises(backup_agent.AgentError) as raised:
+                executor._systemctl(*arguments)
+            self.assertEqual(raised.exception.code, "EXECUTOR_UNAVAILABLE")
+        runner.assert_not_called()
+
+    def test_systemd_executor_blocks_cross_class_jobs_left_running_after_agent_restart(self) -> None:
+        backup_id = "officechat-backup-20260804-120000Z"
+        verify_unit = f"{backup_agent.VERIFY_EXECUTOR_UNIT_PREFIX}{backup_id}.service"
+        cases = (
+            ("create_backup", None, (verify_unit,)),
+            ("verify_backup", backup_id, (backup_agent.CREATE_EXECUTOR_UNIT,)),
+            (
+                "verify_backup",
+                backup_id,
+                (f"{backup_agent.VERIFY_EXECUTOR_UNIT_PREFIX}officechat-backup-20260803-120000Z.service",),
+            ),
+        )
+        for operation, requested_backup_id, active_units in cases:
+            unit = backup_agent.executor_unit_name(operation, requested_backup_id)
+            runner = FakeSystemctlRunner(unit, active_executor_units=active_units)
+            executor = backup_agent.SystemdJobExecutor(runner=runner)
+            with self.subTest(operation=operation, active_units=active_units), self.assertRaises(
+                backup_agent.AgentError
+            ) as raised:
+                executor.run(
+                    operation,
+                    requested_backup_id,
+                    timeout_seconds=60,
+                    stop_event=threading.Event(),
+                )
+            self.assertEqual(raised.exception.code, "BACKUP_BUSY")
+            self.assertFalse(any(call[0][1] == "start" for call in runner.calls))
+
+    def test_systemd_executor_can_succeed_after_previous_failed_oneshot(self) -> None:
+        cases = (
+            ("create_backup", None, "BACKUP_EXECUTION_FAILED"),
+            ("verify_backup", "officechat-backup-20260804-120000Z", "VERIFY_FAILED"),
+        )
+        for operation, backup_id, error_code in cases:
+            unit = backup_agent.executor_unit_name(operation, backup_id)
+            runner = FakeSystemctlRunner(unit, exit_code=1)
+            executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+
+            with self.subTest(operation=operation), self.assertRaises(backup_agent.AgentError) as failed:
+                executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event())
+            self.assertEqual(failed.exception.code, error_code)
+
+            runner.exit_code = 0
+            self.assertEqual(
+                executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event()),
+                0,
+            )
+            reset_call = [backup_agent.SYSTEMCTL_PATH, "reset-failed", unit]
+            self.assertEqual([call[0] for call in runner.calls].count(reset_call), 2)
+
+    def test_systemd_executor_classifies_busy_failure_unavailable_timeout_and_interrupt(self) -> None:
+        cases = (
+            ("create_backup", None, 75, "BACKUP_BUSY"),
+            ("create_backup", None, 1, "BACKUP_EXECUTION_FAILED"),
+            ("verify_backup", "officechat-backup-20260804-120000Z", 1, "VERIFY_FAILED"),
+        )
+        for operation, backup_id, exit_code, expected in cases:
+            unit = backup_agent.executor_unit_name(operation, backup_id)
+            executor = backup_agent.SystemdJobExecutor(
+                runner=FakeSystemctlRunner(unit, exit_code=exit_code), sleep=lambda _delay: None
+            )
+            with self.subTest(expected=expected), self.assertRaises(backup_agent.AgentError) as raised:
+                executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event())
+            self.assertEqual(raised.exception.code, expected)
+
+        busy = backup_agent.SystemdJobExecutor(
+            runner=FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, scheduled_active=True)
+        )
+        with self.assertRaises(backup_agent.AgentError) as scheduled:
+            busy.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
+        self.assertEqual(scheduled.exception.code, "BACKUP_BUSY")
+
+        executor_active = backup_agent.SystemdJobExecutor(
+            runner=FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, target_active=True)
+        )
+        with self.assertRaises(backup_agent.AgentError) as active:
+            executor_active.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
+        self.assertEqual(active.exception.code, "BACKUP_BUSY")
+
+        unavailable = backup_agent.SystemdJobExecutor(runner=MagicMock(side_effect=FileNotFoundError))
+        with self.assertRaises(backup_agent.AgentError) as missing:
+            unavailable.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
+        self.assertEqual(missing.exception.code, "EXECUTOR_UNAVAILABLE")
+
+        ticks = iter((0.0, 0.0, 2.0, 2.0))
+        timeout_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, never_finishes=True)
+        timed = backup_agent.SystemdJobExecutor(
+            runner=timeout_runner,
+            sleep=lambda _delay: None,
+            monotonic=lambda: next(ticks),
+        )
+        with self.assertRaises(backup_agent.AgentError) as timeout:
+            timed.run("create_backup", None, timeout_seconds=1, stop_event=threading.Event())
+        self.assertEqual(timeout.exception.code, "EXECUTOR_TIMEOUT")
+        self.assertIn(
+            [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
+            [call[0] for call in timeout_runner.calls],
+        )
+
+        interrupted_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT)
+        interrupted = backup_agent.SystemdJobExecutor(
+            runner=interrupted_runner, sleep=lambda _delay: None
+        )
+        stop_event = threading.Event()
+        stop_event.set()
+        with self.assertRaises(backup_agent.AgentError) as stopped:
+            interrupted.run("create_backup", None, timeout_seconds=60, stop_event=stop_event)
+        self.assertEqual(stopped.exception.code, "JOB_INTERRUPTED")
+        self.assertNotIn(
+            [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
+            [call[0] for call in interrupted_runner.calls],
+        )
 
     def test_protocol_validation(self) -> None:
         protocol = backup_agent.AgentProtocol(self.inspector)
@@ -252,7 +553,7 @@ class BackupAgentTestCase(unittest.TestCase):
         manager = backup_agent.BackupJobManager(
             self.config,
             self.inspector,
-            popen=lambda *_args, **_kwargs: MagicMock(wait=lambda: 0),
+            executor=FakeExecutor(),
         )
         protocol = backup_agent.AgentProtocol(self.inspector, manager)
         request_id = str(uuid.uuid4())
@@ -279,20 +580,8 @@ class BackupAgentTestCase(unittest.TestCase):
             })
         self.assertEqual(top_level.exception.code, "INVALID_REQUEST")
 
-    def test_create_job_uses_fixed_argv_without_shell_and_persists_safe_state(self) -> None:
-        calls = []
-
-        class Process:
-            pid = 12345
-
-            def wait(self, timeout=None):
-                return 0
-
-            def poll(self):
-                return 0
-
-        def popen(argv, **kwargs):
-            calls.append((argv, kwargs))
+    def test_create_job_uses_fixed_executor_and_persists_safe_state(self) -> None:
+        def publish_backup():
             created = self.make_backup(
                 "officechat-backup-20260805-120000Z",
                 manifest={"timestamp": timestamp()},
@@ -301,9 +590,9 @@ class BackupAgentTestCase(unittest.TestCase):
             self.config.status_file.write_text(json.dumps({
                 "last_run": {"backup_id": created.name},
             }), encoding="utf-8")
-            return Process()
 
-        manager = backup_agent.BackupJobManager(self.config, self.inspector, popen=popen)
+        executor = FakeExecutor(on_run=publish_backup)
+        manager = backup_agent.BackupJobManager(self.config, self.inspector, executor=executor)
         accepted = manager.create_job(
             "create_backup", requested_by_user_id=ACTOR_USER_ID, requested_by_login=ACTOR_LOGIN
         )
@@ -311,17 +600,15 @@ class BackupAgentTestCase(unittest.TestCase):
         result = self.wait_for_terminal(manager, accepted["job_id"])
         self.assertEqual(result["state"], "succeeded")
         self.assertEqual(result["backup_id"], "officechat-backup-20260805-120000Z")
-        self.assertEqual(calls[0][0], list(backup_agent.BACKUP_COMMAND))
-        self.assertFalse(calls[0][1]["shell"])
-        self.assertEqual(calls[0][1]["env"], backup_agent.SAFE_JOB_ENVIRONMENT)
+        self.assertEqual(executor.calls[0][0:2], ("create_backup", None))
         state = (self.config.state_directory / "jobs.json").read_text(encoding="utf-8")
         self.assertLessEqual(len(state.encode()), backup_agent.JOB_HISTORY_MAX_BYTES)
         self.assertNotIn("password", state.lower())
         self.assertFalse(list(self.config.state_directory.glob(".jobs-*.tmp")))
 
     def test_backup_storage_error_finishes_job_without_starting_process(self) -> None:
-        popen = MagicMock()
-        manager = backup_agent.BackupJobManager(self.config, self.inspector, popen=popen)
+        executor = MagicMock()
+        manager = backup_agent.BackupJobManager(self.config, self.inspector, executor=executor)
         with patch.object(
             self.inspector,
             "completed_backup_ids",
@@ -333,13 +620,13 @@ class BackupAgentTestCase(unittest.TestCase):
             result = self.wait_for_terminal(manager, accepted["job_id"])
 
         self.assertEqual(result["state"], "failed")
-        self.assertEqual(result["last_error"], "JOB_START_FAILED")
+        self.assertEqual(result["last_error"], "BACKUP_EXECUTION_FAILED")
         self.assertIsNone(manager.active_job())
-        popen.assert_not_called()
+        executor.run.assert_not_called()
 
     def test_verify_requires_completed_safe_backup_and_uses_fixed_prefix(self) -> None:
         directory = self.make_backup(manifest={"timestamp": timestamp()})
-        manager = backup_agent.BackupJobManager(self.config, self.inspector)
+        manager = backup_agent.BackupJobManager(self.config, self.inspector, executor=FakeExecutor())
         with self.assertRaises(backup_agent.AgentError) as incomplete:
             manager.create_job(
                 "verify_backup",
@@ -356,14 +643,11 @@ class BackupAgentTestCase(unittest.TestCase):
                 requested_by_user_id=ACTOR_USER_ID,
                 requested_by_login=ACTOR_LOGIN,
             )
-        calls = []
-        process = MagicMock(pid=12345)
-        process.wait.return_value = 0
-        process.poll.return_value = 0
+        executor = FakeExecutor()
         verifying = backup_agent.BackupJobManager(
             self.config,
             self.inspector,
-            popen=lambda argv, **kwargs: calls.append((argv, kwargs)) or process,
+            executor=executor,
         )
         accepted = verifying.create_job(
             "verify_backup",
@@ -373,17 +657,13 @@ class BackupAgentTestCase(unittest.TestCase):
         )
         result = self.wait_for_terminal(verifying, accepted["job_id"])
         self.assertEqual(result["state"], "succeeded")
-        self.assertEqual(calls[0][0], [*backup_agent.VERIFY_COMMAND_PREFIX, directory.name])
-        self.assertFalse(calls[0][1]["shell"])
+        self.assertEqual(executor.calls[0][0:2], ("verify_backup", directory.name))
 
     def test_terminal_audit_claim_is_durable_idempotent_and_preserves_actor(self) -> None:
         directory = self.make_backup(manifest={"timestamp": timestamp()})
         (directory / "SUCCESS").touch()
-        process = MagicMock(pid=12345)
-        process.wait.return_value = 0
-        process.poll.return_value = 0
         manager = backup_agent.BackupJobManager(
-            self.config, self.inspector, popen=lambda *_args, **_kwargs: process
+            self.config, self.inspector, executor=FakeExecutor()
         )
         accepted = manager.create_job(
             "verify_backup",
@@ -412,11 +692,10 @@ class BackupAgentTestCase(unittest.TestCase):
         self.assertNotIn("password", state.lower())
 
     def test_terminal_audit_claim_is_exclusive_and_can_be_released(self) -> None:
-        process = MagicMock(pid=12345)
-        process.wait.return_value = 7
-        process.poll.return_value = 7
         manager = backup_agent.BackupJobManager(
-            self.config, self.inspector, popen=lambda *_args, **_kwargs: process
+            self.config,
+            self.inspector,
+            executor=FakeExecutor(error=backup_agent.AgentError("BACKUP_EXECUTION_FAILED", "failed")),
         )
         accepted = manager.create_job(
             "create_backup", requested_by_user_id=ACTOR_USER_ID, requested_by_login=ACTOR_LOGIN
@@ -446,18 +725,8 @@ class BackupAgentTestCase(unittest.TestCase):
     def test_audit_protocol_rejects_actor_spoofing_and_non_terminal_ack(self) -> None:
         release = threading.Event()
 
-        class BlockingProcess:
-            pid = 12345
-
-            def wait(self, timeout=None):
-                release.wait(timeout=2)
-                return 0
-
-            def poll(self):
-                return None if not release.is_set() else 0
-
         manager = backup_agent.BackupJobManager(
-            self.config, self.inspector, popen=lambda *_args, **_kwargs: BlockingProcess()
+            self.config, self.inspector, executor=FakeExecutor(release=release)
         )
         protocol = backup_agent.AgentProtocol(self.inspector, manager)
         accepted = protocol.handle({
@@ -504,7 +773,7 @@ class BackupAgentTestCase(unittest.TestCase):
 
     def test_unreconciled_audit_history_is_never_evicted(self) -> None:
         self.config = replace(self.config, max_job_history=2)
-        manager = backup_agent.BackupJobManager(self.config, self.inspector)
+        manager = backup_agent.BackupJobManager(self.config, self.inspector, executor=FakeExecutor())
         template = {
             "operation": "create_backup",
             "state": "failed",
@@ -596,19 +865,11 @@ class BackupAgentTestCase(unittest.TestCase):
 
     def test_only_one_active_job_and_restart_marks_it_interrupted(self) -> None:
         release = threading.Event()
-
-        class BlockingProcess:
-            pid = 12345
-
-            def wait(self, timeout=None):
-                release.wait(timeout=2)
-                return 0
-
-            def poll(self):
-                return None if not release.is_set() else 0
+        backup = self.make_backup(manifest={"timestamp": timestamp()})
+        (backup / "SUCCESS").touch()
 
         manager = backup_agent.BackupJobManager(
-            self.config, self.inspector, popen=lambda *_args, **_kwargs: BlockingProcess()
+            self.config, self.inspector, executor=FakeExecutor(release=release)
         )
         first = manager.create_job(
             "create_backup", requested_by_user_id=ACTOR_USER_ID, requested_by_login=ACTOR_LOGIN
@@ -622,6 +883,14 @@ class BackupAgentTestCase(unittest.TestCase):
                 "create_backup", requested_by_user_id=ACTOR_USER_ID, requested_by_login=ACTOR_LOGIN
             )
         self.assertEqual(conflict.exception.code, "JOB_CONFLICT")
+        with self.assertRaises(backup_agent.AgentError) as verify_conflict:
+            manager.create_job(
+                "verify_backup",
+                backup_id=backup.name,
+                requested_by_user_id=ACTOR_USER_ID,
+                requested_by_login=ACTOR_LOGIN,
+            )
+        self.assertEqual(verify_conflict.exception.code, "JOB_CONFLICT")
         release.set()
         self.wait_for_terminal(manager, first["job_id"])
 
@@ -635,6 +904,66 @@ class BackupAgentTestCase(unittest.TestCase):
         interrupted_claim = restarted.claim_terminal_audit()
         self.assertEqual(interrupted_claim["job"]["state"], "interrupted")
         self.assertEqual(interrupted_claim["job"]["requested_by_login"], ACTOR_LOGIN)
+
+        verify_release = threading.Event()
+        verifying = backup_agent.BackupJobManager(
+            replace(self.config, state_directory=self.root / "verify-state"),
+            self.inspector,
+            executor=FakeExecutor(release=verify_release),
+        )
+        verify_job = verifying.create_job(
+            "verify_backup",
+            backup_id=backup.name,
+            requested_by_user_id=ACTOR_USER_ID,
+            requested_by_login=ACTOR_LOGIN,
+        )
+        for _ in range(100):
+            if verifying.active_job() and verifying.active_job()["state"] == "verifying":
+                break
+            time.sleep(0.01)
+        with self.assertRaises(backup_agent.AgentError) as create_conflict:
+            verifying.create_job(
+                "create_backup",
+                requested_by_user_id=ACTOR_USER_ID,
+                requested_by_login=ACTOR_LOGIN,
+            )
+        self.assertEqual(create_conflict.exception.code, "JOB_CONFLICT")
+        verify_release.set()
+        self.wait_for_terminal(verifying, verify_job["job_id"])
+
+    def test_agent_stop_interrupts_observation_without_stopping_executor(self) -> None:
+        runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, never_finishes=True)
+        manager = backup_agent.BackupJobManager(
+            self.config,
+            self.inspector,
+            executor=backup_agent.SystemdJobExecutor(runner=runner, poll_interval_seconds=0.01),
+        )
+        job = manager.create_job(
+            "create_backup",
+            requested_by_user_id=ACTOR_USER_ID,
+            requested_by_login=ACTOR_LOGIN,
+        )
+        for _ in range(100):
+            if any(call[0][1:3] == ["start", "--no-block"] for call in runner.calls):
+                break
+            time.sleep(0.01)
+
+        manager.stop()
+        terminal = self.wait_for_terminal(manager, job["job_id"])
+
+        self.assertEqual(terminal["state"], "interrupted")
+        self.assertEqual(terminal["last_error"], "JOB_INTERRUPTED")
+        self.assertNotIn(
+            [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
+            [call[0] for call in runner.calls],
+        )
+        with self.assertRaises(backup_agent.AgentError) as stopping:
+            manager.create_job(
+                "create_backup",
+                requested_by_user_id=ACTOR_USER_ID,
+                requested_by_login=ACTOR_LOGIN,
+            )
+        self.assertEqual(stopping.exception.code, "JOB_INTERRUPTED")
 
     def test_agent_config_is_allowlisted_owned_and_does_not_execute_shell(self) -> None:
         config_path = self.root / "agent.conf"

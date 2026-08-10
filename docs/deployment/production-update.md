@@ -31,9 +31,11 @@ labels, and backup-agent socket isolation. Resolved config and secrets are not
 printed. The `.env` metadata and final override are replaced atomically.
 
 If migration or readiness fails, the updater restores the previous Compose, final
-override, `.env`, agent unit/config/executable, and application containers. It does
+override, `.env`, agent/executor units, agent config/executable, backup scripts, and application containers. It does
 not downgrade the database. Backup data, `backup.conf`, the HTTPS override, Caddy
 volumes, PostgreSQL data, and uploads are never removed.
+
+The updater preserves the backup agent's enabled and active states independently. It installs the fixed executor assets before `daemon-reload`, restarts the agent only when it was active, validates the replacement socket as `root:officechat-backup` mode `0660`, and force-recreates backend so the bind mount points at the current socket inode. It never changes the backup timer state or schedule. The same ordering is used when rolling back a partially completed update.
 
 ## SELinux acceptance
 
@@ -43,6 +45,9 @@ On RED OS or another RHEL-like host, keep SELinux Enforcing:
 getenforce
 sudo systemctl restart officechat-backup-agent
 sudo stat -c '%U %G %a' /run/officechat-backup-agent/agent.sock
+sudo systemctl status officechat-backup-job.service
+sudo journalctl -u officechat-backup-job.service --since today
+sudo ausearch -m AVC,USER_AVC -ts recent
 sudo ls -Zd /run/officechat-backup-agent /var/lib/officechat/{postgres,valkey,uploads}
 sudo /opt/officechat/officechatctl restart
 sudo /opt/officechat/officechatctl health

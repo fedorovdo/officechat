@@ -25,7 +25,10 @@ require_docker_compose
 acquire_lock
 if command -v systemctl >/dev/null 2>&1; then
   as_root systemctl disable --now officechat-backup-agent.service || true
-  as_root rm -f /etc/systemd/system/officechat-backup-agent.service
+  as_root systemctl stop officechat-backup-job.service 'officechat-backup-verify@*.service' || true
+  as_root rm -f /etc/systemd/system/officechat-backup-agent.service \
+    /etc/systemd/system/officechat-backup-job.service \
+    /etc/systemd/system/officechat-backup-verify@.service
   as_root systemctl daemon-reload
 fi
 run_cmd compose down

@@ -24,6 +24,9 @@ OFFICECHAT_BACKUP_GROUP="${OFFICECHAT_BACKUP_GROUP:-officechat-backup}"
 OFFICECHAT_BACKUP_CONFIG_FILE="${OFFICECHAT_BACKUP_CONFIG_FILE:-/etc/officechat/backup.conf}"
 OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="${OFFICECHAT_BACKUP_AGENT_CONFIG_FILE:-/etc/officechat/backup-agent.conf}"
 OFFICECHAT_BACKUP_AGENT_UNIT_FILE="${OFFICECHAT_BACKUP_AGENT_UNIT_FILE:-/etc/systemd/system/officechat-backup-agent.service}"
+OFFICECHAT_BACKUP_JOB_UNIT_FILE="${OFFICECHAT_BACKUP_JOB_UNIT_FILE:-/etc/systemd/system/officechat-backup-job.service}"
+OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="${OFFICECHAT_BACKUP_VERIFY_UNIT_FILE:-/etc/systemd/system/officechat-backup-verify@.service}"
+OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${OFFICECHAT_BACKUP_AGENT_SOCKET_FILE:-/run/officechat-backup-agent/agent.sock}"
 DRY_RUN="${DRY_RUN:-0}"
 
 log() {
@@ -474,6 +477,30 @@ wait_for_ready() {
   fi
   for ((i = 1; i <= attempts; i++)); do
     if compose exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5).read()" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+  return 1
+}
+
+wait_for_backup_agent_socket() {
+  local attempts="${1:-50}"
+  local delay="${2:-0.2}"
+  local socket_path="$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE"
+  local expected_group="${OFFICECHAT_BACKUP_GROUP}"
+  local i owner group mode
+  if is_dry_run; then
+    log "DRY-RUN: wait for current backup agent socket"
+    return 0
+  fi
+  for ((i = 1; i <= attempts; i++)); do
+    if [[ -S "$socket_path" ]]; then
+      owner="$(stat -c '%U' "$socket_path")"
+      group="$(stat -c '%G' "$socket_path")"
+      mode="$(stat -c '%a' "$socket_path")"
+      [[ "$owner" == "root" && "$group" == "$expected_group" && "$mode" == "660" ]] ||
+        fail "Backup agent socket has unsafe ownership or mode"
       return 0
     fi
     sleep "$delay"

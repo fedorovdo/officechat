@@ -91,6 +91,8 @@ run cp "${ROOT_DIR}/deploy/backup/officechat-backup-agent.conf.example" "${RELEA
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "${RELEASE_DIR}/systemd/officechat-backup.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.timer" "${RELEASE_DIR}/systemd/officechat-backup.timer"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" "${RELEASE_DIR}/systemd/officechat-backup-agent.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-job.service" "${RELEASE_DIR}/systemd/officechat-backup-job.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-verify@.service" "${RELEASE_DIR}/systemd/officechat-backup-verify@.service"
 run cp "${ROOT_DIR}/docs/BACKUP_RESTORE_RU.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE_RU.md"
 run cp "${ROOT_DIR}/docs/BACKUP_RESTORE.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE.md"
 run cp "${ROOT_DIR}/docs/BACKUP_CENTER_RU.md" "${RELEASE_DIR}/deployment/BACKUP_CENTER_RU.md"
@@ -118,7 +120,9 @@ run chmod 0644 \
   "${RELEASE_DIR}/backup/officechat-backup-agent.conf.example" \
   "${RELEASE_DIR}/systemd/officechat-backup.service" \
   "${RELEASE_DIR}/systemd/officechat-backup.timer" \
-  "${RELEASE_DIR}/systemd/officechat-backup-agent.service"
+  "${RELEASE_DIR}/systemd/officechat-backup-agent.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup-job.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup-verify@.service"
 
 if [[ "$DRY_RUN" != "1" ]]; then
   (

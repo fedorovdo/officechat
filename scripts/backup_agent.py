@@ -38,18 +38,14 @@ TERMINAL_JOB_STATES = JOB_STATES - ACTIVE_JOB_STATES
 JOB_HISTORY_VERSION = 1
 JOB_HISTORY_MAX_BYTES = 1_048_576
 DEFAULT_AUDIT_CLAIM_TTL_SECONDS = 120
-BACKUP_COMMAND = (
-    "/opt/officechat/backup-production.sh",
-    "--config",
-    "/etc/officechat/backup.conf",
-)
-VERIFY_COMMAND_PREFIX = (
-    "/opt/officechat/restore-production.sh",
-    "--config",
-    "/etc/officechat/backup.conf",
-    "--verify-only",
-    "--backup-id",
-)
+SYSTEMCTL_PATH = "/usr/bin/systemctl"
+CREATE_EXECUTOR_UNIT = "officechat-backup-job.service"
+VERIFY_EXECUTOR_UNIT_PREFIX = "officechat-backup-verify@"
+VERIFY_EXECUTOR_UNIT_GLOB = "officechat-backup-verify@*.service"
+SCHEDULED_BACKUP_UNIT = "officechat-backup.service"
+SYSTEMCTL_COMMAND_TIMEOUT_SECONDS = 15
+SYSTEMCTL_OUTPUT_MAX_BYTES = 16_384
+EXECUTOR_BUSY_EXIT_CODE = 75
 SAFE_JOB_ENVIRONMENT = {
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "LANG": "C",
@@ -71,6 +67,7 @@ CONFIG_KEYS = {
     "STATE_DIRECTORY",
     "MAX_JOB_HISTORY",
     "AUDIT_CLAIM_TTL_SECONDS",
+    "EXECUTOR_TIMEOUT_SECONDS",
 }
 
 logger = logging.getLogger("officechat-backup-agent")
@@ -99,6 +96,7 @@ class AgentConfig:
     state_directory: Path = Path("/var/lib/officechat-backup-agent")
     max_job_history: int = 100
     audit_claim_ttl_seconds: int = DEFAULT_AUDIT_CLAIM_TTL_SECONDS
+    executor_timeout_seconds: int = 21_600
 
 
 def _contains_control(value: str) -> bool:
@@ -203,6 +201,9 @@ def load_agent_config(path: Path, *, expected_uid: int = 0) -> AgentConfig:
         max_job_history=integer("MAX_JOB_HISTORY", defaults.max_job_history, 10, 500),
         audit_claim_ttl_seconds=integer(
             "AUDIT_CLAIM_TTL_SECONDS", defaults.audit_claim_ttl_seconds, 30, 3600
+        ),
+        executor_timeout_seconds=integer(
+            "EXECUTOR_TIMEOUT_SECONDS", defaults.executor_timeout_seconds, 60, 86_400
         ),
     )
 
@@ -331,7 +332,7 @@ def _parse_systemd_time(value: str | None) -> str | None:
 
 def read_timer_status(unit_name: str) -> tuple[dict[str, Any], list[str]]:
     command = [
-        "systemctl", "show", unit_name, "--no-pager",
+        SYSTEMCTL_PATH, "show", unit_name, "--no-pager",
         "--property=LoadState", "--property=UnitFileState", "--property=ActiveState",
         "--property=NextElapseUSecRealtime", "--property=LastTriggerUSec",
     ]
@@ -661,6 +662,214 @@ def validate_actor_login(value: object) -> str:
     return login
 
 
+def executor_unit_name(operation: str, backup_id: str | None = None) -> str:
+    if operation == "create_backup":
+        if backup_id is not None:
+            raise AgentError("INVALID_PARAMS", "Create backup does not accept a backup identifier")
+        return CREATE_EXECUTOR_UNIT
+    if operation == "verify_backup":
+        return f"{VERIFY_EXECUTOR_UNIT_PREFIX}{validate_backup_id(backup_id)}.service"
+    raise AgentError("UNKNOWN_OPERATION", "Backup job operation is not supported")
+
+
+class SystemdJobExecutor:
+    """Starts and observes only the installed OfficeChat executor units."""
+
+    _SHOW_PROPERTIES = (
+        "LoadState",
+        "ActiveState",
+        "SubState",
+        "Result",
+        "ExecMainCode",
+        "ExecMainStatus",
+        "ExecMainStartTimestampMonotonic",
+        "InvocationID",
+    )
+    _LIST_ACTIVE_VERIFY_ARGUMENTS = (
+        "list-units",
+        "--type=service",
+        "--state=activating,active,deactivating",
+        "--plain",
+        "--no-legend",
+        "--no-pager",
+        VERIFY_EXECUTOR_UNIT_GLOB,
+    )
+
+    def __init__(
+        self,
+        *,
+        runner: Any = subprocess.run,
+        sleep: Any = time.sleep,
+        monotonic: Any = time.monotonic,
+        poll_interval_seconds: float = 0.5,
+    ) -> None:
+        self._runner = runner
+        self._sleep = sleep
+        self._monotonic = monotonic
+        self._poll_interval_seconds = poll_interval_seconds
+
+    @staticmethod
+    def _is_executor_unit(unit_name: str) -> bool:
+        if unit_name == CREATE_EXECUTOR_UNIT:
+            return True
+        if not unit_name.startswith(VERIFY_EXECUTOR_UNIT_PREFIX) or not unit_name.endswith(".service"):
+            return False
+        backup_id = unit_name[len(VERIFY_EXECUTOR_UNIT_PREFIX):-len(".service")]
+        try:
+            validate_backup_id(backup_id)
+        except AgentError:
+            return False
+        return True
+
+    def _validate_systemctl_arguments(self, arguments: tuple[str, ...]) -> None:
+        if not arguments:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor control request is invalid")
+        action = arguments[0]
+        if action == "show" and len(arguments) >= 3:
+            unit_name = arguments[1]
+            expected = (
+                "show",
+                unit_name,
+                "--no-pager",
+                *(f"--property={name}" for name in self._SHOW_PROPERTIES),
+            )
+            if arguments == expected and (
+                unit_name == SCHEDULED_BACKUP_UNIT or self._is_executor_unit(unit_name)
+            ):
+                return
+        elif action == "reset-failed" and len(arguments) == 2:
+            if self._is_executor_unit(arguments[1]):
+                return
+        elif action == "start" and len(arguments) == 3:
+            if arguments[1] == "--no-block" and self._is_executor_unit(arguments[2]):
+                return
+        elif action == "stop" and len(arguments) == 2:
+            if self._is_executor_unit(arguments[1]):
+                return
+        elif action == "list-units" and arguments == self._LIST_ACTIVE_VERIFY_ARGUMENTS:
+            return
+        raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor control request is invalid")
+
+    def _systemctl(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        self._validate_systemctl_arguments(arguments)
+        try:
+            completed = self._runner(
+                [SYSTEMCTL_PATH, *arguments],
+                shell=False,
+                env=dict(SAFE_JOB_ENVIRONMENT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=SYSTEMCTL_COMMAND_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise AgentError("EXECUTOR_TIMEOUT", "Backup executor control timed out") from exc
+        except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor is unavailable") from exc
+        if len(completed.stdout.encode("utf-8", errors="replace")) > SYSTEMCTL_OUTPUT_MAX_BYTES:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor returned invalid status")
+        return completed
+
+    def _show(self, unit_name: str) -> dict[str, str]:
+        completed = self._systemctl(
+            "show",
+            unit_name,
+            "--no-pager",
+            *(f"--property={name}" for name in self._SHOW_PROPERTIES),
+        )
+        if completed.returncode != 0:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor status is unavailable")
+        status: dict[str, str] = {}
+        for line in completed.stdout.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                if key in self._SHOW_PROPERTIES:
+                    status[key] = value
+        if status.get("LoadState") != "loaded":
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor unit is unavailable")
+        return status
+
+    def _scheduled_backup_is_active(self) -> bool:
+        status = self._show(SCHEDULED_BACKUP_UNIT)
+        return status.get("ActiveState") in {"activating", "active", "deactivating"}
+
+    def _active_verify_executor_units(self) -> tuple[str, ...]:
+        completed = self._systemctl(*self._LIST_ACTIVE_VERIFY_ARGUMENTS)
+        if completed.returncode != 0:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor status is unavailable")
+        active_units: list[str] = []
+        for line in completed.stdout.splitlines():
+            fields = line.split(None, 1)
+            if not fields:
+                continue
+            unit_name = fields[0]
+            if not unit_name.startswith(VERIFY_EXECUTOR_UNIT_PREFIX) or not self._is_executor_unit(unit_name):
+                raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor returned invalid status")
+            active_units.append(unit_name)
+        return tuple(active_units)
+
+    def _stop(self, unit_name: str) -> None:
+        completed = self._systemctl("stop", unit_name)
+        if completed.returncode != 0:
+            logger.error("executor_unit=%s stop_failed", unit_name)
+
+    def run(
+        self,
+        operation: str,
+        backup_id: str | None,
+        *,
+        timeout_seconds: int,
+        stop_event: threading.Event,
+    ) -> int:
+        unit_name = executor_unit_name(operation, backup_id)
+        if self._scheduled_backup_is_active():
+            raise AgentError("BACKUP_BUSY", "Another backup operation is already running")
+        create_status = self._show(CREATE_EXECUTOR_UNIT)
+        if create_status.get("ActiveState") in {"activating", "active", "deactivating"}:
+            raise AgentError("BACKUP_BUSY", "Another backup operation is already running")
+        if self._active_verify_executor_units():
+            raise AgentError("BACKUP_BUSY", "Another backup operation is already running")
+        previous = create_status if unit_name == CREATE_EXECUTOR_UNIT else self._show(unit_name)
+        previous_invocation = previous.get("InvocationID") or ""
+        previous_start = previous.get("ExecMainStartTimestampMonotonic") or "0"
+        reset = self._systemctl("reset-failed", unit_name)
+        if reset.returncode != 0:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor state could not be reset")
+        started = self._systemctl("start", "--no-block", unit_name)
+        if started.returncode != 0:
+            raise AgentError("EXECUTOR_UNAVAILABLE", "Backup executor could not be started")
+
+        deadline = self._monotonic() + timeout_seconds
+        invocation_seen = False
+        while self._monotonic() < deadline:
+            if stop_event.is_set():
+                raise AgentError("JOB_INTERRUPTED", "Backup operation was interrupted")
+            status = self._show(unit_name)
+            invocation = status.get("InvocationID") or ""
+            start_timestamp = status.get("ExecMainStartTimestampMonotonic") or "0"
+            if (invocation and invocation != previous_invocation) or (
+                start_timestamp not in {"0", previous_start}
+            ):
+                invocation_seen = True
+            if invocation_seen and status.get("ActiveState") in {"inactive", "failed"}:
+                try:
+                    exit_code = int(status.get("ExecMainStatus") or "1")
+                except ValueError:
+                    exit_code = 1
+                if status.get("Result") == "success" and exit_code == 0:
+                    return 0
+                if exit_code == EXECUTOR_BUSY_EXIT_CODE:
+                    raise AgentError("BACKUP_BUSY", "Another backup operation is already running")
+                error_code = "VERIFY_FAILED" if operation == "verify_backup" else "BACKUP_EXECUTION_FAILED"
+                raise AgentError(error_code, "Backup executor reported a failure")
+            self._sleep(self._poll_interval_seconds)
+
+        self._stop(unit_name)
+        raise AgentError("EXECUTOR_TIMEOUT", "Backup executor timed out")
+
+
 class BackupJobManager:
     """Runs one fixed backup operation at a time and persists bounded public state."""
 
@@ -669,18 +878,14 @@ class BackupJobManager:
         config: AgentConfig,
         inspector: BackupInspector,
         *,
-        popen: Any = subprocess.Popen,
-        backup_command: tuple[str, ...] = BACKUP_COMMAND,
-        verify_command_prefix: tuple[str, ...] = VERIFY_COMMAND_PREFIX,
+        executor: SystemdJobExecutor | Any | None = None,
     ) -> None:
         self.config = config
         self.inspector = inspector
-        self._popen = popen
-        self._backup_command = backup_command
-        self._verify_command_prefix = verify_command_prefix
+        self._executor = executor or SystemdJobExecutor()
         self._lock = threading.RLock()
         self._jobs: list[dict[str, Any]] = []
-        self._process: subprocess.Popen[Any] | None = None
+        self._stop_event = threading.Event()
         self._stopping = False
         self._state_file = config.state_directory / "jobs.json"
         self._prepare_state_directory()
@@ -876,6 +1081,8 @@ class BackupJobManager:
         actor_user_id = validate_actor_user_id(requested_by_user_id)
         actor_login = validate_actor_login(requested_by_login)
         with self._lock:
+            if self._stopping:
+                raise AgentError("JOB_INTERRUPTED", "Backup agent is stopping")
             if self.active_job() is not None:
                 raise AgentError("JOB_CONFLICT", "Another backup operation is already running")
             self._make_history_room()
@@ -976,10 +1183,8 @@ class BackupJobManager:
             started_at=_utc_now(),
             safe_message="Backup verification is running" if state == "verifying" else "Backup creation is running",
         )
-        argv = list(self._backup_command) if operation == "create_backup" else [*self._verify_command_prefix, backup_id]
         before_backup_ids: set[str] = set()
         agent_error: AgentError | None = None
-        process: subprocess.Popen[Any] | None = None
         exit_code: int | None = None
         try:
             if operation == "create_backup":
@@ -987,27 +1192,18 @@ class BackupJobManager:
             with self._lock:
                 if self._stopping:
                     raise AgentError("JOB_INTERRUPTED", "Backup operation was interrupted")
-                process = self._popen(
-                    argv,
-                    shell=False,
-                    env=dict(SAFE_JOB_ENVIRONMENT),
-                    stdin=subprocess.DEVNULL,
-                    stdout=None,
-                    stderr=None,
-                    start_new_session=True,
-                    close_fds=True,
-                )
-                self._process = process
-            exit_code = process.wait()
+            exit_code = self._executor.run(
+                operation,
+                backup_id,
+                timeout_seconds=self.config.executor_timeout_seconds,
+                stop_event=self._stop_event,
+            )
         except AgentError as exc:
             agent_error = exc
             logger.error("job_id=%s operation=%s agent_error=%s", job_id, operation, exc.code)
-        except (OSError, subprocess.SubprocessError):
-            logger.exception("job_id=%s operation=%s failed_to_start", job_id, operation)
-        finally:
-            with self._lock:
-                if self._process is process:
-                    self._process = None
+        except Exception:
+            logger.exception("job_id=%s operation=%s executor_failure", job_id, operation)
+            agent_error = AgentError("EXECUTOR_UNAVAILABLE", "Backup executor is unavailable")
         if self._stopping or (agent_error and agent_error.code == "JOB_INTERRUPTED"):
             self._set_job(
                 job,
@@ -1020,7 +1216,7 @@ class BackupJobManager:
                 last_error="JOB_INTERRUPTED",
             )
             return
-        if exit_code == 0:
+        if agent_error is None and exit_code == 0:
             if operation == "create_backup":
                 try:
                     created_ids = self.inspector.completed_backup_ids() - before_backup_ids
@@ -1054,6 +1250,23 @@ class BackupJobManager:
                 last_error=None,
             )
         else:
+            operation_error = "VERIFY_FAILED" if operation == "verify_backup" else "BACKUP_EXECUTION_FAILED"
+            reported_errors = {
+                "BACKUP_BUSY", "BACKUP_EXECUTION_FAILED", "VERIFY_FAILED",
+                "EXECUTOR_UNAVAILABLE", "EXECUTOR_TIMEOUT",
+            }
+            error_code = (
+                agent_error.code
+                if agent_error is not None and agent_error.code in reported_errors
+                else operation_error
+            )
+            safe_messages = {
+                "BACKUP_BUSY": "Another backup operation is already running",
+                "BACKUP_EXECUTION_FAILED": "Backup creation failed",
+                "VERIFY_FAILED": "Backup verification failed",
+                "EXECUTOR_UNAVAILABLE": "Backup executor is unavailable",
+                "EXECUTOR_TIMEOUT": "Backup executor timed out",
+            }
             self._set_job(
                 job,
                 state="failed",
@@ -1061,26 +1274,14 @@ class BackupJobManager:
                 finished_at=_utc_now(),
                 success=False,
                 exit_code=exit_code,
-                safe_message="Backup operation failed or another backup is already running",
-                last_error="JOB_EXECUTION_FAILED" if exit_code is not None else "JOB_START_FAILED",
+                safe_message=safe_messages.get(error_code, "Backup operation failed"),
+                last_error=error_code,
             )
 
     def stop(self) -> None:
         with self._lock:
             self._stopping = True
-            process = self._process
-        if process is not None and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    process.kill()
+            self._stop_event.set()
         deadline = time.monotonic() + 2
         while self.active_job() is not None and time.monotonic() < deadline:
             time.sleep(0.05)

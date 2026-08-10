@@ -120,6 +120,9 @@ require_command tar
 require_command flock
 require_command mktemp
 build_compose_args "$COMPOSE_FILES" "$COMPOSE_ENV_FILE" "$COMPOSE_PROJECT_NAME"
+if [[ "$MODE" == "verify" ]]; then
+  acquire_backup_lock
+fi
 "${SCRIPT_DIR}/verify-backup.sh" --config "$CONFIG_FILE" "$BACKUP_PATH"
 
 manifest="$BACKUP_PATH/metadata/manifest.json"

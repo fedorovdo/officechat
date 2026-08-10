@@ -1,0 +1,23 @@
+[Unit]
+Description=OfficeChat manual production backup executor
+Documentation=file:/opt/officechat/docs/BACKUP_CENTER.md
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+NoNewPrivileges=false
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/officechat /var/backups/officechat /run/lock
+StandardOutput=journal
+StandardError=journal

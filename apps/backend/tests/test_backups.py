@@ -419,6 +419,33 @@ class BackupAgentClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(raised.exception), "BACKUP_NOT_FOUND")
         self.assertNotIn("secret", str(raised.exception))
 
+        for error_code in (
+            "BACKUP_BUSY",
+            "BACKUP_EXECUTION_FAILED",
+            "VERIFY_FAILED",
+            "EXECUTOR_UNAVAILABLE",
+            "EXECUTOR_TIMEOUT",
+            "JOB_INTERRUPTED",
+        ):
+            remote = self.fake_streams((json.dumps({
+                "protocol_version": 1,
+                "request_id": str(REQUEST_ID),
+                "ok": False,
+                "error": {"code": error_code, "message": "private executor detail"},
+            }) + "\n").encode())
+            with (
+                self.subTest(error_code=error_code),
+                patch("app.services.backup_agent.uuid.uuid4", return_value=REQUEST_ID),
+                patch(
+                    "app.services.backup_agent.asyncio.open_unix_connection",
+                    AsyncMock(return_value=remote),
+                ),
+            ):
+                with self.assertRaises(BackupAgentRemoteError) as executor_error:
+                    await BackupAgentClient("/run/agent.sock").request("get_job")
+            self.assertEqual(str(executor_error.exception), error_code)
+            self.assertNotIn("private", str(executor_error.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -242,5 +242,9 @@ describe("Backup Center", () => {
     expect(Object.keys(en.backups.values).sort()).toEqual(Object.keys(ru.backups.values).sort());
     expect(Object.keys(en.backups.warnings).sort()).toEqual(Object.keys(ru.backups.warnings).sort());
     expect(Object.keys(en.backups.jobMessages).sort()).toEqual(Object.keys(ru.backups.jobMessages).sort());
+    expect(Object.keys(en.backups.jobErrors).sort()).toEqual(Object.keys(ru.backups.jobErrors).sort());
+    expect(en.backups.jobErrors.JOB_INTERRUPTED).toBeTruthy();
+    expect(en.backups.jobErrors.EXECUTOR_UNAVAILABLE).toBeTruthy();
+    expect(en.backups.jobErrors.EXECUTOR_TIMEOUT).toBeTruthy();
   });
 });

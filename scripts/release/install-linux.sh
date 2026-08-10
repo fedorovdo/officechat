@@ -166,9 +166,11 @@ elif [[ -d "${SCRIPT_DIR}/systemd" ]]; then
   systemd_source="${SCRIPT_DIR}/systemd"
 fi
 if [[ -n "$systemd_source" ]]; then
-  as_root install -m 0644 "${systemd_source}/officechat-backup.service" /etc/systemd/system/officechat-backup.service
-  as_root install -m 0644 "${systemd_source}/officechat-backup.timer" /etc/systemd/system/officechat-backup.timer
-  as_root install -m 0644 "${systemd_source}/officechat-backup-agent.service" /etc/systemd/system/officechat-backup-agent.service
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup.service" /etc/systemd/system/officechat-backup.service
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup.timer" /etc/systemd/system/officechat-backup.timer
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-agent.service" /etc/systemd/system/officechat-backup-agent.service
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" /etc/systemd/system/officechat-backup-job.service
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" /etc/systemd/system/officechat-backup-verify@.service
 fi
 if [[ -d "${SCRIPT_DIR}/../../deploy/caddy" ]]; then
   as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
@@ -179,7 +181,8 @@ elif [[ -d "${SCRIPT_DIR}/caddy" ]]; then
   as_root cp "${SCRIPT_DIR}/caddy/Caddyfile.example" "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
   as_root cp "${SCRIPT_DIR}/caddy/docker-compose.caddy.yml" "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
 fi
-as_root chmod +x "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl" "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+as_root chown root:root "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
+as_root chmod 0755 "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl" "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
 as_root chmod 644 "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
 as_root chmod 755 "$OFFICECHAT_INSTALL_DIR"
 ensure_backup_agent_group
@@ -199,6 +202,7 @@ if is_dry_run; then
 elif command -v systemctl >/dev/null 2>&1; then
   as_root systemctl daemon-reload
   as_root systemctl enable --now officechat-backup-agent.service
+  wait_for_backup_agent_socket || fail "Backup agent socket did not become ready"
 else
   fail "systemd is required for the backup agent"
 fi

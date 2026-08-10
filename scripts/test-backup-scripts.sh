@@ -762,10 +762,20 @@ done
   exec 8>"${TMP_DIR}/flock-test"
   flock -n 8
   LOCK_FILE="${TMP_DIR}/flock-test"
-  if (acquire_backup_lock) >/dev/null 2>&1; then
-    echo "parallel flock was not rejected" >&2
+  set +e
+  (acquire_backup_lock) >/dev/null 2>&1
+  lock_status=$?
+  set -e
+  [[ "$lock_status" == "75" ]] || {
+    echo "parallel flock did not return the executor busy status" >&2
     exit 1
-  fi
+  }
 )
+verify_lock_line="$(grep -n 'acquire_backup_lock' "${SCRIPT_DIR}/restore-production.sh" | head -n 1 | cut -d: -f1)"
+verify_script_line="$(grep -n 'verify-backup.sh.*--config' "${SCRIPT_DIR}/restore-production.sh" | head -n 1 | cut -d: -f1)"
+[[ -n "$verify_lock_line" && -n "$verify_script_line" && "$verify_lock_line" -lt "$verify_script_line" ]] || {
+  echo "verify-only path does not acquire the shared lock before reading backup files" >&2
+  exit 1
+}
 
 echo "backup script tests passed"

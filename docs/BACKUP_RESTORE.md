@@ -26,7 +26,7 @@ sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
 ```
 
 ### 8. Verify through Backup Center
-Open a completed backup and confirm “Verify backup”. The agent runs only the fixed verify-only argv for that validated backup ID.
+Open a completed backup and confirm “Verify backup”. The agent starts the fixed root-owned verify executor for that strictly validated backup ID. The unit can run only `--verify-only`; Backup Center still exposes no restore operation.
 
 ### 9. Verify through CLI
 ```bash
@@ -52,7 +52,7 @@ Defaults are `KEEP_DAILY=14`, `KEEP_WEEKLY=8`, and `KEEP_MONTHLY=12`; the UI dis
 Review `df -h` and GFS first. Backup Center has no delete or prune operation.
 
 ### 16. Safe verify-only
-Verify-only creates isolated temporary Docker resources, validates the dump/uploads, and removes those resources without modifying production.
+Verify-only creates isolated temporary Docker resources, validates the dump/uploads, and removes those resources without modifying production. It uses the same host `flock` as scheduled/manual backup and restore, so parallel operations fail safely as busy.
 
 ### 17. Restore drill on a VM clone
 Exercise disaster recovery on an isolated clone without client traffic and complete post-restore acceptance.

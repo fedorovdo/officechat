@@ -7,13 +7,19 @@ Backup Center — раздел для `superadmin`, который показы�
 ```text
 Browser -> OfficeChat backend -> Unix socket -> officechat-backup-agent
                                              -> backup metadata
-                                             -> fixed allowlisted backup/verify argv
+                                             -> fixed allowlisted systemctl argv
+                                             -> root-owned executor units
+                                             -> fixed backup/verify scripts
                                              -> systemd timer status
 ```
 
-Backend не получает backup root, Docker socket, systemd D-Bus или содержимое dump/uploads. Host-side agent работает отдельным root-owned systemd service, читает ограниченный набор metadata и запускает только фиксированные argv без shell. Протокол поддерживает чтение metadata/jobs, `create_backup`, `verify_backup` и безопасное подтверждение terminal audit claim. Клиент не может передать executable, config path, environment или дополнительные argv.
+Backend не получает backup root, Docker socket, systemd D-Bus, содержимое dump/uploads или state directory агента. Host-side agent работает отдельным root-owned systemd service и читает ограниченный набор metadata. Протокол поддерживает чтение metadata/jobs, `create_backup`, `verify_backup` и безопасное подтверждение terminal audit claim. Клиент не может передать executable, config path, environment, unit name, systemd property или дополнительные argv.
 
-Job state хранится атомарно в root-owned `/var/lib/officechat-backup-agent` с mode `0700`; backend этот каталог не монтирует. Одновременно выполняется одна операция. После рестарта незавершённая job становится `interrupted`. Полный stdout/stderr остаётся в journald и не попадает в API или state JSON.
+Agent сохраняет `NoNewPrivileges=true`, пустые `CapabilityBoundingSet`/`AmbientCapabilities` и hardened sandbox. Он может выполнять только точные shell-free формы `systemctl show/reset-failed/start/stop` для `officechat-backup-job.service`, строго проверенного `officechat-backup-verify@<backup-id>.service`, read-only status scheduled unit и один фиксированный `list-units` запрос активных OfficeChat verify instances. Create запускает только фиксированный production backup. Verify запускает только `restore-production.sh --verify-only` с ID формата `officechat-backup-YYYYMMDD-HHMMSSZ` и не может превратиться в restore.
+
+Только два root-owned executor unit используют `NoNewPrivileges=false`. Их `ExecStart`, config path, environment, writable paths и systemd properties устанавливаются release bundle и не поступают из API. Это явный security tradeoff для запуска Docker при SELinux Enforcing: компрометация executor unit или root-owned backup scripts потенциально даёт root-доступ через Docker. Файлы `/etc/systemd/system/officechat-backup-*.service` и `/opt/officechat/{backup-agent.py,backup-production.sh,verify-backup.sh,restore-production.sh,backup}` должны изменяться только root.
+
+Job state хранится атомарно в root-owned `/var/lib/officechat-backup-agent` с mode `0700`; backend этот каталог не монтирует. Одновременно выполняется одна API-операция. Scheduled, manual и verify-only дополнительно используют общий host `flock`; конфликт возвращает `BACKUP_BUSY`. После рестарта agent незавершённая наблюдаемая job становится `interrupted`, но systemd executor продолжает работу независимо. Новый agent не запустит вторую операцию, пока executor активен. Полный stdout/stderr остаётся в journald и не попадает в API или state JSON.
 
 Terminal audit не зависит от открытой страницы и frontend polling. Job хранит только снимок ID/login инициатора. При любом последующем GET Backup Center backend атомарно получает один pending terminal claim, проверяет существующий audit по `job_id`, выполняет commit и лишь затем подтверждает reconciliation agent. При ошибке commit claim освобождается; при потере acknowledgement он восстанавливается после `AUDIT_CLAIM_TTL_SECONDS`, а проверка correlation в БД предотвращает дубликат.
 
@@ -38,9 +44,13 @@ Release bundle содержит:
 - `backup-agent.py`;
 - `backup/officechat-backup-agent.conf.example`;
 - `systemd/officechat-backup-agent.service`;
+- `systemd/officechat-backup-job.service`;
+- `systemd/officechat-backup-verify@.service`;
 - этот документ и существующую документацию backup/restore.
 
-Installer создаёт system group `officechat-backup`, устанавливает root-owned `/etc/officechat/backup-agent.conf`, запускает agent service и передаёт backend numeric GID. Существующий agent config при update не перезаписывается. `StateDirectory` создаётся systemd. Установка agent не запускает backup и не включает `officechat-backup.timer`: timer включается только отдельным явным решением оператора.
+Installer создаёт system group `officechat-backup`, устанавливает root-owned `/etc/officechat/backup-agent.conf`, устанавливает units как `root:root` mode `0644`, запускает agent service, проверяет owner/group/mode socket и передаёт backend только numeric GID. Существующий agent config при update не перезаписывается. `StateDirectory` создаётся systemd. Установка agent не запускает backup и не включает `officechat-backup.timer`: timer включается только отдельным явным решением оператора.
+
+Updater сначала устанавливает scripts и units, выполняет `daemon-reload`, перезапускает agent только если он был active, сохраняет enabled/disabled state, проверяет новый socket и затем принудительно пересоздаёт backend, чтобы bind mount получил текущий inode socket. Timer и расписание не меняются. При частично выполненном неудачном update восстанавливаются прежние agent/executor assets и active/enabled state, затем backend пересоздаётся с восстановленным socket.
 
 Uninstaller останавливает и отключает agent, удаляет его systemd unit, после чего systemd удаляет runtime-каталог с socket. Backup data, `/etc/officechat/backup.conf`, `/etc/officechat/backup-agent.conf` и system group сохраняются для восстановления или повторной установки.
 
@@ -48,12 +58,15 @@ Uninstaller останавливает и отключает agent, удаляе
 
 ```bash
 sudo systemctl status officechat-backup-agent.service
+sudo systemctl status officechat-backup-job.service
+sudo systemctl status 'officechat-backup-verify@officechat-backup-YYYYMMDD-HHMMSSZ.service'
 sudo journalctl -u officechat-backup-agent.service --since today
+sudo journalctl -u officechat-backup-job.service --since today
 sudo stat /run/officechat-backup-agent/agent.sock
 docker compose --env-file /opt/officechat/.env -f /opt/officechat/docker-compose.yml exec backend id
 ```
 
-На production с SELinux Enforcing после ручного запуска через UI проверьте:
+На production с SELinux Enforcing после ручного запуска через UI проверьте `getenforce`, `ps -eZ`, `ausearch -m AVC,USER_AVC -ts recent`, журналы agent/executor и SELinux contexts. В журнале agent не должно быть отказа `nnp_transition`. Убедитесь, что agent сохраняет `NoNewPrivileges=true`, а `NoNewPrivileges=false` есть только в двух executor units. SELinux должен оставаться Enforcing; нельзя использовать permissive, `label=disable` или allow-all policy.
 
 ```bash
 getenforce
@@ -63,7 +76,9 @@ sudo ls -Zd /run/officechat-backup-agent /var/backups/officechat /var/lib/office
 sudo find /var/backups/officechat/production -maxdepth 3 -type f \( -name manifest.json -o -name SUCCESS -o -name SHA256SUMS \) -print
 ```
 
-Убедитесь, что backend видит только socket mount `ro,z`, а PostgreSQL/Valkey/uploads сохранили предусмотренные `:Z`/`:z` labels. SELinux отключать нельзя.
+Убедитесь, что backend видит только socket mount `ro,z`, а PostgreSQL/Valkey/uploads сохранили предусмотренные `:Z`/`:z` labels.
+
+Terminal errors намеренно безопасны: `BACKUP_BUSY`, `BACKUP_EXECUTION_FAILED`, `VERIFY_FAILED`, `EXECUTOR_UNAVAILABLE`, `EXECUTOR_TIMEOUT`, `JOB_INTERRUPTED`. Подробности операции смотрите в journald соответствующего executor; raw stderr браузеру не возвращается.
 
 Если agent недоступен, `/api/admin/backups/status` возвращает HTTP 200 с `agent_status=unavailable`; list/detail возвращают безопасный 503. Обычная локальная разработка без systemd agent продолжает работать, а UI показывает понятное unavailable-состояние.
 

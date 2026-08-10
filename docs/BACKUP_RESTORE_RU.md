@@ -26,7 +26,7 @@ sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
 ```
 
 ### 8. Проверка backup через Backup Center
-В окне завершённой копии нажмите «Проверить копию». Agent запускает только фиксированный verify-only argv для выбранного безопасного backup ID.
+В окне завершённой копии нажмите «Проверить копию». Agent запускает фиксированный root-owned verify executor только для строго проверенного backup ID. Unit может работать только с `--verify-only`; restore в Backup Center по-прежнему отсутствует.
 
 ### 9. Проверка backup через CLI
 ```bash
@@ -58,7 +58,7 @@ Defaults `KEEP_DAILY=14`, `KEEP_WEEKLY=8`, `KEEP_MONTHLY=12` применяют�
 Сначала проверьте `df -h` и GFS. Backup Center не удаляет и не prune-копии; удаление выполняет оператор по утверждённой процедуре.
 
 ### 16. Безопасный verify-only
-Verify-only создаёт изолированные временные Docker resources, проверяет dump/uploads и очищает их; production PostgreSQL и uploads не изменяются.
+Verify-only создаёт изолированные временные Docker resources, проверяет dump/uploads и очищает их; production PostgreSQL и uploads не изменяются. Он использует тот же host `flock`, что scheduled/manual backup и restore, поэтому параллельная операция безопасно получает busy.
 
 ### 17. Тестовое восстановление на клоне VM
 Проверяйте disaster recovery на изолированном клоне с копией конфигурации и без доступа клиентов, затем выполняйте post-restore acceptance.

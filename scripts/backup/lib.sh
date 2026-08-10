@@ -325,7 +325,10 @@ acquire_backup_lock() {
   fi
   exec 9>"$LOCK_FILE"
   chmod 600 "$LOCK_FILE"
-  flock -n 9 || fail "Another OfficeChat backup or restore operation is running"
+  if ! flock -n 9; then
+    printf 'FAIL: Another OfficeChat backup or restore operation is running\n' >&2
+    return 75
+  fi
 }
 
 validate_hook() {

@@ -84,6 +84,25 @@ cat >"${FAKE_BIN}/systemctl" <<'EOF_SYSTEMCTL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'systemctl %s\n' "$*" >>"${OFFICECHAT_FAKE_DOCKER_LOG}"
+if [[ "${1:-}" == "is-enabled" ]]; then
+  exit "${OFFICECHAT_FAKE_AGENT_ENABLED_STATUS:-0}"
+fi
+if [[ "${1:-}" == "is-active" ]]; then
+  exit "${OFFICECHAT_FAKE_AGENT_ACTIVE_STATUS:-0}"
+fi
+if [[ "${1:-}" == "restart" && "${2:-}" == "officechat-backup-agent.service" && -n "${OFFICECHAT_BACKUP_AGENT_SOCKET_FILE:-}" ]]; then
+  rm -f -- "$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE"
+  python3 - "$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE" <<'PY_SOCKET'
+import os
+import socket
+import sys
+
+listener = socket.socket(socket.AF_UNIX)
+listener.bind(sys.argv[1])
+listener.close()
+os.chmod(sys.argv[1], 0o660)
+PY_SOCKET
+fi
 exit 0
 EOF_SYSTEMCTL
 chmod +x "${FAKE_BIN}/systemctl"
@@ -99,6 +118,7 @@ export OFFICECHAT_HTTPS_OVERRIDE_FILE="$HTTPS_OVERRIDE_FILE"
 export OFFICECHAT_VERSION_OVERRIDE_FILE="$VERSION_OVERRIDE_FILE"
 export OFFICECHAT_RELEASE_METADATA_FILE="$RELEASE_METADATA_FILE"
 export OFFICECHAT_LOCK_FILE="$LOCK_DIR"
+export OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${TMP_DIR}/agent.sock"
 
 bash -n "${SCRIPT_DIR}"/*.sh
 bash -n "${SCRIPT_DIR}/officechatctl"
@@ -163,7 +183,9 @@ for backup_asset in \
   deploy/backup/officechat-backup-agent.conf.example \
   deploy/systemd/officechat-backup.service \
   deploy/systemd/officechat-backup.timer \
-  deploy/systemd/officechat-backup-agent.service; do
+  deploy/systemd/officechat-backup-agent.service \
+  deploy/systemd/officechat-backup-job.service \
+  deploy/systemd/officechat-backup-verify@.service; do
   grep -Fq "$backup_asset" "${SCRIPT_DIR}/create-release-bundle.sh" || {
     echo "Release bundle does not include ${backup_asset}" >&2
     exit 1
@@ -193,7 +215,7 @@ grep -Fq 'BACKUP_CENTER_RU.md' "${SCRIPT_DIR}/update-linux.sh" || {
   echo "Updater does not install Backup Center documentation" >&2
   exit 1
 }
-grep -Fq 'rm -f /etc/systemd/system/officechat-backup-agent.service' "${SCRIPT_DIR}/uninstall-linux.sh" || {
+grep -Fq '/etc/systemd/system/officechat-backup-agent.service' "${SCRIPT_DIR}/uninstall-linux.sh" || {
   echo "Uninstaller does not remove the stopped backup agent unit" >&2
   exit 1
 }
@@ -217,8 +239,69 @@ grep -Fq 'StateDirectoryMode=0700' "${ROOT_DIR}/deploy/systemd/officechat-backup
   echo "Backup agent state directory mode is not private" >&2
   exit 1
 }
-grep -Fq '/var/backups/officechat /run/lock' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
-  echo "Backup agent job sandbox lacks the required backup write paths" >&2
+if grep -Fq 'ReadWritePaths=' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" &&
+  grep -Eq 'ReadWritePaths=.*(/var/backups/officechat|/run/lock|/var/lib/officechat([[:space:]]|$))' \
+    "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service"; then
+  echo "Socket-facing backup agent retains executor write paths" >&2
+  exit 1
+fi
+grep -Fq 'NoNewPrivileges=true' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent must retain NoNewPrivileges=true" >&2
+  exit 1
+}
+for executor_unit in officechat-backup-job.service 'officechat-backup-verify@.service'; do
+  grep -Fq 'NoNewPrivileges=false' "${ROOT_DIR}/deploy/systemd/${executor_unit}" || {
+    echo "Executor unit ${executor_unit} does not declare the approved SELinux tradeoff" >&2
+    exit 1
+  }
+  grep -Fq 'User=root' "${ROOT_DIR}/deploy/systemd/${executor_unit}" || {
+    echo "Executor unit ${executor_unit} is not fixed to root" >&2
+    exit 1
+  }
+done
+[[ "$(grep -Rhc '^NoNewPrivileges=false$' "${ROOT_DIR}/deploy/systemd" | awk '{total += $1} END {print total + 0}')" == "2" ]] || {
+  echo "NoNewPrivileges=false must appear in exactly two executor units" >&2
+  exit 1
+}
+grep -Fq 'ExecStart=/opt/officechat/backup-production.sh --config /etc/officechat/backup.conf' \
+  "${ROOT_DIR}/deploy/systemd/officechat-backup-job.service" || {
+  echo "Manual backup executor command is not fixed" >&2
+  exit 1
+}
+grep -Fq 'ExecStart=/opt/officechat/restore-production.sh --config /etc/officechat/backup.conf --verify-only --backup-id %i' \
+  "${ROOT_DIR}/deploy/systemd/officechat-backup-verify@.service" || {
+  echo "Verification executor command is not fixed" >&2
+  exit 1
+}
+for unit_name in officechat-backup.service officechat-backup.timer officechat-backup-agent.service officechat-backup-job.service 'officechat-backup-verify@.service'; do
+  grep -Fq "install -o root -g root -m 0644 \"\${systemd_source}/${unit_name}\"" \
+    "${SCRIPT_DIR}/install-linux.sh" || {
+    echo "Installer does not explicitly install ${unit_name} as root-owned" >&2
+    exit 1
+  }
+done
+grep -Fq "as_root chown root:root \"\${OFFICECHAT_INSTALL_DIR}/backup-production.sh\"" \
+  "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not enforce root ownership for privileged backup scripts" >&2
+  exit 1
+}
+grep -Fq "as_root chmod 0755 \"\${OFFICECHAT_INSTALL_DIR}/install-linux.sh\"" \
+  "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not remove group/other write bits from privileged scripts" >&2
+  exit 1
+}
+grep -Fq "as_root chmod 644 \"\${OFFICECHAT_INSTALL_DIR}/backup/lib.sh\"" \
+  "${SCRIPT_DIR}/install-linux.sh" || {
+  echo "Installer does not set a non-writable mode on the backup helper library" >&2
+  exit 1
+}
+grep -Fq "install -o root -g root -m 0755 \"\$agent_source\"" "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not preserve root ownership for the backup agent executable" >&2
+  exit 1
+}
+grep -Fq "install -o root -g root -m 0755 \"\${SCRIPT_DIR}/\${backup_tool}\"" \
+  "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not preserve root ownership for backup executor scripts" >&2
   exit 1
 }
 grep -Fq 'STATE_DIRECTORY=/var/lib/officechat-backup-agent' "${ROOT_DIR}/deploy/backup/officechat-backup-agent.conf.example" || {
@@ -288,6 +371,18 @@ grep -Fq 'rollback_update' "${SCRIPT_DIR}/update-linux.sh" || {
   echo "Updater does not restore pre-update files on failure" >&2
   exit 1
 }
+grep -Fq 'systemctl restart officechat-backup-agent.service' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not restart a previously active backup agent" >&2
+  exit 1
+}
+grep -Fq 'compose up -d --force-recreate backend' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not recreate backend after the agent socket is replaced" >&2
+  exit 1
+}
+if grep -Fq 'systemctl enable --now officechat-backup-agent.service' "${SCRIPT_DIR}/update-linux.sh"; then
+  echo "Updater must not unconditionally enable or start the backup agent" >&2
+  exit 1
+fi
 
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
@@ -372,7 +467,9 @@ rollback_https="${rollback_install}/docker-compose.https-override.yml"
 rollback_override="${rollback_install}/docker-compose.version-override.yml"
 rollback_agent_config="${rollback_etc}/backup-agent.conf"
 rollback_agent_unit="${rollback_etc}/officechat-backup-agent.service"
-mkdir -p "$rollback_install" "$rollback_etc"
+rollback_job_unit="${rollback_etc}/officechat-backup-job.service"
+rollback_verify_unit="${rollback_etc}/officechat-backup-verify@.service"
+mkdir -p "${rollback_install}/backup" "$rollback_etc"
 cp "$COMPOSE_FILE" "$rollback_compose"
 cp "$HTTPS_OVERRIDE_FILE" "$rollback_https"
 printf 'services:\n  backend:\n    image: ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2\n  calendar-worker:\n    image: ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2\n  frontend:\n    image: ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2\n' >"$rollback_override"
@@ -382,10 +479,19 @@ printf 'old-agent\n' >"${rollback_install}/backup-agent.py"
 printf '{"old":true}\n' >"${rollback_install}/RELEASE.json"
 printf 'old-agent-config\n' >"$rollback_agent_config"
 printf 'old-agent-unit\n' >"$rollback_agent_unit"
+printf 'old-job-unit\n' >"$rollback_job_unit"
+printf 'old-verify-unit\n' >"$rollback_verify_unit"
+printf 'old-backup-script\n' >"${rollback_install}/backup-production.sh"
+printf 'old-verify-script\n' >"${rollback_install}/verify-backup.sh"
+printf 'old-restore-script\n' >"${rollback_install}/restore-production.sh"
+printf 'old-backup-lib\n' >"${rollback_install}/backup/lib.sh"
 
 declare -A rollback_hashes=()
 for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" "$rollback_env" \
   "$rollback_agent_config" "$rollback_agent_unit" "${rollback_install}/backup-agent.py" \
+  "$rollback_job_unit" "$rollback_verify_unit" "${rollback_install}/backup-production.sh" \
+  "${rollback_install}/verify-backup.sh" \
+  "${rollback_install}/restore-production.sh" "${rollback_install}/backup/lib.sh" \
   "${rollback_install}/RELEASE.json" "${rollback_install}/VERSION"; do
   rollback_hashes["$rollback_file"]="$(sha256sum "$rollback_file")"
 done
@@ -406,6 +512,9 @@ if env \
   OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
   OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
   OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+  OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
+  OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+  OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${rollback_root}/agent.sock" \
   bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >/dev/null 2>&1; then
   echo "update unexpectedly succeeded with a simulated migration failure" >&2
   exit 1
@@ -421,6 +530,79 @@ for rollback_file in "${!rollback_hashes[@]}"; do
     echo "update rollback did not restore ${rollback_file}" >&2
     exit 1
   }
+done
+grep -Fq 'systemctl restart officechat-backup-agent.service' "$FAKE_LOG" || {
+  echo "update did not restart the previously active backup agent" >&2
+  exit 1
+}
+grep -Fq -- '--force-recreate backend' "$FAKE_LOG" || {
+  echo "update rollback did not recreate backend for the current socket inode" >&2
+  exit 1
+}
+
+for enabled_status in 0 1; do
+  for active_status in 0 1; do
+    lifecycle_log="${TMP_DIR}/agent-state-${enabled_status}-${active_status}.log"
+    lifecycle_socket="${rollback_root}/agent-state-${enabled_status}-${active_status}.sock"
+    : >"$lifecycle_log"
+    if env \
+      OFFICECHAT_FAKE_DOCKER_LOG="$lifecycle_log" \
+      OFFICECHAT_FAKE_MIGRATION_FAIL=1 \
+      OFFICECHAT_FAKE_AGENT_ENABLED_STATUS="$enabled_status" \
+      OFFICECHAT_FAKE_AGENT_ACTIVE_STATUS="$active_status" \
+      OFFICECHAT_INSTALL_DIR="$rollback_install" \
+      OFFICECHAT_DATA_DIR="${rollback_root}/data" \
+      OFFICECHAT_BACKUP_DIR="${rollback_root}/backups" \
+      OFFICECHAT_ENV_FILE="$rollback_env" \
+      OFFICECHAT_COMPOSE_FILE="$rollback_compose" \
+      OFFICECHAT_HTTPS_OVERRIDE_FILE="$rollback_https" \
+      OFFICECHAT_VERSION_OVERRIDE_FILE="$rollback_override" \
+      OFFICECHAT_RELEASE_METADATA_FILE="$RELEASE_METADATA_FILE" \
+      OFFICECHAT_LOCK_FILE="${rollback_root}/agent-state-${enabled_status}-${active_status}.lock" \
+      OFFICECHAT_BACKUP_GROUP=root \
+      OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
+      OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
+      OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+      OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
+      OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+      OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="$lifecycle_socket" \
+      bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >/dev/null 2>&1; then
+      echo "agent lifecycle test unexpectedly succeeded past simulated migration failure" >&2
+      exit 1
+    fi
+    expected_enabled_action="disable"
+    unexpected_enabled_action="enable"
+    if [[ "$enabled_status" == "0" ]]; then
+      expected_enabled_action="enable"
+      unexpected_enabled_action="disable"
+    fi
+    expected_active_action="stop"
+    unexpected_active_action="restart"
+    if [[ "$active_status" == "0" ]]; then
+      expected_active_action="restart"
+      unexpected_active_action="stop"
+    fi
+    grep -Fq "systemctl ${expected_enabled_action} officechat-backup-agent.service" "$lifecycle_log" || {
+      echo "updater did not preserve backup agent enabled state" >&2
+      exit 1
+    }
+    if grep -Fq "systemctl ${unexpected_enabled_action} officechat-backup-agent.service" "$lifecycle_log"; then
+      echo "updater changed backup agent enabled state" >&2
+      exit 1
+    fi
+    grep -Fq "systemctl ${expected_active_action} officechat-backup-agent.service" "$lifecycle_log" || {
+      echo "updater did not preserve backup agent active state" >&2
+      exit 1
+    }
+    if grep -Fq "systemctl ${unexpected_active_action} officechat-backup-agent.service" "$lifecycle_log"; then
+      echo "updater changed backup agent active state" >&2
+      exit 1
+    fi
+    if grep -Fq 'officechat-backup.timer' "$lifecycle_log"; then
+      echo "updater changed backup timer state" >&2
+      exit 1
+    fi
+  done
 done
 
 verify_output="$(bash "${SCRIPT_DIR}/verify-install.sh" --dry-run 2>&1)"

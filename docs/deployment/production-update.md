@@ -37,6 +37,12 @@ volumes, PostgreSQL data, and uploads are never removed.
 
 The updater preserves the backup agent's enabled and active states independently. It installs the fixed executor assets before `daemon-reload`, restarts the agent only when it was active, validates the replacement socket as `root:officechat-backup` mode `0660`, and force-recreates backend so the bind mount points at the current socket inode. It never changes the backup timer state or schedule. The same ordering is used when rolling back a partially completed update.
 
+Before updating, follow the protected pre-upgrade procedure in
+[Backup and Restore](../BACKUP_RESTORE.md). After updating, confirm the
+[Backup Center](../BACKUP_CENTER.md), agent socket, timer state, and most recent
+successful backup. The restore runbook is canonical; this update guide does not
+duplicate its confirmed production restore command.
+
 ## SELinux acceptance
 
 On RED OS or another RHEL-like host, keep SELinux Enforcing:

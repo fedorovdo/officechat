@@ -38,6 +38,13 @@ PostgreSQL data и uploads не удаляются.
 
 Updater независимо сохраняет enabled и active state backup agent. Он устанавливает фиксированные executor assets до `daemon-reload`, перезапускает agent только если тот был active, проверяет новый socket как `root:officechat-backup` mode `0660` и принудительно пересоздаёт backend, чтобы bind mount получил текущий inode socket. Timer и расписание backup не меняются. Тот же порядок применяется при rollback частично выполненного update.
 
+Перед обновлением выполните процедуру защищённой pre-upgrade копии из документа
+[«Резервное копирование, проверка и восстановление»](../BACKUP_RESTORE_RU.md).
+После обновления проверьте [Центр резервного копирования](../BACKUP_CENTER_RU.md),
+сокет агента, состояние таймера и последнюю успешную копию. Каноническая
+процедура production-восстановления находится в руководстве по резервному
+копированию и здесь не дублируется.
+
 ## Acceptance на SELinux Enforcing
 
 На RED OS/RHEL-like хосте не отключайте SELinux:

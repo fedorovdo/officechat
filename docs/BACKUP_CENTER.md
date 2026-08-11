@@ -1,85 +1,124 @@
-# OfficeChat Backup Center v0.1
+# OfficeChat Backup Center
 
-Backup Center is a `superadmin` view of the OfficeChat production backup system. It can start a full local backup or an isolated verify-only job after confirmation. It cannot delete, prune, restore, or reconfigure backups, schedules, retention, or off-site storage.
+Backup Center is the `superadmin` interface for production backup status, manual backup creation, and isolated verification. It is available at `/en/admin/backups`. It does not delete, download, restore, or reconfigure backups, retention, schedules, or external storage. Production restore remains an authorized CLI-only operation.
 
-## Architecture
+For storage layout, scheduled backups, external storage, restore, and disaster recovery, use [Backup and Restore](BACKUP_RESTORE.md).
+
+## What the dashboard shows
+
+- availability and health of the host backup agent;
+- last run and last successful backup;
+- verification status and latest successful backup size;
+- free space in the local backup repository without revealing its path;
+- next scheduled run and read-only daily/weekly/monthly retention values;
+- external/off-site configuration and the last copy status without a destination path;
+- completed local backups with type, version, build, Alembic/PostgreSQL metadata, components, protection, and warnings;
+- the current or most recently observed browser job.
+
+Only completed directories with a strict ID such as `officechat-backup-20260811-111632Z` are listed. Missing or corrupt metadata produces a sanitized warning rather than exposing paths, private configuration, or tracebacks.
+
+## Buttons and job states
+
+- **Create backup** starts the fixed full local backup command after confirmation. OfficeChat remains available while the live best-effort backup is created.
+- **Refresh** reloads agent, storage, timer, history, and job metadata.
+- **Verify backup** is available in a completed backup's details. It performs the existing isolated `--verify-only` restore drill and does not change production data.
+
+The HTTP request only creates an asynchronous host job. The page then polls that job. Actual states are:
+
+- `queued`: accepted and waiting for the worker;
+- `running`: backup creation is in progress;
+- `verifying`: isolated verification is in progress;
+- `succeeded` with phase `completed`: operation completed successfully;
+- `failed` with phase `error`: executor or script reported an error;
+- `interrupted`: the agent stopped or restarted while observing the operation.
+
+Closing the page does not cancel a job. Backup Center does not expose cancellation or a queue.
+
+## Architecture and trust boundary
 
 ```text
-Browser -> OfficeChat backend -> Unix socket -> officechat-backup-agent
-                                             -> backup metadata
-                                             -> fixed allowlisted systemctl argv
-                                             -> root-owned executor units
-                                             -> fixed backup/verify scripts
-                                             -> systemd timer status
+Browser
+  -> unprivileged backend
+  -> read-only bind of a Unix socket directory
+  -> hardened root backup agent
+  -> fixed, allowlisted systemctl command
+  -> fixed systemd executor unit
+  -> fixed backup or verify-only script
 ```
 
-The backend receives neither the backup root nor Docker access, systemd D-Bus access, dump/upload contents, private configuration, or agent state directory. The root-owned host agent accepts only metadata reads, fixed `create_backup`/`verify_backup` jobs, job reads, and terminal-audit claim acknowledgements. It never accepts an executable, configuration path, environment, unit name, systemd property, or free-form argv from the client.
+The backend has no Docker socket, backup repository mount, or agent state mount. The frontend and calendar worker have no agent socket. A browser request cannot provide an executable, path, argv, environment, systemd property, or unit name.
 
-The agent runs with `NoNewPrivileges=true`, an empty capability bounding set, and its hardened sandbox. It can only issue exact, shell-free `systemctl show/start/stop` forms for `officechat-backup-job.service`, a strictly validated `officechat-backup-verify@<backup-id>.service`, read-only status for the scheduled backup unit, and one fixed `list-units` query for active OfficeChat verify instances. Creation executes only the fixed production backup command. Verification executes only `restore-production.sh --verify-only` with a backup ID matching `officechat-backup-YYYYMMDD-HHMMSSZ`; it cannot be changed into restore mode. The fixed `Type=oneshot` executors are started with blocking `systemctl start UNIT`: systemd completes that start job only after `ExecStart` exits, so a zero `systemctl` status is the authoritative success signal even if the inactive static unit is immediately garbage-collected. `--no-block` and `--wait` are not accepted. A non-zero start status never becomes success; retained failed-unit metadata is consulted only to classify exit 75 as `BACKUP_BUSY`, and only when it identifies a new failed invocation relative to the pre-start snapshot.
+The socket-facing `officechat-backup-agent.service` retains:
 
-Only the two root-owned executor units use `NoNewPrivileges=false`. Their `ExecStart` commands, configuration path, environment, writable paths, and service properties are installed by the release and are never supplied by the API. This is an explicit security tradeoff required for Docker under SELinux Enforcing: compromise of either root-owned unit file or the root-owned backup scripts can yield host root-equivalent access through Docker. Keep `/etc/systemd/system/officechat-backup-*.service` and `/opt/officechat/{backup-agent.py,backup-production.sh,verify-backup.sh,restore-production.sh,backup}` writable only by root and treat changes as security-sensitive.
+```ini
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+```
 
-The agent persists bounded, sanitized job history atomically in `/var/lib/officechat-backup-agent` (mode `0700`). Only one API operation runs at a time. Scheduled, manual, and verify-only operations also share the same host `flock`; contention returns `BACKUP_BUSY`. The blocking `systemctl` client runs in the job worker, so metadata requests remain available. On agent shutdown the client is terminated and reaped without stopping the PID 1-owned executor; the observed job becomes `interrupted`, and a restarted agent refuses a second operation while that executor is active. Completion after the agent restart is not retroactively reconciled into the interrupted job in this version. On executor timeout, the client is reaped and the same strictly allowlisted unit is explicitly stopped. Executor output remains in journald rather than API responses or state JSON.
+Only `officechat-backup-job.service` and `officechat-backup-verify@.service` use `NoNewPrivileges=false`. Their root-owned `ExecStart` commands are fixed by the release. This isolates the explicit Docker/SELinux privilege tradeoff in two narrow executors instead of the web application or socket-facing agent.
 
-Terminal audit is independent of the browser polling lifecycle. Each job stores only the initiating user ID/login snapshot. On any later Backup Center GET, the backend atomically claims one pending terminal job from the agent, commits an idempotent audit event correlated by `job_id`, and acknowledges the claim only after the database commit. Failed commits release the claim; lost acknowledgements recover after `AUDIT_CLAIM_TTL_SECONDS`, with the database correlation check preventing duplicate events.
+Create can run only:
 
-The default socket is `/run/officechat-backup-agent/agent.sock`, mode `0660`, owner `root`, group `officechat-backup`. Only the backend receives the supplementary numeric GID and a read-only bind of the runtime directory. The frontend and calendar worker receive no socket access.
+```text
+/opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+```
 
-## Visible metadata
+Verify can run only:
 
-- agent availability and overall backup health;
-- last run and last successful backup;
-- verification and off-site status without destination paths;
-- backup-root capacity without exposing its path;
-- installed timer state;
-- current read-only retention values;
-- backup history, version/build/Alembic/PostgreSQL metadata, and detected components.
+```text
+/opt/officechat/restore-production.sh --config /etc/officechat/backup.conf --verify-only --backup-id <validated-backup-id>
+```
 
-Legacy backups without reliable type metadata remain `unknown`. Missing or corrupt metadata produces safe warnings without exposing tracebacks, configuration content, or filesystem paths.
+Restore mode cannot be selected through the protocol.
 
-## Installation and updates
+## Concurrency and interruption
 
-The release bundle includes `backup-agent.py`, its root-owned configuration template, the hardened agent unit, the two fixed executor units, and Backup Center documentation. The installer creates the `officechat-backup` system group, installs `/etc/officechat/backup-agent.conf`, installs all units as `root:root` mode `0644`, starts the agent, validates the socket owner/group/mode, and passes only its numeric GID to the backend container. Updates preserve an existing agent configuration.
+The agent accepts one browser backup/verification operation at a time. Manual, scheduled, verify-only, and restore operations also share `/run/lock/officechat/backup.lock`. An active scheduled backup or executor causes a competing request to fail as `BACKUP_BUSY`.
 
-Updates install scripts and units first, run `daemon-reload`, restart the agent only when it was active, preserve its enabled/disabled state, validate the newly created socket, and then force-recreate backend so its bind mount uses the current socket inode. The backup timer state and schedule are not changed. A failed partial update restores the prior agent/executor assets and active/enabled state before recreating backend against the restored socket.
+If the agent restarts while a job is running, OfficeChat records that observed job as `interrupted`. The local `systemctl` client is terminated, but the `Type=oneshot` executor remains owned by PID 1 and may continue. A restarted agent checks active executors and refuses a competing operation. A late executor completion does not retroactively rewrite the interrupted OfficeChat job.
 
-Installing the agent does not run a backup and does not enable `officechat-backup.timer`. Enabling scheduled backups remains an explicit operator decision.
+Do not delete the lock file, edit `/var/lib/officechat-backup-agent/jobs.json`, or immediately retry an interrupted job. First inspect the executor and journals.
 
-The uninstaller stops and disables the agent, removes its systemd unit, and lets systemd remove the runtime socket directory. Backup data, `/etc/officechat/backup.conf`, `/etc/officechat/backup-agent.conf`, and the system group are preserved for recovery or reinstallation.
+## rc13.3 production acceptance evidence
 
-## Diagnostics
+Release `0.1.0-rc13.3-backup-jobs-completion-fix` was accepted on RED OS/systemd 253 on 2026-08-11. Browser backup `officechat-backup-20260811-111632Z` completed in 7 seconds with verification `passed` and final job `state=succeeded`, `phase=completed`, `success=true`, `exit_code=0`.
+
+After completion, systemd had already garbage-collected the inactive static unit identity:
+
+```text
+InvocationID=
+ExecMainStartTimestampMonotonic=0
+```
+
+This is expected. rc13.3 uses the result of blocking `systemctl start UNIT` as the authoritative success result for `Type=oneshot`; success no longer depends on polling invocation identity after completion. For a non-zero start result, stale metadata cannot become success or `BACKUP_BUSY`: exit 75 is classified as busy only when metadata proves a new failed invocation.
+
+## Safe diagnostics
 
 ```bash
 sudo systemctl status officechat-backup-agent.service
 sudo systemctl status officechat-backup-job.service
-sudo systemctl status 'officechat-backup-verify@officechat-backup-YYYYMMDD-HHMMSSZ.service'
-sudo journalctl -u officechat-backup-agent.service --since today
-sudo journalctl -u officechat-backup-job.service --since today
-sudo stat /run/officechat-backup-agent/agent.sock
-docker compose --env-file /opt/officechat/.env -f /opt/officechat/docker-compose.yml exec backend id
+sudo systemctl list-units --all 'officechat-backup-verify@*.service'
+sudo journalctl -u officechat-backup-agent.service --since today --no-pager
+sudo journalctl -u officechat-backup-job.service --since today --no-pager
+sudo stat -c '%U %G %a %n' /run/officechat-backup-agent/agent.sock
+sudo lslocks --output COMMAND,PID,TYPE,PATH | grep -F '/run/lock/officechat/backup.lock'
 ```
 
-On an SELinux Enforcing host, run a confirmed UI backup and inspect `getenforce`, `ps -eZ`, `ausearch -m AVC,USER_AVC -ts recent`, the agent and executor journals, contexts for `/run/officechat-backup-agent`, `/var/backups/officechat`, and `/var/lib/officechat`, plus the resulting manifest, `SHA256SUMS`, `SUCCESS`, and `latest.json`. The agent journal must not show an `nnp_transition` denial. Confirm the agent retains `NoNewPrivileges=true` and only the two executor units contain `NoNewPrivileges=false`. Keep the backend socket bind `ro,z`, PostgreSQL/Valkey private labels `:Z`, and shared uploads label `:z`. Keep SELinux Enforcing; do not use permissive mode, `label=disable`, or an allow-all policy.
+Common sanitized errors include `BACKUP_BUSY`, `BACKUP_EXECUTION_FAILED`, `VERIFY_FAILED`, `EXECUTOR_UNAVAILABLE`, `EXECUTOR_TIMEOUT`, and `JOB_INTERRUPTED`. Inspect the matching executor journal; raw stderr and private backup content are intentionally absent from browser responses.
 
-Terminal job errors are deliberately sanitized: `BACKUP_BUSY`, `BACKUP_EXECUTION_FAILED`, `VERIFY_FAILED`, `EXECUTOR_UNAVAILABLE`, `EXECUTOR_TIMEOUT`, and `JOB_INTERRUPTED`. Inspect the corresponding executor journal for operational detail; raw stderr is never returned to the browser.
-
-When the agent is unavailable, `/api/admin/backups/status` returns HTTP 200 with `agent_status=unavailable`; list and detail endpoints return a sanitized 503. Local development without the host agent remains usable and displays this unavailable state.
-
-Backup Center requires confirmation before creation or verification. Equivalent server-side CLI commands are:
+On SELinux Enforcing systems also use:
 
 ```bash
-sudo /opt/officechat/backup-production.sh --config /etc/officechat/backup.conf
+getenforce
+sudo ausearch -m AVC,USER_AVC -ts recent
+sudo ls -Zd /run/officechat-backup-agent /var/backups/officechat /var/lib/officechat
 ```
 
-```bash
-/opt/officechat/restore-production.sh \
-  --config /etc/officechat/backup.conf \
-  --backup-id officechat-backup-YYYYMMDD-HHMMSSZ \
-  --verify-only
-```
+Do not disable SELinux, make the socket world-writable, grant the backend Docker access, or broaden the executor allowlist as troubleshooting shortcuts.
 
-Backup Center intentionally has no restore button. Production restore is performed only through SSH as the separate, confirmed disaster-recovery procedure described in [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+## Installation and updates
 
-## Metadata security
+The release installer installs the scripts, documentation, agent configuration, and five backup units. It creates `/etc/officechat/backup.conf` and `/etc/officechat/backup-agent.conf` only when absent and preserves existing configuration on update. The agent is enabled and started; `officechat-backup.timer` is enabled only with `--enable-backup-timer` or a later explicit operator command.
 
-The API and UI never return local or off-site paths, credentials, private configuration, dump/upload filenames, usernames, or message metadata. Backup IDs use strict full-match and realpath validation, verification requires the `SUCCESS` marker, protocol and state sizes are bounded, symlinks are rejected, and subprocess execution uses fixed argv without a shell. The backend still receives no Docker socket, backup root, or agent state mount.
+Updates preserve the agent's enabled/active state, replace fixed executor assets before `daemon-reload`, validate the new socket, and recreate only backend so its read-only bind points to the current socket inode. They do not change the timer state or schedule.

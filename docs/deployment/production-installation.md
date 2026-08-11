@@ -112,4 +112,9 @@ curl --fail https://officechat.example.local/ready
   набор защищён от автоматической ротации и включает текущие frontend/backend
   images.
 
-См. [BACKUP_RESTORE_RU.md](../BACKUP_RESTORE_RU.md), [internal-https.md](internal-https.md), [windows-certificate-installation.md](windows-certificate-installation.md) и [caddy-ca-backup-restore.md](caddy-ca-backup-restore.md).
+После установки проверьте [Центр резервного копирования](../BACKUP_CENTER_RU.md),
+затем настройте и испытайте полный операторский процесс по документу
+[«Резервное копирование, проверка и восстановление»](../BACKUP_RESTORE_RU.md).
+Также см. [internal-https.md](internal-https.md),
+[windows-certificate-installation.md](windows-certificate-installation.md) и
+[caddy-ca-backup-restore.md](caddy-ca-backup-restore.md).

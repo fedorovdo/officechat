@@ -46,41 +46,120 @@ class FakeExecutor:
         return self.result
 
 
+class FakeSystemctlProcess:
+    def __init__(self, runner, argv, *, polls_before_exit=0):
+        self.runner = runner
+        self.args = argv
+        self.polls_before_exit = polls_before_exit
+        self.returncode = None
+        self.terminated = False
+        self.killed = False
+        self.wait_calls = 0
+
+    def poll(self):
+        if self.runner.poll_error is not None:
+            error = self.runner.poll_error
+            self.runner.poll_error = None
+            raise error
+        if self.returncode is not None:
+            return self.returncode
+        if self.runner.never_finishes:
+            return None
+        if self.polls_before_exit > 0:
+            self.polls_before_exit -= 1
+            return None
+        self.runner.active_executor_units.discard(self.runner.target_unit)
+        self.returncode = self.runner.systemctl_returncode
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+        if not self.runner.ignore_terminate:
+            self.returncode = -15
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        self.wait_calls += 1
+        if self.returncode is None:
+            raise backup_agent.subprocess.TimeoutExpired(self.args, timeout)
+        return self.returncode
+
+
 class FakeSystemctlRunner:
     def __init__(
         self,
         target_unit,
         *,
         exit_code=0,
+        previous_exit_code=0,
+        systemctl_returncode=None,
         scheduled_active=False,
         target_active=False,
         active_executor_units=(),
         never_finishes=False,
-        reset_failed_returncode=0,
-        stale_polls_after_start=0,
-        stale_forever_after_start=False,
-        stale_after_new_once=False,
+        ignore_terminate=False,
+        polls_before_exit=0,
+        stale_failed_status_after_start=False,
+        process_error=None,
+        poll_error=None,
     ):
         self.target_unit = target_unit
         self.exit_code = exit_code
+        self.previous_exit_code = previous_exit_code
+        self._configured_systemctl_returncode = systemctl_returncode
+        self.systemctl_returncode = systemctl_returncode if systemctl_returncode is not None else 0
         self.scheduled_active = scheduled_active
         self.target_active = target_active
         self.active_executor_units = set(active_executor_units)
         if target_active:
             self.active_executor_units.add(target_unit)
         self.never_finishes = never_finishes
-        self.reset_failed_returncode = reset_failed_returncode
-        self.stale_polls_after_start = stale_polls_after_start
-        self.stale_forever_after_start = stale_forever_after_start
-        self.stale_after_new_once = stale_after_new_once
+        self.ignore_terminate = ignore_terminate
+        self.polls_before_exit = polls_before_exit
+        self.stale_failed_status_after_start = stale_failed_status_after_start
+        self.process_error = process_error
+        self.poll_error = poll_error
         self.calls = []
+        self.process_calls = []
+        self.processes = []
         self.start_count = 0
-        self.polls_since_start = 0
         self.current_run_exit_code = None
 
     @staticmethod
     def _completed(argv, stdout="", returncode=0):
         return backup_agent.subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+    @staticmethod
+    def _status(exit_code, *, active=False, invocation="old", start_timestamp="100"):
+        result = "success" if exit_code == 0 else "exit-code"
+        active_state = "active" if active else ("inactive" if exit_code == 0 else "failed")
+        sub_state = "running" if active else "dead"
+        return (
+            f"LoadState=loaded\nActiveState={active_state}\nSubState={sub_state}\nResult={result}\n"
+            f"ExecMainCode=1\nExecMainStatus={exit_code}\n"
+            f"ExecMainStartTimestampMonotonic={start_timestamp}\nInvocationID={invocation}\n"
+        )
+
+    def popen(self, argv, **kwargs):
+        self.process_calls.append((argv, kwargs))
+        if self.process_error is not None:
+            raise self.process_error
+        if argv != [backup_agent.SYSTEMCTL_PATH, "start", self.target_unit]:
+            raise AssertionError(f"unexpected systemctl process argv: {argv!r}")
+        self.start_count += 1
+        self.current_run_exit_code = self.exit_code
+        self.systemctl_returncode = (
+            self._configured_systemctl_returncode
+            if self._configured_systemctl_returncode is not None
+            else (0 if self.exit_code == 0 else 1)
+        )
+        self.active_executor_units.add(self.target_unit)
+        process = FakeSystemctlProcess(self, argv, polls_before_exit=self.polls_before_exit)
+        self.processes.append(process)
+        return process
 
     def __call__(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
@@ -102,58 +181,59 @@ class FakeSystemctlRunner:
                     active = "active" if unit in self.active_executor_units else "inactive"
                     return self._completed(
                         argv,
-                        f"LoadState=loaded\nActiveState={active}\nSubState=dead\nResult=success\n"
-                        "ExecMainCode=1\nExecMainStatus=0\nExecMainStartTimestampMonotonic=100\n"
-                        "InvocationID=old-create\n",
+                        self._status(0, active=active == "active", invocation="old-create"),
                     )
                 return self._completed(argv, "LoadState=not-found\n", 1)
             if self.start_count == 0:
                 active = "active" if unit in self.active_executor_units else "inactive"
                 return self._completed(
                     argv,
-                    f"LoadState=loaded\nActiveState={active}\nSubState=dead\nResult=success\n"
-                    "ExecMainCode=1\nExecMainStatus=0\nExecMainStartTimestampMonotonic=100\n"
-                    "InvocationID=old\n",
+                    self._status(
+                        self.previous_exit_code,
+                        active=active == "active",
+                        invocation="old",
+                    ),
                 )
-            stale_status = (
-                "LoadState=loaded\nActiveState=inactive\nSubState=dead\nResult=success\n"
-                "ExecMainCode=1\nExecMainStatus=0\nExecMainStartTimestampMonotonic=100\n"
-                "InvocationID=old\n"
-            )
-            if self.stale_forever_after_start:
-                return self._completed(argv, stale_status)
-            if self.polls_since_start < self.stale_polls_after_start:
-                self.polls_since_start += 1
-                return self._completed(argv, stale_status)
-            relative_poll = self.polls_since_start - self.stale_polls_after_start
-            invocation = f"new-{self.start_count}"
-            if self.stale_after_new_once and relative_poll == 1:
-                self.polls_since_start += 1
-                return self._completed(argv, stale_status)
-            if self.never_finishes or relative_poll == 0:
-                self.polls_since_start += 1
+            if unit in self.active_executor_units:
                 return self._completed(
                     argv,
-                    "LoadState=loaded\nActiveState=activating\nSubState=start\nResult=success\n"
-                    f"ExecMainCode=0\nExecMainStatus=0\nExecMainStartTimestampMonotonic={100 + self.start_count}\n"
-                    f"InvocationID={invocation}\n",
+                    self._status(
+                        self.current_run_exit_code or 0,
+                        active=True,
+                        invocation=f"new-{self.start_count}",
+                        start_timestamp=str(100 + self.start_count),
+                    ),
+                )
+            if self.stale_failed_status_after_start:
+                return self._completed(
+                    argv,
+                    self._status(self.previous_exit_code, invocation="old"),
                 )
             exit_code = self.current_run_exit_code
-            result = "success" if exit_code == 0 else "exit-code"
-            active = "inactive" if exit_code == 0 else "failed"
+            if exit_code == 0:
+                return self._completed(
+                    argv,
+                    self._status(0, invocation="", start_timestamp="0"),
+                )
             return self._completed(
                 argv,
-                f"LoadState=loaded\nActiveState={active}\nSubState=dead\nResult={result}\n"
-                f"ExecMainCode=1\nExecMainStatus={exit_code}\n"
-                f"ExecMainStartTimestampMonotonic={100 + self.start_count}\nInvocationID={invocation}\n",
+                self._status(
+                    exit_code,
+                    invocation=f"new-{self.start_count}",
+                    start_timestamp=str(100 + self.start_count),
+                ),
             )
-        if action == "reset-failed":
-            return self._completed(argv, returncode=self.reset_failed_returncode)
-        if action == "start":
-            self.start_count += 1
-            self.polls_since_start = 0
-            self.current_run_exit_code = self.exit_code
+        if action == "stop":
+            self.active_executor_units.discard(argv[2])
         return self._completed(argv)
+
+
+def make_systemd_executor(runner, **kwargs):
+    return backup_agent.SystemdJobExecutor(
+        runner=runner,
+        process_factory=runner.popen,
+        **kwargs,
+    )
 
 
 def timestamp() -> str:
@@ -369,7 +449,7 @@ class BackupAgentTestCase(unittest.TestCase):
 
     def test_systemd_executor_uses_only_fixed_create_unit_and_no_docker(self) -> None:
         runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT)
-        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+        executor = make_systemd_executor(runner, sleep=lambda _delay: None)
 
         result = executor.run(
             "create_backup",
@@ -386,26 +466,21 @@ class BackupAgentTestCase(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(repeated, 0)
-        argv_calls = [call[0] for call in runner.calls]
-        self.assertIn(
-            [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", backup_agent.CREATE_EXECUTOR_UNIT],
-            argv_calls,
-        )
+        argv_calls = [call[0] for call in runner.calls] + [call[0] for call in runner.process_calls]
+        start_argv = [backup_agent.SYSTEMCTL_PATH, "start", backup_agent.CREATE_EXECUTOR_UNIT]
+        self.assertIn(start_argv, argv_calls)
         self.assertFalse(any("docker" in argument for argv in argv_calls for argument in argv))
+        self.assertFalse(any("--no-block" in argv or "--wait" in argv for argv in argv_calls))
         self.assertTrue(all(argv[0] == backup_agent.SYSTEMCTL_PATH for argv in argv_calls))
         self.assertTrue(all(call[1]["shell"] is False for call in runner.calls))
-        self.assertEqual(
-            argv_calls.count(
-                [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", backup_agent.CREATE_EXECUTOR_UNIT]
-            ),
-            2,
-        )
+        self.assertTrue(all(call[1]["shell"] is False for call in runner.process_calls))
+        self.assertEqual(argv_calls.count(start_argv), 2)
 
     def test_systemd_executor_builds_only_validated_verify_unit(self) -> None:
         backup_id = "officechat-backup-20260804-120000Z"
         unit = f"{backup_agent.VERIFY_EXECUTOR_UNIT_PREFIX}{backup_id}.service"
         runner = FakeSystemctlRunner(unit)
-        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+        executor = make_systemd_executor(runner, sleep=lambda _delay: None)
 
         for _attempt in range(2):
             self.assertEqual(
@@ -417,16 +492,9 @@ class BackupAgentTestCase(unittest.TestCase):
                 ),
                 0,
             )
-        self.assertIn(
-            [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", unit],
-            [call[0] for call in runner.calls],
-        )
-        self.assertEqual(
-            [call[0] for call in runner.calls].count(
-                [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", unit]
-            ),
-            2,
-        )
+        start_argv = [backup_agent.SYSTEMCTL_PATH, "start", unit]
+        self.assertIn(start_argv, [call[0] for call in runner.process_calls])
+        self.assertEqual([call[0] for call in runner.process_calls].count(start_argv), 2)
         for invalid in ("../../etc/passwd", "officechat-backup-20260804-120000Z;reboot", "bad\n.service"):
             with self.subTest(invalid=invalid), self.assertRaises(backup_agent.AgentError) as raised:
                 backup_agent.executor_unit_name("verify_backup", invalid)
@@ -439,7 +507,9 @@ class BackupAgentTestCase(unittest.TestCase):
         rejected = (
             ("enable", backup_agent.CREATE_EXECUTOR_UNIT),
             ("reset-failed", backup_agent.CREATE_EXECUTOR_UNIT),
-            ("start", "--no-block", "ssh.service"),
+            ("start", "--no-block", backup_agent.CREATE_EXECUTOR_UNIT),
+            ("start", "--wait", backup_agent.CREATE_EXECUTOR_UNIT),
+            ("start", "ssh.service"),
             ("stop", backup_agent.SCHEDULED_BACKUP_UNIT),
             ("show", "officechat-backup-verify@../../etc/passwd.service", "--no-pager"),
             ("list-units", "--type=service", "officechat-backup-verify@evil*.service"),
@@ -466,7 +536,7 @@ class BackupAgentTestCase(unittest.TestCase):
         for operation, requested_backup_id, active_units in cases:
             unit = backup_agent.executor_unit_name(operation, requested_backup_id)
             runner = FakeSystemctlRunner(unit, active_executor_units=active_units)
-            executor = backup_agent.SystemdJobExecutor(runner=runner)
+            executor = make_systemd_executor(runner)
             with self.subTest(operation=operation, active_units=active_units), self.assertRaises(
                 backup_agent.AgentError
             ) as raised:
@@ -477,7 +547,7 @@ class BackupAgentTestCase(unittest.TestCase):
                     stop_event=threading.Event(),
                 )
             self.assertEqual(raised.exception.code, "BACKUP_BUSY")
-            self.assertFalse(any(call[0][1] == "start" for call in runner.calls))
+            self.assertFalse(runner.process_calls)
 
     def test_systemd_executor_can_succeed_after_previous_failed_oneshot(self) -> None:
         cases = (
@@ -487,7 +557,7 @@ class BackupAgentTestCase(unittest.TestCase):
         for operation, backup_id, error_code in cases:
             unit = backup_agent.executor_unit_name(operation, backup_id)
             runner = FakeSystemctlRunner(unit, exit_code=1)
-            executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+            executor = make_systemd_executor(runner, sleep=lambda _delay: None)
 
             with self.subTest(operation=operation), self.assertRaises(backup_agent.AgentError) as failed:
                 executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event())
@@ -498,82 +568,84 @@ class BackupAgentTestCase(unittest.TestCase):
                 executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event()),
                 0,
             )
-            argv_calls = [call[0] for call in runner.calls]
-            self.assertEqual(
-                argv_calls.count([backup_agent.SYSTEMCTL_PATH, "start", "--no-block", unit]),
-                2,
-            )
+            argv_calls = [call[0] for call in runner.calls] + [call[0] for call in runner.process_calls]
+            self.assertEqual(argv_calls.count([backup_agent.SYSTEMCTL_PATH, "start", unit]), 2)
             self.assertFalse(any(call[1] == "reset-failed" for call in argv_calls))
 
     def test_systemd_executor_starts_unloaded_static_create_unit_without_reset_failed(self) -> None:
-        runner = FakeSystemctlRunner(
-            backup_agent.CREATE_EXECUTOR_UNIT,
-            reset_failed_returncode=1,
-        )
-        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+        runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT)
+        executor = make_systemd_executor(runner, sleep=lambda _delay: None)
 
         self.assertEqual(
             executor.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event()),
             0,
         )
-        argv_calls = [call[0] for call in runner.calls]
-        self.assertIn(
-            [backup_agent.SYSTEMCTL_PATH, "start", "--no-block", backup_agent.CREATE_EXECUTOR_UNIT],
-            argv_calls,
-        )
+        argv_calls = [call[0] for call in runner.calls] + [call[0] for call in runner.process_calls]
+        self.assertIn([backup_agent.SYSTEMCTL_PATH, "start", backup_agent.CREATE_EXECUTOR_UNIT], argv_calls)
         self.assertFalse(any(call[1] == "reset-failed" for call in argv_calls))
 
     def test_systemd_executor_starts_unloaded_verify_instance_without_reset_failed(self) -> None:
         backup_id = "officechat-backup-20260804-120000Z"
         unit = f"{backup_agent.VERIFY_EXECUTOR_UNIT_PREFIX}{backup_id}.service"
-        runner = FakeSystemctlRunner(unit, reset_failed_returncode=1)
-        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
+        runner = FakeSystemctlRunner(unit)
+        executor = make_systemd_executor(runner, sleep=lambda _delay: None)
 
         self.assertEqual(
             executor.run("verify_backup", backup_id, timeout_seconds=60, stop_event=threading.Event()),
             0,
         )
-        argv_calls = [call[0] for call in runner.calls]
-        self.assertIn([backup_agent.SYSTEMCTL_PATH, "start", "--no-block", unit], argv_calls)
+        argv_calls = [call[0] for call in runner.calls] + [call[0] for call in runner.process_calls]
+        self.assertIn([backup_agent.SYSTEMCTL_PATH, "start", unit], argv_calls)
         self.assertFalse(any(call[1] == "reset-failed" for call in argv_calls))
 
-    def test_systemd_executor_never_accepts_stale_success_as_new_job(self) -> None:
-        ticks = iter((0.0, 0.0, 2.0))
+    def test_systemd_executor_accepts_blocking_success_after_immediate_unit_gc(self) -> None:
+        cases = (
+            ("create_backup", None),
+            ("verify_backup", "officechat-backup-20260804-120000Z"),
+        )
+        for operation, backup_id in cases:
+            unit = backup_agent.executor_unit_name(operation, backup_id)
+            runner = FakeSystemctlRunner(unit)
+            executor = make_systemd_executor(runner, sleep=lambda _delay: None)
+
+            with self.subTest(operation=operation):
+                self.assertEqual(
+                    executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event()),
+                    0,
+                )
+            target_shows = [
+                call[0]
+                for call in runner.calls
+                if call[0][1:3] == ["show", unit]
+            ]
+            self.assertEqual(len(target_shows), 1)
+            self.assertEqual(runner.processes[0].returncode, 0)
+
+    def test_systemd_executor_success_ignores_previous_stale_success_or_failure(self) -> None:
+        for previous_exit_code in (0, 1, 75):
+            runner = FakeSystemctlRunner(
+                backup_agent.CREATE_EXECUTOR_UNIT,
+                previous_exit_code=previous_exit_code,
+            )
+            executor = make_systemd_executor(runner, sleep=lambda _delay: None)
+            with self.subTest(previous_exit_code=previous_exit_code):
+                self.assertEqual(
+                    executor.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event()),
+                    0,
+                )
+
+    def test_systemd_executor_does_not_classify_stale_failed_status_as_new_busy(self) -> None:
         runner = FakeSystemctlRunner(
             backup_agent.CREATE_EXECUTOR_UNIT,
-            stale_forever_after_start=True,
+            exit_code=1,
+            previous_exit_code=75,
+            stale_failed_status_after_start=True,
         )
-        executor = backup_agent.SystemdJobExecutor(
-            runner=runner,
-            sleep=lambda _delay: None,
-            monotonic=lambda: next(ticks),
-        )
+        executor = make_systemd_executor(runner, sleep=lambda _delay: None)
 
         with self.assertRaises(backup_agent.AgentError) as raised:
-            executor.run("create_backup", None, timeout_seconds=1, stop_event=threading.Event())
-        self.assertEqual(raised.exception.code, "EXECUTOR_TIMEOUT")
-        self.assertIn(
-            [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
-            [call[0] for call in runner.calls],
-        )
-
-    def test_systemd_executor_ignores_stale_terminal_after_new_invocation_seen(self) -> None:
-        runner = FakeSystemctlRunner(
-            backup_agent.CREATE_EXECUTOR_UNIT,
-            stale_after_new_once=True,
-        )
-        executor = backup_agent.SystemdJobExecutor(runner=runner, sleep=lambda _delay: None)
-
-        self.assertEqual(
-            executor.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event()),
-            0,
-        )
-        target_shows = [
-            call[0]
-            for call in runner.calls
-            if call[0][1:3] == ["show", backup_agent.CREATE_EXECUTOR_UNIT]
-        ]
-        self.assertGreaterEqual(len(target_shows), 4)
+            executor.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
+        self.assertEqual(raised.exception.code, "BACKUP_EXECUTION_FAILED")
 
     def test_systemd_executor_classifies_busy_failure_unavailable_timeout_and_interrupt(self) -> None:
         cases = (
@@ -583,23 +655,20 @@ class BackupAgentTestCase(unittest.TestCase):
         )
         for operation, backup_id, exit_code, expected in cases:
             unit = backup_agent.executor_unit_name(operation, backup_id)
-            executor = backup_agent.SystemdJobExecutor(
-                runner=FakeSystemctlRunner(unit, exit_code=exit_code), sleep=lambda _delay: None
-            )
+            runner = FakeSystemctlRunner(unit, exit_code=exit_code)
+            executor = make_systemd_executor(runner, sleep=lambda _delay: None)
             with self.subTest(expected=expected), self.assertRaises(backup_agent.AgentError) as raised:
                 executor.run(operation, backup_id, timeout_seconds=60, stop_event=threading.Event())
             self.assertEqual(raised.exception.code, expected)
 
-        busy = backup_agent.SystemdJobExecutor(
-            runner=FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, scheduled_active=True)
-        )
+        busy_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, scheduled_active=True)
+        busy = make_systemd_executor(busy_runner)
         with self.assertRaises(backup_agent.AgentError) as scheduled:
             busy.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
         self.assertEqual(scheduled.exception.code, "BACKUP_BUSY")
 
-        executor_active = backup_agent.SystemdJobExecutor(
-            runner=FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, target_active=True)
-        )
+        active_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, target_active=True)
+        executor_active = make_systemd_executor(active_runner)
         with self.assertRaises(backup_agent.AgentError) as active:
             executor_active.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
         self.assertEqual(active.exception.code, "BACKUP_BUSY")
@@ -609,10 +678,23 @@ class BackupAgentTestCase(unittest.TestCase):
             unavailable.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
         self.assertEqual(missing.exception.code, "EXECUTOR_UNAVAILABLE")
 
-        ticks = iter((0.0, 0.0, 2.0, 2.0))
-        timeout_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, never_finishes=True)
-        timed = backup_agent.SystemdJobExecutor(
-            runner=timeout_runner,
+        process_missing_runner = FakeSystemctlRunner(
+            backup_agent.CREATE_EXECUTOR_UNIT,
+            process_error=FileNotFoundError(),
+        )
+        process_missing = make_systemd_executor(process_missing_runner)
+        with self.assertRaises(backup_agent.AgentError) as process_missing_error:
+            process_missing.run("create_backup", None, timeout_seconds=60, stop_event=threading.Event())
+        self.assertEqual(process_missing_error.exception.code, "EXECUTOR_UNAVAILABLE")
+
+        ticks = iter((0.0, 0.0, 2.0))
+        timeout_runner = FakeSystemctlRunner(
+            backup_agent.CREATE_EXECUTOR_UNIT,
+            never_finishes=True,
+            ignore_terminate=True,
+        )
+        timed = make_systemd_executor(
+            timeout_runner,
             sleep=lambda _delay: None,
             monotonic=lambda: next(ticks),
         )
@@ -623,11 +705,30 @@ class BackupAgentTestCase(unittest.TestCase):
             [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
             [call[0] for call in timeout_runner.calls],
         )
+        self.assertTrue(timeout_runner.processes[0].terminated)
+        self.assertTrue(timeout_runner.processes[0].killed)
+        self.assertGreaterEqual(timeout_runner.processes[0].wait_calls, 2)
+        self.assertNotIn(backup_agent.CREATE_EXECUTOR_UNIT, timeout_runner.active_executor_units)
 
-        interrupted_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT)
-        interrupted = backup_agent.SystemdJobExecutor(
-            runner=interrupted_runner, sleep=lambda _delay: None
+        poll_error_runner = FakeSystemctlRunner(
+            backup_agent.CREATE_EXECUTOR_UNIT,
+            never_finishes=True,
+            poll_error=OSError("poll failed"),
         )
+        poll_error_executor = make_systemd_executor(poll_error_runner)
+        with self.assertRaises(backup_agent.AgentError) as poll_failure:
+            poll_error_executor.run(
+                "create_backup",
+                None,
+                timeout_seconds=60,
+                stop_event=threading.Event(),
+            )
+        self.assertEqual(poll_failure.exception.code, "EXECUTOR_UNAVAILABLE")
+        self.assertTrue(poll_error_runner.processes[0].terminated)
+        self.assertGreaterEqual(poll_error_runner.processes[0].wait_calls, 1)
+
+        interrupted_runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, never_finishes=True)
+        interrupted = make_systemd_executor(interrupted_runner, sleep=lambda _delay: None)
         stop_event = threading.Event()
         stop_event.set()
         with self.assertRaises(backup_agent.AgentError) as stopped:
@@ -637,6 +738,8 @@ class BackupAgentTestCase(unittest.TestCase):
             [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
             [call[0] for call in interrupted_runner.calls],
         )
+        self.assertTrue(interrupted_runner.processes[0].terminated)
+        self.assertIn(backup_agent.CREATE_EXECUTOR_UNIT, interrupted_runner.active_executor_units)
 
     def test_protocol_validation(self) -> None:
         protocol = backup_agent.AgentProtocol(self.inspector)
@@ -1031,11 +1134,15 @@ class BackupAgentTestCase(unittest.TestCase):
         self.wait_for_terminal(verifying, verify_job["job_id"])
 
     def test_agent_stop_interrupts_observation_without_stopping_executor(self) -> None:
-        runner = FakeSystemctlRunner(backup_agent.CREATE_EXECUTOR_UNIT, never_finishes=True)
+        runner = FakeSystemctlRunner(
+            backup_agent.CREATE_EXECUTOR_UNIT,
+            never_finishes=True,
+            ignore_terminate=True,
+        )
         manager = backup_agent.BackupJobManager(
             self.config,
             self.inspector,
-            executor=backup_agent.SystemdJobExecutor(runner=runner, poll_interval_seconds=0.01),
+            executor=make_systemd_executor(runner, poll_interval_seconds=0.01),
         )
         job = manager.create_job(
             "create_backup",
@@ -1043,7 +1150,7 @@ class BackupAgentTestCase(unittest.TestCase):
             requested_by_login=ACTOR_LOGIN,
         )
         for _ in range(100):
-            if any(call[0][1:3] == ["start", "--no-block"] for call in runner.calls):
+            if runner.process_calls:
                 break
             time.sleep(0.01)
 
@@ -1056,6 +1163,20 @@ class BackupAgentTestCase(unittest.TestCase):
             [backup_agent.SYSTEMCTL_PATH, "stop", backup_agent.CREATE_EXECUTOR_UNIT],
             [call[0] for call in runner.calls],
         )
+        self.assertTrue(runner.processes[0].terminated)
+        self.assertTrue(runner.processes[0].killed)
+        self.assertGreaterEqual(runner.processes[0].wait_calls, 2)
+        self.assertEqual(runner.processes[0].returncode, -9)
+        self.assertIn(backup_agent.CREATE_EXECUTOR_UNIT, runner.active_executor_units)
+        restarted_executor = make_systemd_executor(runner)
+        with self.assertRaises(backup_agent.AgentError) as active_executor:
+            restarted_executor.run(
+                "create_backup",
+                None,
+                timeout_seconds=60,
+                stop_event=threading.Event(),
+            )
+        self.assertEqual(active_executor.exception.code, "BACKUP_BUSY")
         with self.assertRaises(backup_agent.AgentError) as stopping:
             manager.create_job(
                 "create_backup",

@@ -51,7 +51,7 @@ Creation follows this lifecycle:
 ```text
 officechat-backup-....partial
   -> database, uploads, configured optional components
-  -> manifest and SHA256SUMS
+  -> metadata/manifest.json and metadata/SHA256SUMS
   -> checksum verification
   -> verify-backup.sh when VERIFY_AFTER_BACKUP=yes
   -> SUCCESS
@@ -159,17 +159,19 @@ The Backup Center **Verify backup** action runs this same `--verify-only --backu
 
 OfficeChat supports one filesystem destination already mounted by the host operating system. It does not implement NFS/SMB clients, object storage, S3, URLs, credentials, remote shells, or cloud APIs.
 
-Relevant keys are:
+> **Default state:** OfficeChat creates local backups only. External NFS storage is optional and must be configured explicitly.
+
+The local-only defaults are:
 
 ```ini
-OFFSITE_ROOT=/mnt/officechat-offsite
-REQUIRE_OFFSITE=yes
+OFFSITE_ROOT=
+REQUIRE_OFFSITE=no
 ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no
 REQUIRE_ENCRYPTED_PRIVATE=no
 AGE_RECIPIENT=
 ```
 
-This complete baseline copies PostgreSQL, uploads, public configuration, metadata, and any non-private optional content. Plaintext private configuration, Caddy CA, and extra-path archives are excluded. To include their encrypted alternatives, install `age`, set a valid public `AGE_RECIPIENT`, and normally set `REQUIRE_ENCRYPTED_PRIVATE=yes`.
+No external copy is attempted while `OFFSITE_ROOT` is empty. If external storage is enabled with these safe private-content settings, PostgreSQL, uploads, public configuration, metadata, and non-private optional content are copied, while plaintext private configuration, Caddy CA, and extra-path archives are excluded. To transfer encrypted alternatives for private archives that are actually created, set a valid public `AGE_RECIPIENT`; the script then requires `age`, encrypts each created private archive, and fails if encryption fails. `REQUIRE_ENCRYPTED_PRIVATE=yes` additionally rejects the configuration before capture unless the recipient is non-empty and `age` is available; it does not make an otherwise optional private component mandatory.
 
 `OFFSITE_ROOT` must already be a real active mountpoint, must not be a symlink, must not overlap application/local backup data, and must report a different filesystem device from `BACKUP_ROOT`. The root executor must be able to inspect free space and create, chmod, rename, and rotate directories there. The script never creates a missing mountpoint and rechecks mount/device identity before and after transfer.
 
@@ -197,6 +199,221 @@ Statuses are `not_configured`, `copied`, `skipped_not_mounted`, `failed`, or `un
 There is no copy retry and no dedicated network-copy timeout. systemd/browser executions have a six-hour unit/agent limit; a direct CLI run relies on the filesystem and operating-system timeout behavior. Monitor network mounts so a stalled storage server cannot leave an unattended CLI process waiting indefinitely.
 
 After a successful external copy, the same GFS policy is run independently on local and external repositories. Rotation considers only correctly named directories with `SUCCESS`, preserves the newest successful copy and every `PROTECTED` copy, and ignores partial, symlinked, and unrelated paths. External rotation is not run when the current external copy was skipped or failed.
+
+### Optional: external storage over NFS
+
+The architecture remains:
+
+```text
+backup-production.sh
+  -> verified local backup
+  -> filesystem mounted at OFFSITE_ROOT
+  -> verified off-site copy
+```
+
+The operating system mounts NFS. OfficeChat does not configure an NFS server, mount an export automatically, store NFS credentials, or implement its own network NFS client.
+
+#### OpenMediaVault example
+
+In the OpenMediaVault web interface:
+
+1. create or select a Shared Folder dedicated to OfficeChat backups;
+2. enable the NFS service if necessary;
+3. add an NFS share for that Shared Folder;
+4. restrict Client to `<OFFICECHAT_IP>` or a trusted backup subnet;
+5. grant read/write access;
+6. save and apply the configuration.
+
+OpenMediaVault exposes NFSv4 shares through its NFSv4 pseudo filesystem. Depending on its configuration, the address may be:
+
+```text
+<OMV_IP>:/<SHARE_NAME>
+```
+
+Do not assume an export path. Verify it in OpenMediaVault and, where the server supports the query, with:
+
+```bash
+OMV_IP='<OMV_IP>'
+showmount -e "$OMV_IP"
+```
+
+Keep NFS on a trusted LAN/VPN; do not publish it directly to the Internet.
+
+#### RED OS 8 client setup
+
+Install the client tools and enable the NFS client target:
+
+```bash
+sudo dnf install nfs-utils
+sudo systemctl enable --now nfs-client.target
+OMV_IP='<OMV_IP>'
+SHARE_NAME='<SHARE_NAME>'
+showmount -e "$OMV_IP"
+```
+
+Create a dedicated mountpoint and test the mount:
+
+```bash
+sudo mkdir -p /mnt/officechat-offsite
+sudo mount -t nfs "${OMV_IP}:/${SHARE_NAME}" /mnt/officechat-offsite
+findmnt /mnt/officechat-offsite
+mountpoint /mnt/officechat-offsite
+df -hT /mnt/officechat-offsite
+```
+
+Because `backup-production.sh` runs as root, perform a harmless root write test:
+
+```bash
+sudo touch /mnt/officechat-offsite/.officechat-write-test
+sudo rm -f /mnt/officechat-offsite/.officechat-write-test
+```
+
+If it fails, correct the NFS export permissions and root-squash mapping before configuring OfficeChat. Do not use `chmod 777` as a workaround.
+
+#### Persistent mount
+
+Back up `/etc/fstab` before editing it:
+
+```bash
+sudo cp -a /etc/fstab "/etc/fstab.officechat-before-nfs.$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Add a line using the export that was actually verified:
+
+```fstab
+<OMV_IP>:/<SHARE_NAME> /mnt/officechat-offsite nfs defaults,_netdev 0 0
+```
+
+Apply and verify it:
+
+```bash
+sudo mount -a
+findmnt /mnt/officechat-offsite
+mountpoint -q /mnt/officechat-offsite
+df -hT /mnt/officechat-offsite
+```
+
+Do not add unverified NFS timeout/retry options. If the mount is absent, OfficeChat rejects `OFFSITE_ROOT` as inactive and does not write a copy into a plain local directory with the same name.
+
+#### OfficeChat configuration
+
+Only after verifying the mount and root write access, edit `/etc/officechat/backup.conf`:
+
+```ini
+OFFSITE_ROOT=/mnt/officechat-offsite
+REQUIRE_OFFSITE=no
+ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no
+REQUIRE_ENCRYPTED_PRIVATE=no
+AGE_RECIPIENT=
+```
+
+Start with `REQUIRE_OFFSITE=no`: when NFS is not mounted, the local backup remains valid and `offsite_status` becomes `skipped_not_mounted`. A mounted destination that fails capacity, copy, or verification checks still fails the run and reports `failed`, while preserving the published local backup. Use `REQUIRE_OFFSITE=yes` only after a successful test when policy requires the backup operation to fail unless the external copy succeeds.
+
+`ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no` excludes plaintext private configuration, Caddy CA, and private extra-path archives from the off-site copy. A non-empty public `AGE_RECIPIENT` causes every private archive that is actually created to receive a `.age` alternative; encryption failure stops the backup. `REQUIRE_ENCRYPTED_PRIVATE=yes` rejects an empty recipient or missing `age` before capture, but does not require optional private components to exist. Keep the private age identity outside OfficeChat and the backup repository.
+
+#### First NFS backup test
+
+1. Verify the mount and filesystem:
+
+   ```bash
+   mountpoint -q /mnt/officechat-offsite
+   findmnt /mnt/officechat-offsite
+   ```
+
+2. Run one manual backup:
+
+   ```bash
+   sudo /opt/officechat/backup-production.sh \
+     --config /etc/officechat/backup.conf
+   ```
+
+3. Inspect the result and find the external backup ID:
+
+   ```bash
+   sudo cat /var/backups/officechat/status/latest.json
+   sudo find /mnt/officechat-offsite -mindepth 1 -maxdepth 1 -type d \
+     -name 'officechat-backup-????????-??????Z' -print | sort -r
+   ```
+
+   Expect `"offsite_status": "copied"` in `latest.json`.
+
+4. Substitute the discovered ID and inspect its published metadata:
+
+   ```bash
+   BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ
+   sudo test -f "/mnt/officechat-offsite/${BACKUP_ID}/SUCCESS"
+   sudo test -f "/mnt/officechat-offsite/${BACKUP_ID}/metadata/SHA256SUMS"
+   sudo test -f "/mnt/officechat-offsite/${BACKUP_ID}/metadata/manifest.json"
+   ```
+
+5. Run the isolated restore drill with the supported full-path syntax:
+
+   ```bash
+   sudo /opt/officechat/restore-production.sh \
+     --config /etc/officechat/backup.conf \
+     --verify-only \
+     "/mnt/officechat-offsite/${BACKUP_ID}"
+   ```
+
+Do not perform a production restore merely to test NFS.
+
+#### Optional unavailability test
+
+Perform this only in an approved maintenance window and only for a dedicated mount unused by other workloads. First confirm that no unrelated process uses it, then unmount it without deleting the mountpoint directory:
+
+```bash
+sudo fuser -vm /mnt/officechat-offsite
+sudo umount /mnt/officechat-offsite
+mountpoint /mnt/officechat-offsite || echo 'NFS test mount is unavailable as expected'
+```
+
+With `REQUIRE_OFFSITE=no`, run one manual backup and inspect `latest.json` plus the local `SUCCESS` marker:
+
+```bash
+sudo /opt/officechat/backup-production.sh \
+  --config /etc/officechat/backup.conf
+sudo cat /var/backups/officechat/status/latest.json
+BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ
+sudo test -f "/var/backups/officechat/production/${BACKUP_ID}/SUCCESS"
+sudo find /mnt/officechat-offsite -mindepth 1 -maxdepth 1 -print
+```
+
+Expect a valid local backup, `"offsite_status": "skipped_not_mounted"`, and no output from the final command: OfficeChat must not write files into the plain unmounted `/mnt/officechat-offsite` directory.
+
+Restore and verify the mount after the test:
+
+```bash
+sudo mount /mnt/officechat-offsite
+mountpoint -q /mnt/officechat-offsite
+findmnt /mnt/officechat-offsite
+```
+
+The protection relies on `mountpoint -q OFFSITE_ROOT` and checking that the external filesystem device differs from `BACKUP_ROOT`. Do not remove these checks or edit production scripts.
+
+#### NFS troubleshooting
+
+```bash
+rpm -q nfs-utils
+sudo systemctl status nfs-client.target
+OMV_IP='<OMV_IP>'
+showmount -e "$OMV_IP"
+findmnt /mnt/officechat-offsite
+mountpoint /mnt/officechat-offsite
+df -hT /mnt/officechat-offsite
+sudo journalctl -b --no-pager
+sudo cat /var/backups/officechat/status/latest.json
+```
+
+| Symptom | Check and safe action |
+| --- | --- |
+| NFS server unreachable | Check routing, DNS/IP, trusted LAN/VPN, the OMV NFS service, and `journalctl -b`. |
+| Export not visible | Confirm the share and Client restriction in OMV; use `showmount -e` according to the server's actual NFSv4 configuration. |
+| `Permission denied` or root cannot write | Repeat the root write test; correct read/write permissions and root-squash mapping server-side. Do not use `chmod 777`. |
+| Mount disappeared or directory exists without a mount | Check `findmnt` and `mountpoint`, then recover the mount through the OS. OfficeChat safely refuses the unmounted directory. |
+| Insufficient external free space | Check `df -hT`, retention, and external capacity before retrying. |
+| External verification failed | Inspect `latest.json` and journals, correct the storage/I/O problem, and create a new backup. Do not rename `.partial` or create `SUCCESS` manually. |
+
+Do not disable SELinux, weaken mountpoint/device checks, or edit production backup scripts to work around NFS problems.
 
 ### Acceptance procedure
 

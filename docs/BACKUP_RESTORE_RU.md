@@ -51,7 +51,7 @@ officechat-backup-YYYYMMDD-HHMMSSZ
 ```text
 officechat-backup-....partial
   -> database, uploads и настроенные дополнительные компоненты
-  -> manifest и SHA256SUMS
+  -> metadata/manifest.json и metadata/SHA256SUMS
   -> проверка checksums
   -> verify-backup.sh при VERIFY_AFTER_BACKUP=yes
   -> SUCCESS
@@ -159,17 +159,19 @@ Verify-only получает общий lock, повторяет структу�
 
 OfficeChat поддерживает один каталог назначения на файловой системе, заранее смонтированной операционной системой хоста. Встроенных клиентов NFS/SMB, объектного хранилища, S3, URL, удалённой оболочки или облачного API нет; учётные данные хранилища OfficeChat не принимает.
 
-Точные параметры:
+> **Текущее состояние по умолчанию:** OfficeChat создаёт локальные резервные копии. Внешнее NFS-хранилище является дополнительной опцией и настраивается отдельно.
+
+Параметры по умолчанию для локального режима:
 
 ```ini
-OFFSITE_ROOT=/mnt/officechat-offsite
-REQUIRE_OFFSITE=yes
+OFFSITE_ROOT=
+REQUIRE_OFFSITE=no
 ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no
 REQUIRE_ENCRYPTED_PRIVATE=no
 AGE_RECIPIENT=
 ```
 
-Этот безопасный базовый пример копирует PostgreSQL, uploads, публичную конфигурацию, metadata и неприватные дополнительные компоненты. Plaintext private config, Caddy CA и extra-path archives исключаются. Чтобы передавать их зашифрованные варианты, установите `age`, задайте действительный публичный `AGE_RECIPIENT` и обычно включите `REQUIRE_ENCRYPTED_PRIVATE=yes`.
+При пустом `OFFSITE_ROOT` внешнее копирование не выполняется. Если внешнее хранилище будет включено с указанными безопасными параметрами приватного содержимого, PostgreSQL, uploads, публичная конфигурация, metadata и неприватные дополнительные компоненты будут скопированы, а plaintext private config, Caddy CA и extra-path archives — исключены. Чтобы передавать зашифрованные варианты фактически создаваемых приватных архивов, задайте действительный публичный `AGE_RECIPIENT`: скрипт потребует `age`, зашифрует каждый созданный приватный архив и завершит backup ошибкой при сбое шифрования. `REQUIRE_ENCRYPTED_PRIVATE=yes` дополнительно отклоняет конфигурацию до создания копии, если recipient пуст или `age` недоступен, но не делает отсутствующий optional private component обязательным.
 
 `OFFSITE_ROOT` должен заранее существовать как активная точка монтирования, не быть символической ссылкой, не пересекаться с данными приложения или локальных копий и находиться на другом устройстве файловой системы, чем `BACKUP_ROOT`. Исполнитель от имени root должен иметь возможность проверять свободное место, создавать, менять права, переименовывать и ротировать каталоги. Скрипт не создаёт отсутствующую точку монтирования и повторно проверяет её и устройство до и после передачи.
 
@@ -197,6 +199,221 @@ NFS, SMB/CIFS и отдельная локальная точка монтиро
 Копирование не имеет повторных попыток и отдельного сетевого тайм-аута. Операции через systemd и браузер ограничены шестью часами на уровне unit и агента; прямой запуск из CLI зависит от тайм-аутов файловой системы и ОС. Контролируйте сетевые точки монтирования, чтобы зависшее хранилище не оставляло фоновый процесс CLI без ограничения времени.
 
 После успешного внешнего копирования одинаковая GFS-политика запускается независимо для локального и внешнего repositories. Rotation рассматривает только каталоги ожидаемого имени с `SUCCESS`, сохраняет newest successful и все `PROTECTED`, игнорирует partial, symlink и посторонние пути. Если текущая внешняя копия skipped или failed, внешняя rotation не запускается.
+
+### Опционально: внешнее хранилище через NFS
+
+Архитектура остаётся простой:
+
+```text
+backup-production.sh
+  -> проверенная локальная резервная копия
+  -> файловая система, смонтированная в OFFSITE_ROOT
+  -> проверенная внешняя копия
+```
+
+NFS монтирует операционная система. OfficeChat не настраивает NFS-сервер, не монтирует export автоматически, не хранит NFS credentials и не реализует собственный сетевой NFS-клиент.
+
+#### Пример настройки OpenMediaVault
+
+В web-интерфейсе OpenMediaVault:
+
+1. создайте или выберите отдельную Shared Folder для резервных копий OfficeChat;
+2. включите NFS service, если он ещё не включён;
+3. добавьте NFS share для этой Shared Folder;
+4. ограничьте Client адресом `<OFFICECHAT_IP>` или доверенной backup-подсетью;
+5. предоставьте read/write access;
+6. сохраните и примените конфигурацию.
+
+NFSv4 в OpenMediaVault публикует shares через псевдофайловую систему NFSv4. В зависимости от конфигурации адрес может выглядеть так:
+
+```text
+<OMV_IP>:/<SHARE_NAME>
+```
+
+Не подставляйте предполагаемый export path вслепую. Проверьте его в OpenMediaVault и, где сервер поддерживает этот запрос, командой:
+
+```bash
+OMV_IP='<OMV_IP>'
+showmount -e "$OMV_IP"
+```
+
+NFS должен оставаться внутри доверенной LAN/VPN и не должен публиковаться напрямую в Интернет.
+
+#### Подготовка клиента RED OS 8
+
+Установите клиентские инструменты и включите target NFS-клиента:
+
+```bash
+sudo dnf install nfs-utils
+sudo systemctl enable --now nfs-client.target
+OMV_IP='<OMV_IP>'
+SHARE_NAME='<SHARE_NAME>'
+showmount -e "$OMV_IP"
+```
+
+Создайте отдельную точку монтирования и выполните пробное монтирование:
+
+```bash
+sudo mkdir -p /mnt/officechat-offsite
+sudo mount -t nfs "${OMV_IP}:/${SHARE_NAME}" /mnt/officechat-offsite
+findmnt /mnt/officechat-offsite
+mountpoint /mnt/officechat-offsite
+df -hT /mnt/officechat-offsite
+```
+
+`backup-production.sh` работает от root, поэтому обязательно проверьте запись от root без изменения существующих данных:
+
+```bash
+sudo touch /mnt/officechat-offsite/.officechat-write-test
+sudo rm -f /mnt/officechat-offsite/.officechat-write-test
+```
+
+Если тест не проходит, исправьте права export и mapping/root-squash на NFS-сервере до настройки OfficeChat. Не используйте `chmod 777` как обходной путь.
+
+#### Постоянное монтирование
+
+Перед изменением сохраните резервную копию `/etc/fstab`:
+
+```bash
+sudo cp -a /etc/fstab "/etc/fstab.officechat-before-nfs.$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Добавьте в `/etc/fstab` строку с фактически проверенным export:
+
+```fstab
+<OMV_IP>:/<SHARE_NAME> /mnt/officechat-offsite nfs defaults,_netdev 0 0
+```
+
+Примените и повторно проверьте конфигурацию:
+
+```bash
+sudo mount -a
+findmnt /mnt/officechat-offsite
+mountpoint -q /mnt/officechat-offsite
+df -hT /mnt/officechat-offsite
+```
+
+Не добавляйте непроверенные NFS timeout/retry options. Если mount отсутствует, OfficeChat отклонит `OFFSITE_ROOT` как неактивную точку монтирования и не запишет копию в обычный локальный каталог с тем же именем.
+
+#### Включение NFS в OfficeChat
+
+Только после проверки mount и записи от root измените `/etc/officechat/backup.conf`:
+
+```ini
+OFFSITE_ROOT=/mnt/officechat-offsite
+REQUIRE_OFFSITE=no
+ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no
+REQUIRE_ENCRYPTED_PRIVATE=no
+AGE_RECIPIENT=
+```
+
+Начинайте с `REQUIRE_OFFSITE=no`: если NFS не смонтирован, локальная копия останется валидной, а `offsite_status` получит `skipped_not_mounted`. Ошибка уже смонтированного destination при проверке места, копировании или verification всё равно завершает запуск ошибкой и получает статус `failed`, сохраняя опубликованную локальную копию. `REQUIRE_OFFSITE=yes` используйте только после успешного теста, когда политика требует считать backup неуспешным без внешней копии.
+
+`ALLOW_PLAINTEXT_PRIVATE_OFFSITE=no` исключает незашифрованные private config, Caddy CA и private extra-path archives из внешней копии. При непустом публичном `AGE_RECIPIENT` каждый фактически созданный приватный архив получает `.age` вариант; ошибка шифрования останавливает backup. `REQUIRE_ENCRYPTED_PRIVATE=yes` заранее отклоняет пустой recipient или отсутствующий `age`, но не требует наличия optional private components. Приватный age identity не храните в OfficeChat или backup repository.
+
+#### Первый тест резервного копирования
+
+1. Проверьте mount и файловую систему:
+
+   ```bash
+   mountpoint -q /mnt/officechat-offsite
+   findmnt /mnt/officechat-offsite
+   ```
+
+2. Запустите одну ручную копию:
+
+   ```bash
+   sudo /opt/officechat/backup-production.sh \
+     --config /etc/officechat/backup.conf
+   ```
+
+3. Проверьте результат и найдите внешний backup ID:
+
+   ```bash
+   sudo cat /var/backups/officechat/status/latest.json
+   sudo find /mnt/officechat-offsite -mindepth 1 -maxdepth 1 -type d \
+     -name 'officechat-backup-????????-??????Z' -print | sort -r
+   ```
+
+   Ожидается `"offsite_status": "copied"` в `latest.json`.
+
+4. Подставьте найденный ID и проверьте опубликованные metadata:
+
+   ```bash
+   BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ
+   sudo test -f "/mnt/officechat-offsite/${BACKUP_ID}/SUCCESS"
+   sudo test -f "/mnt/officechat-offsite/${BACKUP_ID}/metadata/SHA256SUMS"
+   sudo test -f "/mnt/officechat-offsite/${BACKUP_ID}/metadata/manifest.json"
+   ```
+
+5. Выполните изолированную проверку восстановления по полному внешнему пути:
+
+   ```bash
+   sudo /opt/officechat/restore-production.sh \
+     --config /etc/officechat/backup.conf \
+     --verify-only \
+     "/mnt/officechat-offsite/${BACKUP_ID}"
+   ```
+
+Для проверки NFS не выполняйте production restore.
+
+#### Опциональный тест недоступности
+
+Проводите его только в согласованное окно обслуживания и только для выделенного mount, который не используют другие workloads. Сначала убедитесь, что точку не используют посторонние процессы, затем размонтируйте её, не удаляя каталог:
+
+```bash
+sudo fuser -vm /mnt/officechat-offsite
+sudo umount /mnt/officechat-offsite
+mountpoint /mnt/officechat-offsite || echo 'NFS test mount is unavailable as expected'
+```
+
+При `REQUIRE_OFFSITE=no` создайте одну ручную копию и проверьте `latest.json` и локальный `SUCCESS`:
+
+```bash
+sudo /opt/officechat/backup-production.sh \
+  --config /etc/officechat/backup.conf
+sudo cat /var/backups/officechat/status/latest.json
+BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ
+sudo test -f "/var/backups/officechat/production/${BACKUP_ID}/SUCCESS"
+sudo find /mnt/officechat-offsite -mindepth 1 -maxdepth 1 -print
+```
+
+Ожидается валидная локальная копия, `"offsite_status": "skipped_not_mounted"` и пустой вывод последней команды: OfficeChat не должен записать файлы в обычный несмонтированный `/mnt/officechat-offsite`.
+
+После теста восстановите mount и ещё раз проверьте его:
+
+```bash
+sudo mount /mnt/officechat-offsite
+mountpoint -q /mnt/officechat-offsite
+findmnt /mnt/officechat-offsite
+```
+
+Защита основана на `mountpoint -q OFFSITE_ROOT` и проверке, что устройство внешней файловой системы отличается от устройства `BACKUP_ROOT`. Не удаляйте эти проверки и не изменяйте production scripts.
+
+#### Диагностика NFS
+
+```bash
+rpm -q nfs-utils
+sudo systemctl status nfs-client.target
+OMV_IP='<OMV_IP>'
+showmount -e "$OMV_IP"
+findmnt /mnt/officechat-offsite
+mountpoint /mnt/officechat-offsite
+df -hT /mnt/officechat-offsite
+sudo journalctl -b --no-pager
+sudo cat /var/backups/officechat/status/latest.json
+```
+
+| Симптом | Проверка и безопасное действие |
+| --- | --- |
+| NFS-сервер недоступен | Проверьте маршрут, DNS/IP, trusted LAN/VPN, состояние NFS в OMV и `journalctl -b`. |
+| Export не виден | Сверьте share и Client restriction в OMV; используйте `showmount -e`, учитывая фактическую NFSv4-конфигурацию сервера. |
+| `Permission denied` или root не может писать | Повторите root write test; исправьте read/write permissions и root-squash mapping на сервере. Не применяйте `chmod 777`. |
+| Mount исчез или каталог существует без mount | Проверьте `findmnt` и `mountpoint`; восстановите mount через ОС. OfficeChat безопасно откажется писать в несмонтированный каталог. |
+| Недостаточно свободного места | Проверьте `df -hT`, retention и ёмкость внешнего storage до повторного запуска. |
+| Проверка внешней копии завершилась ошибкой | Изучите `latest.json` и журналы, устраните storage/I/O issue и создайте новую копию. Не переименовывайте `.partial` и не создавайте `SUCCESS` вручную. |
+
+Не отключайте SELinux, не ослабляйте mountpoint/device checks и не редактируйте backup scripts на production как способ устранения NFS-проблем.
 
 ### Проверка настройки
 

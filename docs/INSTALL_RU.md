@@ -1,8 +1,8 @@
-# Установка OfficeChat 0.1.0-rc2 на Linux
+# Установка release-версии OfficeChat на Linux
 
 Для production-установки с внутренним HTTPS используйте [deployment/production-installation.md](deployment/production-installation.md). Windows trust для `tls internal` описан в [deployment/windows-certificate-installation.md](deployment/windows-certificate-installation.md).
 
-OfficeChat 0.1.0-rc2 распространяется как Docker Compose bundle для `linux/amd64`.
+OfficeChat распространяется как versioned Docker Compose bundle для `linux/amd64`.
 Публикация образов, Git tag и GitHub Release выполняются вручную после проверки.
 
 ## 1. Что входит в bundle
@@ -23,12 +23,12 @@ release/
   README_INSTALL_RU.md
 ```
 
-Архив: `officechat-0.1.0-rc2-linux-amd64.tar.gz`.
+Архив: `officechat-<VERSION>-linux-amd64.tar.gz`.
 
 ## 2. Образы
 
-- `ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2`
-- `ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2`
+- `ghcr.io/fedorovdo/officechat-backend:<VERSION>`
+- `ghcr.io/fedorovdo/officechat-frontend:<VERSION>`
 - дополнительный immutable tag: `sha-<short_git_sha>`
 - опциональный moving tag: `rc`
 
@@ -52,7 +52,8 @@ release/
 ## 5. Установка
 
 ```bash
-tar -xzf officechat-0.1.0-rc2-linux-amd64.tar.gz
+VERSION=0.1.0-example
+tar -xzf "officechat-${VERSION}-linux-amd64.tar.gz"
 cd release
 sudo ./install-linux.sh
 ```
@@ -117,7 +118,7 @@ HTTPS override не редактируется. Не запускайте руч
 Image rollback:
 
 ```bash
-sudo /opt/officechat/rollback-linux.sh 0.1.0-rc1
+sudo /opt/officechat/rollback-linux.sh PREVIOUS_VERSION
 ```
 
 Он не откатывает базу данных. Полное восстановление требует backup и точного подтверждения:
@@ -178,20 +179,21 @@ Enforcing описана в `deployment/production-update_RU.md`.
 
 Диагностика собирает состояние Compose, версии, Alembic revision, sanitized logs, OS/Docker info и свободное место. Она не выгружает `.env`, сообщения, базу данных или вложения.
 
-## 17. Git tag позже
+## 17. Git tag release
 
 После финальной проверки вручную:
 
 ```bash
-git tag -a v0.1.0-rc2 -m "OfficeChat 0.1.0-rc2"
-git push origin v0.1.0-rc2
+VERSION=0.1.0-example
+git tag -a "v${VERSION}" -m "OfficeChat ${VERSION}"
+git push origin "v${VERSION}"
 ```
 
-Этот task не создает tag и не публикует релиз.
+Tag должен указывать на точный проверенный commit; release tooling получает эту
+же version явно и не использует старую release-версию как fallback.
 
-## 18. Ограничения RC
+## 18. Ограничения текущей архитектуры
 
-- Это release candidate, не стабильный финальный релиз.
 - WebSocket fanout пока single-instance; для multi-instance нужен Valkey pub/sub.
 - Browser notifications требуют открытую вкладку.
 - Нет LDAP/AD, S3, antivirus scanning, recurring calendar, RSVP, email/mobile push.
@@ -202,6 +204,6 @@ git push origin v0.1.0-rc2
 ```bash
 bash -n scripts/release/*.sh
 bash -n scripts/release/officechatctl
-docker compose -f deploy/docker-compose.release.yml config
-bash scripts/release/create-release-bundle.sh --dry-run
+OFFICECHAT_VERSION=0.1.0-example docker compose -f deploy/docker-compose.release.yml config
+OFFICECHAT_RELEASE_VERSION=0.1.0-example bash scripts/release/create-release-bundle.sh --dry-run
 ```

@@ -6,7 +6,17 @@ Group, direct, discussion и personal sockets используют общий bo
 
 Backend использует close code `4401` для недействительной аутентификации и `4403` для недостатка доступа. `4401` завершает frontend-сессию без последующих reconnect; `4403` показывает отказ в доступе, но не удаляет JWT.
 
-Query-аутентификация остаётся временной архитектурой v0.1. Значения параметров `token`, `access_token`, `authorization` и `ticket` заменяются на `[REDACTED]` в Uvicorn logs. Для multi-instance deployment по-прежнему требуется Valkey pub/sub.
+Query-аутентификация остаётся временной архитектурой v0.1: frontend передаёт JWT
+в параметре `token`. Backend/Uvicorn заменяет чувствительные query values на
+`[REDACTED]` собственным logging filter. Production Caddy является независимым
+слоем журналирования: shipped `Caddyfile.example` отдельно фильтрует access и
+runtime/error loggers, заменяя в `request>uri` значения `token`, `access_token`,
+`authorization`, `ticket` и приватный поисковый `q` на `REDACTED`. Access-запись
+token-bearing bot webhook исключена, а path credential маскируется в runtime
+errors; backend ведёт свой независимо санитизированный log. При замене Caddy
+другим reverse proxy необходимо сохранить эквивалентную
+защиту; удаление фильтра раскрывает bearer token всем читателям proxy logs. Для
+multi-instance deployment по-прежнему требуется Valkey pub/sub.
 
 WebSocket Real-time v0.1 добавляет базовые онлайн-обновления для сообщений в группах. REST API остается источником истины: отправка, редактирование и удаление сообщений по-прежнему выполняются через REST endpoints, а WebSocket используется только для получения событий.
 
@@ -229,7 +239,12 @@ Broadcast announcement events use the same personal channel and are separate fro
 - Нет multi-instance pub/sub.
 # RC WebSocket production notes
 
-WebSocket query tokens remain a v0.1 development-compatible mechanism and are redacted from logs. Production reverse proxy deployment must preserve WebSocket upgrade headers. Multi-instance delivery still requires a future Valkey pub/sub bridge; the current connection manager is process-local.
+WebSocket query tokens remain a v0.1-compatible mechanism. Backend and shipped
+Caddy access and runtime/error logs redact them independently; arbitrary reverse
+proxies do not do this automatically. Production proxy configuration must preserve
+equivalent query/path-secret redaction and WebSocket upgrade handling. Multi-instance delivery
+still requires a future Valkey pub/sub bridge; the current connection manager is
+process-local.
 
 # Notifications Center events
 

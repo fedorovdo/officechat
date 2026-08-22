@@ -47,4 +47,4 @@ Frontend metadata настроен для внутреннего приложе�
 
 ## Release version metadata
 
-Для release `0.1.0-rc2` версия задается через `APP_VERSION`/`OFFICECHAT_VERSION` на backend и `NEXT_PUBLIC_OFFICECHAT_VERSION` на frontend. About, frontend `/api/health` и backend `/health` должны показывать одинаковую безопасную версию без секретов.
+Для release точная версия задается через `APP_VERSION`/`OFFICECHAT_VERSION` на backend и `NEXT_PUBLIC_OFFICECHAT_VERSION` на frontend. About, frontend `/api/health` и backend `/health` должны показывать одинаковую безопасную версию без секретов. Если metadata не переданы, source/dev build показывает `development`, а release Compose завершается ошибкой вместо выбора старого image tag.

@@ -1,3 +1,14 @@
+{
+	# Reverse-proxy failures are emitted by Caddy's runtime logger, separately
+	# from access logs. Redact URL credentials there as well.
+	log default {
+		format filter {
+			request>uri regexp `((?:/api/bots/incoming/)|(?:[?&](?:token|access_token|authorization|ticket|q)=))[^?&[:space:]]*` `${1}REDACTED`
+			wrap json
+		}
+	}
+}
+
 {$OFFICECHAT_HOSTNAME:officechat.example.local} {
 	tls internal
 	encode gzip zstd
@@ -8,8 +19,22 @@
 
 	log {
 		output stdout
-		format console
+		format filter {
+			request>uri query {
+				replace token REDACTED
+				replace access_token REDACTED
+				replace authorization REDACTED
+				replace ticket REDACTED
+				replace q REDACTED
+			}
+			wrap console
+		}
 	}
+
+	# Bot webhook tokens are path credentials, so omit only these requests from
+	# the proxy access log. The backend keeps its independently sanitized log.
+	@bot_webhook path /api/bots/incoming/*
+	log_skip @bot_webhook
 
 	@frontend_health path /api/health /api/health/*
 	handle @frontend_health {

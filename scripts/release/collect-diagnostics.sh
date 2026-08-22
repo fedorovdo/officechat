@@ -19,6 +19,10 @@ compose ps >"${OUTPUT_DIR}/compose-ps.txt" 2>&1 || true
 compose config --no-interpolate >"${OUTPUT_DIR}/compose-config.txt" 2>&1 || true
 compose exec -T backend alembic current >"${OUTPUT_DIR}/alembic-current.txt" 2>&1 || true
 compose logs --tail=300 backend frontend calendar-worker >"${OUTPUT_DIR}/logs-sanitized.txt" 2>&1 || true
-sed -i -E 's/(APP_SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL)=.*/\1=<redacted>/g' "${OUTPUT_DIR}/compose-config.txt" "${OUTPUT_DIR}/logs-sanitized.txt" 2>/dev/null || true
+sed -i -E \
+  -e 's/(APP_SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL)=.*/\1=<redacted>/g' \
+  -e 's/([?&](token|access_token|authorization|ticket|q)=)[^&[:space:]"]+/\1<redacted>/gI' \
+  -e 's#(/api/bots/incoming/)[^/?&[:space:]"]+#\1<redacted>#gI' \
+  "${OUTPUT_DIR}/compose-config.txt" "${OUTPUT_DIR}/logs-sanitized.txt" 2>/dev/null || true
 tar -czf "${OUTPUT_DIR}.tar.gz" "$OUTPUT_DIR"
 echo "Diagnostics written to ${OUTPUT_DIR}.tar.gz"

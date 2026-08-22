@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VERSION="${OFFICECHAT_RELEASE_VERSION:-0.1.0-rc2}"
+VERSION="${OFFICECHAT_RELEASE_VERSION:?OFFICECHAT_RELEASE_VERSION must be set explicitly}"
 REVISION="${OFFICECHAT_RELEASE_REVISION:-}"
 BUILD_DATE="${OFFICECHAT_RELEASE_BUILD_DATE:-}"
 ARCH="${OFFICECHAT_RELEASE_ARCH:-linux-amd64}"
@@ -12,9 +12,10 @@ ARCHIVE_NAME="officechat-${VERSION}-${ARCH}.tar.gz"
 
 usage() {
   cat <<'EOF_HELP'
-Usage: create-release-bundle.sh [--dry-run]
+Usage: OFFICECHAT_RELEASE_VERSION=VERSION create-release-bundle.sh [--dry-run]
 
-Creates release/ and dist/officechat-VERSION-linux-amd64.tar.gz.
+Creates release/ and dist/officechat-VERSION-linux-amd64.tar.gz. The immutable
+release version must be supplied explicitly.
 EOF_HELP
 }
 

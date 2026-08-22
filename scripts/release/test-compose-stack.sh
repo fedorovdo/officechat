@@ -18,6 +18,14 @@ build_date="2026-08-04T19:00:00Z"
 
 cp "${ROOT_DIR}/.env.production.example" "$env_file"
 chmod 0600 "$env_file"
+
+missing_version_env="${tmp_dir}/missing-version.env"
+cp "${ROOT_DIR}/.env.production.example" "$missing_version_env"
+if env -u OFFICECHAT_VERSION docker compose --env-file "$missing_version_env" \
+  -f "${ROOT_DIR}/deploy/docker-compose.release.yml" config --quiet >/dev/null 2>&1; then
+  fail "Release Compose accepted a missing OFFICECHAT_VERSION"
+fi
+
 write_env_metadata "$env_file" "${tmp_dir}/updated.env" "$version" "$revision" "$build_date"
 mv "${tmp_dir}/updated.env" "$env_file"
 write_version_override "$version_override" "$version" "$revision" "$build_date"

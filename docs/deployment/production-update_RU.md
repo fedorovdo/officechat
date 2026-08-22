@@ -25,6 +25,13 @@ build date. Legacy HTTPS override может содержать старые ima
 редактируется и не может перекрыть последний слой. Не используйте ручные команды
 с неполным списком `-f`.
 
+Shipped Caddy access/runtime log filters являются security controls, а не только
+настройкой формата. Updater сохраняет предыдущий и заменяет управляемый installer-файл
+`caddy/Caddyfile.example`; для запущенного Caddy выполняется reload без удаления
+volumes. Внешний или отдельно управляемый reverse proxy не переписывается:
+оператор обязан сохранить эквивалентную redaction WebSocket query параметра
+`token` и token-bearing bot webhook paths.
+
 До mutation updater собирает staging stack из копии `.env`, нового base Compose,
 существующего HTTPS override и временного final override. Проверяются resolved
 images, localhost bind frontend, public network, SELinux labels и изоляция socket.

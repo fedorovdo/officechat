@@ -1,11 +1,11 @@
 {
-  "version": "0.1.0-rc2",
+  "version": "development",
   "minimum_supported_version": "0.1.0-rc1",
-  "alembic_revision": "20260704_0023",
+  "alembic_revision": "20260728_0026",
   "requires_manual_migration": false,
   "breaking_changes": false,
   "images": {
-    "backend": "ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2",
-    "frontend": "ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2"
+    "backend": "ghcr.io/fedorovdo/officechat-backend:development",
+    "frontend": "ghcr.io/fedorovdo/officechat-frontend:development"
   }
 }

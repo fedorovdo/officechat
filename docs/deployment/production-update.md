@@ -24,6 +24,13 @@ version, revision, and build-date metadata. A legacy HTTPS override may keep old
 image declarations, but it is never edited and cannot override the final layer.
 Do not run operational commands with an incomplete manual list of `-f` arguments.
 
+The shipped Caddy access/runtime log filters are security controls, not
+formatting-only configuration. The updater snapshots and replaces the installer-managed
+`caddy/Caddyfile.example`; when that Caddy service is running, it reloads the
+configuration without removing its volumes. An external or separately managed
+reverse proxy is not rewritten: preserve equivalent redaction for WebSocket
+`token` query values and token-bearing bot webhook paths.
+
 Before mutation, the updater renders a staging stack with a copied `.env`, the new
 base Compose, the existing HTTPS override, and a temporary final override. It
 validates resolved images, localhost frontend binding, public network, SELinux

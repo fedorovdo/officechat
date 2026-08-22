@@ -8,7 +8,7 @@ x-logging: &default-logging
 
 x-backend-env: &backend-env
   APP_NAME: ${APP_NAME:-OfficeChat}
-  APP_VERSION: ${OFFICECHAT_VERSION:-0.1.0-rc2}
+  APP_VERSION: ${OFFICECHAT_VERSION:?OFFICECHAT_VERSION must be set to an immutable release version}
   OFFICECHAT_BUILD_SHA: ${OFFICECHAT_BUILD_SHA:-}
   OFFICECHAT_BUILD_DATE: ${OFFICECHAT_BUILD_DATE:-}
   ENVIRONMENT: production
@@ -92,7 +92,7 @@ services:
     logging: *default-logging
 
   backend:
-    image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:-0.1.0-rc2}
+    image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:?OFFICECHAT_VERSION must be set to an immutable release version}
     restart: unless-stopped
     environment:
       <<: *backend-env
@@ -124,7 +124,7 @@ services:
     logging: *default-logging
 
   calendar-worker:
-    image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:-0.1.0-rc2}
+    image: ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION:?OFFICECHAT_VERSION must be set to an immutable release version}
     restart: unless-stopped
     command: ["python", "-m", "app.workers.calendar_reminders"]
     environment: *backend-env
@@ -138,14 +138,14 @@ services:
     logging: *default-logging
 
   frontend:
-    image: ghcr.io/fedorovdo/officechat-frontend:${OFFICECHAT_VERSION:-0.1.0-rc2}
+    image: ghcr.io/fedorovdo/officechat-frontend:${OFFICECHAT_VERSION:?OFFICECHAT_VERSION must be set to an immutable release version}
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ru}
       NEXT_PUBLIC_FRONTEND_URL: ${NEXT_PUBLIC_FRONTEND_URL:-https://officechat.example.local}
       NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-https://officechat.example.local}
       NEXT_PUBLIC_PRESENCE_HEARTBEAT_SECONDS: ${PRESENCE_HEARTBEAT_SECONDS:-25}
-      NEXT_PUBLIC_OFFICECHAT_VERSION: ${OFFICECHAT_VERSION:-0.1.0-rc2}
+      NEXT_PUBLIC_OFFICECHAT_VERSION: ${OFFICECHAT_VERSION:?OFFICECHAT_VERSION must be set to an immutable release version}
       NEXT_PUBLIC_OFFICECHAT_BUILD_SHA: ${OFFICECHAT_BUILD_SHA:-}
       NEXT_PUBLIC_OFFICECHAT_BUILD_DATE: ${OFFICECHAT_BUILD_DATE:-}
       NEXT_PUBLIC_OFFICECHAT_PRODUCT_NAME: ${NEXT_PUBLIC_OFFICECHAT_PRODUCT_NAME:-OfficeChat}

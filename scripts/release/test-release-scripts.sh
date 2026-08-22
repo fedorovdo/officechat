@@ -55,6 +55,15 @@ if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
   echo "Docker Compose version v2.test"
   exit 0
 fi
+if [[ "${1:-}" == "compose" && "$*" == *"ps -q caddy"* && "${OFFICECHAT_FAKE_CADDY_RUNNING:-0}" == "1" ]]; then
+  echo "officechat-caddy-test"
+  exit 0
+fi
+if [[ "${1:-}" == "compose" && "$*" == *"logs --tail=300"* ]]; then
+  echo 'GET /api/ws/me?token=synthetic-diagnostics-query&view=all'
+  echo 'POST /api/bots/incoming/synthetic-diagnostics-path'
+  exit 0
+fi
 if [[ "${1:-}" == "compose" && "$*" == *"config --format json"* ]]; then
   version_override=""
   args=("$@")
@@ -117,6 +126,7 @@ export OFFICECHAT_COMPOSE_FILE="$COMPOSE_FILE"
 export OFFICECHAT_HTTPS_OVERRIDE_FILE="$HTTPS_OVERRIDE_FILE"
 export OFFICECHAT_VERSION_OVERRIDE_FILE="$VERSION_OVERRIDE_FILE"
 export OFFICECHAT_RELEASE_METADATA_FILE="$RELEASE_METADATA_FILE"
+export OFFICECHAT_RELEASE_VERSION="0.1.0-rc3"
 export OFFICECHAT_LOCK_FILE="$LOCK_DIR"
 export OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${TMP_DIR}/agent.sock"
 
@@ -130,6 +140,42 @@ grep -Fq '@frontend_health path /api/health /api/health/*' "$CADDY_FILE" || {
 }
 grep -Fq '@backend path /api /api/*' "$CADDY_FILE" || {
   echo "Caddy template does not contain the general backend API route" >&2
+  exit 1
+}
+grep -Fq 'format filter {' "$CADDY_FILE" || {
+  echo "Caddy access log does not use the filter encoder" >&2
+  exit 1
+}
+grep -Fq 'request>uri query {' "$CADDY_FILE" || {
+  echo "Caddy access log does not filter the request URI query" >&2
+  exit 1
+}
+grep -Fq 'replace token REDACTED' "$CADDY_FILE" || {
+  echo "Caddy access log does not redact WebSocket token query values" >&2
+  exit 1
+}
+grep -Fq 'log default {' "$CADDY_FILE" || {
+  echo "Caddy runtime logger is not configured independently" >&2
+  exit 1
+}
+grep -Fq 'request>uri regexp' "$CADDY_FILE" || {
+  echo "Caddy runtime/error log does not filter request URI credentials" >&2
+  exit 1
+}
+grep -Fq '/api/bots/incoming/' "$CADDY_FILE" || {
+  echo "Caddy runtime/error filter does not cover bot webhook path credentials" >&2
+  exit 1
+}
+grep -Fq 'wrap console' "$CADDY_FILE" || {
+  echo "Caddy access log no longer preserves console formatting" >&2
+  exit 1
+}
+grep -Fq '@bot_webhook path /api/bots/incoming/*' "$CADDY_FILE" || {
+  echo "Caddy does not identify the token-bearing bot webhook path" >&2
+  exit 1
+}
+grep -Fq 'log_skip @bot_webhook' "$CADDY_FILE" || {
+  echo "Caddy may log bot webhook path credentials" >&2
   exit 1
 }
 frontend_health_line="$(grep -n '^[[:space:]]*handle @frontend_health' "$CADDY_FILE" | head -n 1 | cut -d: -f1)"
@@ -174,6 +220,28 @@ grep -Fq 'Caddyfile.example' "${SCRIPT_DIR}/install-linux.sh" || {
   echo "Installer does not copy the Caddy template" >&2
   exit 1
 }
+grep -Fq '(token|access_token|authorization|ticket|q)' "${SCRIPT_DIR}/collect-diagnostics.sh" || {
+  echo "Diagnostics collection does not independently redact sensitive query values" >&2
+  exit 1
+}
+grep -Fq '/api/bots/incoming/' "${SCRIPT_DIR}/collect-diagnostics.sh" || {
+  echo "Diagnostics collection does not redact bot webhook path credentials" >&2
+  exit 1
+}
+diagnostics_dir="${TMP_DIR}/diagnostics"
+bash "${SCRIPT_DIR}/collect-diagnostics.sh" "$diagnostics_dir" >/dev/null
+if grep -R -E 'synthetic-diagnostics-(query|path)' "$diagnostics_dir" >/dev/null; then
+  echo "Diagnostics collection exposed a synthetic URL credential" >&2
+  exit 1
+fi
+grep -Fq 'token=<redacted>' "${diagnostics_dir}/logs-sanitized.txt" || {
+  echo "Diagnostics collection omitted the redacted query marker" >&2
+  exit 1
+}
+grep -Fq '/api/bots/incoming/<redacted>' "${diagnostics_dir}/logs-sanitized.txt" || {
+  echo "Diagnostics collection omitted the redacted bot webhook marker" >&2
+  exit 1
+}
 for backup_asset in \
   scripts/backup-production.sh \
   scripts/verify-backup.sh \
@@ -209,6 +277,14 @@ grep -Fq "[[ ! -f \"\$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE\"" "${SCRIPT_DIR}/upda
 }
 grep -Fq 'docker-compose.release.yml' "${SCRIPT_DIR}/update-linux.sh" || {
   echo "Updater does not refresh the versioned release Compose file" >&2
+  exit 1
+}
+grep -Fq 'caddy/Caddyfile.example' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not install the release Caddy security template" >&2
+  exit 1
+}
+grep -Fq 'caddy reload --config /etc/caddy/Caddyfile' "${SCRIPT_DIR}/update-linux.sh" || {
+  echo "Updater does not reload a running Caddy service after security updates" >&2
   exit 1
 }
 grep -Fq 'BACKUP_CENTER_RU.md' "${SCRIPT_DIR}/update-linux.sh" || {
@@ -390,9 +466,31 @@ bash "${SCRIPT_DIR}/rollback-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/uninstall-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/verify-install.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/officechatctl" --help >/dev/null
-OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
+bundle_dry_run_output="$(OFFICECHAT_RELEASE_VERSION=0.1.0-test-release \
+  OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
   OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
-  bash "${SCRIPT_DIR}/create-release-bundle.sh" --dry-run >/dev/null
+  bash "${SCRIPT_DIR}/create-release-bundle.sh" --dry-run)"
+[[ "$bundle_dry_run_output" == *"RELEASE.json for 0.1.0-test-release 2222222222222222222222222222222222222222"* ]] || {
+  echo "Bundle dry-run did not use the exact supplied release metadata" >&2
+  exit 1
+}
+[[ "$bundle_dry_run_output" == *"officechat-0.1.0-test-release-linux-amd64.tar.gz"* ]] || {
+  echo "Bundle dry-run did not use the supplied version in the archive name" >&2
+  exit 1
+}
+if env -u OFFICECHAT_RELEASE_VERSION \
+  OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
+  OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
+  bash "${SCRIPT_DIR}/create-release-bundle.sh" --dry-run >/dev/null 2>&1; then
+  echo "Bundle creation accepted missing release version metadata" >&2
+  exit 1
+fi
+
+source_default_version="$(env -u OFFICECHAT_RELEASE_VERSION bash -c ". \"\$1\"; printf '%s' \"\$OFFICECHAT_RELEASE_VERSION\"" _ "${SCRIPT_DIR}/lib.sh")"
+[[ "$source_default_version" == "development" ]] || {
+  echo "Source release helpers use an unsafe fallback version" >&2
+  exit 1
+}
 
 bundle_lib_dir="${TMP_DIR}/bundle-lib"
 mkdir -p "$bundle_lib_dir"
@@ -493,6 +591,10 @@ grep -q 'preserve-this-secret' "$ENV_FILE" || { echo "update dry-run did not pre
   echo "update dry-run omitted layered Compose files" >&2
   exit 1
 }
+[[ "$update_output" == *"install the release Caddy template"* ]] || {
+  echo "Update dry-run omitted the Caddy security template lifecycle" >&2
+  exit 1
+}
 [[ "$update_output" != *"preserve-this-secret"* ]] || { echo "update dry-run leaked an env secret" >&2; exit 1; }
 
 original_version="$(cat "$VERSION_FILE")"
@@ -553,7 +655,9 @@ rollback_agent_config="${rollback_etc}/backup-agent.conf"
 rollback_agent_unit="${rollback_etc}/officechat-backup-agent.service"
 rollback_job_unit="${rollback_etc}/officechat-backup-job.service"
 rollback_verify_unit="${rollback_etc}/officechat-backup-verify@.service"
-mkdir -p "${rollback_install}/backup" "$rollback_etc"
+rollback_caddy_file="${rollback_install}/caddy/Caddyfile.example"
+rollback_caddy_compose="${rollback_install}/caddy/docker-compose.caddy.yml"
+mkdir -p "${rollback_install}/backup" "${rollback_install}/caddy" "$rollback_etc"
 cp "$COMPOSE_FILE" "$rollback_compose"
 cp "$HTTPS_OVERRIDE_FILE" "$rollback_https"
 printf 'services:\n  backend:\n    image: ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2\n  calendar-worker:\n    image: ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2\n  frontend:\n    image: ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2\n' >"$rollback_override"
@@ -569,6 +673,8 @@ printf 'old-backup-script\n' >"${rollback_install}/backup-production.sh"
 printf 'old-verify-script\n' >"${rollback_install}/verify-backup.sh"
 printf 'old-restore-script\n' >"${rollback_install}/restore-production.sh"
 printf 'old-backup-lib\n' >"${rollback_install}/backup/lib.sh"
+printf 'old-caddy-config\n' >"$rollback_caddy_file"
+printf 'services:\n  caddy: {}\n' >"$rollback_caddy_compose"
 
 declare -A rollback_hashes=()
 for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" "$rollback_env" \
@@ -576,13 +682,15 @@ for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" 
   "$rollback_job_unit" "$rollback_verify_unit" "${rollback_install}/backup-production.sh" \
   "${rollback_install}/verify-backup.sh" \
   "${rollback_install}/restore-production.sh" "${rollback_install}/backup/lib.sh" \
-  "${rollback_install}/RELEASE.json" "${rollback_install}/VERSION"; do
+  "${rollback_install}/RELEASE.json" "${rollback_install}/VERSION" \
+  "$rollback_caddy_file" "$rollback_caddy_compose"; do
   rollback_hashes["$rollback_file"]="$(sha256sum "$rollback_file")"
 done
 
 migrations_before="$(grep -Fc 'alembic upgrade head' "$FAKE_LOG" || true)"
 if env \
   OFFICECHAT_FAKE_MIGRATION_FAIL=1 \
+  OFFICECHAT_FAKE_CADDY_RUNNING=1 \
   OFFICECHAT_INSTALL_DIR="$rollback_install" \
   OFFICECHAT_DATA_DIR="${rollback_root}/data" \
   OFFICECHAT_BACKUP_DIR="${rollback_root}/backups" \
@@ -621,6 +729,10 @@ grep -Fq 'systemctl restart officechat-backup-agent.service' "$FAKE_LOG" || {
 }
 grep -Fq -- '--force-recreate backend' "$FAKE_LOG" || {
   echo "update rollback did not recreate backend for the current socket inode" >&2
+  exit 1
+}
+[[ "$(grep -Fc 'caddy reload --config /etc/caddy/Caddyfile' "$FAKE_LOG" || true)" -ge 2 ]] || {
+  echo "Update did not reload the new and restored Caddy configurations" >&2
   exit 1
 }
 

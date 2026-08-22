@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 0.1.0-rc2"
+        description: "Explicit release version, for example 0.1.0-rc13.4"
         required: true
-        default: "0.1.0-rc2"
       push_rc_tag:
         description: "Also push moving rc image tag"
         required: false
@@ -77,6 +76,7 @@ jobs:
           source .env.production.example
           set +a
           APP_SECRET_KEY=release-validation-secret-release-validation-secret \
+          OFFICECHAT_VERSION=${{ steps.version.outputs.version }} \
           POSTGRES_PASSWORD=release-validation-postgres-password \
           DATABASE_URL=postgresql://officechat:release-validation-postgres-password@postgres:5432/officechat \
           PUBLIC_FRONTEND_URL=https://chat.example.com \
@@ -90,6 +90,9 @@ jobs:
           bash -n scripts/release/officechatctl
           bash scripts/release/test-release-scripts.sh
 
+      - name: Caddy access/runtime log redaction
+        run: bash scripts/release/test-caddy-access-log.sh
+
       - name: ShellCheck
         uses: ludeeus/action-shellcheck@master
         continue-on-error: true
@@ -97,6 +100,8 @@ jobs:
           scandir: ./scripts/release
 
       - name: Release bundle dry run
+        env:
+          OFFICECHAT_RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/release/create-release-bundle.sh --dry-run
 
       - name: Login to GHCR

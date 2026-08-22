@@ -12,6 +12,20 @@ Caddyfile использует `tls internal`. Caddy создаёт локаль
 /data/caddy/pki/authorities/local/root.crt
 ```
 
+## Защита proxy logs
+
+WebSocket-клиент OfficeChat передаёт JWT в query-параметре `token`. Shipped
+`Caddyfile.example` использует `format filter` для поля `request>uri` и заменяет
+чувствительные query values на `REDACTED` как в access, так и в runtime/error
+loggers. Путь входящего bot webhook содержит token: его access-запись исключена,
+а path credential заменяется на `REDACTED` в runtime errors. Backend ведёт
+собственный независимо санитизированный log.
+
+Backend/Uvicorn и Caddy являются независимыми logging layers. Если Caddyfile
+заменён либо перед OfficeChat установлен другой reverse proxy, оператор обязан
+настроить эквивалентную query/path-secret redaction. Без неё bearer JWT или bot
+token может сохраниться в proxy log и стать доступным читателям журнала.
+
 ## Экспорт публичного сертификата
 
 Экспортируйте только `root.crt`:

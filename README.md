@@ -4,23 +4,26 @@
 
 OfficeChat v0.1 RC adds production-oriented Docker targets, `/ready` readiness checks, stricter production configuration validation, security headers, backup/restore scripts, Playwright E2E smoke infrastructure, and release documentation.
 
-## Release Packaging 0.1.0-rc2
+## Release Packaging
 
-OfficeChat 0.1.0-rc2 adds release packaging for Linux `amd64` self-hosted installs:
+OfficeChat release packaging supports Linux `amd64` self-hosted installs:
 
 - release Compose: `deploy/docker-compose.release.yml`
 - installer scripts: `scripts/release/`
 - install guide: [docs/INSTALL_RU.md](docs/INSTALL_RU.md)
-- release notes: [docs/releases/0.1.0-rc2_RU.md](docs/releases/0.1.0-rc2_RU.md)
 - metadata: `deploy/release-metadata.json`
 
-Images are intended to be published as `ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2` and `ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2`, with immutable `sha-<short_git_sha>` tags and optional moving `rc`. Production should not depend on `latest`.
+Release images use the exact version supplied by the annotated tag or
+`OFFICECHAT_RELEASE_VERSION`, plus an immutable `sha-<short_git_sha>` tag. Release
+Compose requires an explicit `OFFICECHAT_VERSION` and never falls back to an old
+image tag. Production should not depend on `latest`.
 
-This task does not publish images, create a git tag, or create a GitHub Release. After verification, tag manually:
+After verification, tag the exact approved version explicitly:
 
 ```bash
-git tag -a v0.1.0-rc2 -m "OfficeChat 0.1.0-rc2"
-git push origin v0.1.0-rc2
+VERSION=0.1.0-example
+git tag -a "v${VERSION}" -m "OfficeChat ${VERSION}"
+git push origin "v${VERSION}"
 ```
 
 Key docs:
@@ -79,7 +82,16 @@ Branding and About:
 
 Protected frontend routes centrally handle expired or invalid JWTs: only `officechat.access_token` is removed, UI preferences remain intact, active WebSockets stop, and the browser returns to the localized login page. HTTP 401 ends the local session; HTTP 403 reports denied access without logging the user out.
 
-WebSocket access logs redact `token`, `access_token`, `authorization`, and `ticket` query values. `APP_SECRET_KEY` (also accepted as `JWT_SECRET`) must be long and persistent in production. Changing it invalidates every active session. JWT storage remains in `localStorage` for the development architecture; secure cookie/session migration remains planned.
+WebSocket authentication currently sends the bearer value in the `token` query
+parameter. Backend/Uvicorn logging sanitizes sensitive query values independently.
+The shipped Caddy access and runtime/error loggers use independent `request>uri`
+filters for `token`, `access_token`, `authorization`, `ticket`, and private search
+`q` values. Bot webhook access entries are skipped and its path credential is
+redacted from runtime errors. A custom reverse proxy must preserve equivalent
+query/path-secret protection because backend filters cannot sanitize proxy logs.
+`APP_SECRET_KEY` (also accepted as `JWT_SECRET`) must be long and
+persistent in production. Changing it invalidates every active session. JWT
+storage remains in `localStorage`; secure cookie/session migration remains planned.
 
 ## Audit log
 
@@ -167,7 +179,7 @@ Presence, persistent last seen, and typing indicators are available in v0.1. `/a
 
 Unread counters and direct-message read receipts use one PostgreSQL high-water row per user/chat. Existing history is backfilled as read by migration `20260704_0017`; messages advance the marker only after they are at least 60% visible for 500 ms in an active, focused OfficeChat window. A user-triggered **Clear legacy unread messages** action in notification settings repairs counters left by older versions by advancing only the current user's accessible chats to their current high-water marks. It does not affect future messages or non-message notifications and is not needed during normal daily use. `/api/ws/me` synchronizes unread and Notification Center state across tabs/devices. Installed Chromium PWAs also use the authoritative total for App Badge; open but hidden/unfocused windows can show system notifications. Fully closed-app Web Push remains planned. See [docs/UNREAD_RU.md](docs/UNREAD_RU.md) and [docs/NOTIFICATIONS_RU.md](docs/NOTIFICATIONS_RU.md).
 
-Message Search v0.1 uses PostgreSQL `simple` full-text GIN indexes for mixed RU/EN message bodies and attachment filenames. The user app provides global/current-chat search, sender/date/attachment filters, cursor pagination, keyboard access, context loading, temporary target highlighting, and authorized deep links. Deleted and archived content is excluded; admin roles do not bypass private direct/discussion membership. Raw `q` values are redacted from access logs. See [docs/MESSAGE_SEARCH_RU.md](docs/MESSAGE_SEARCH_RU.md).
+Message Search v0.1 uses PostgreSQL `simple` full-text GIN indexes for mixed RU/EN message bodies and attachment filenames. The user app provides global/current-chat search, sender/date/attachment filters, cursor pagination, keyboard access, context loading, temporary target highlighting, and authorized deep links. Deleted and archived content is excluded; admin roles do not bypass private direct/discussion membership. Raw `q` values are redacted independently from backend and shipped Caddy logs. See [docs/MESSAGE_SEARCH_RU.md](docs/MESSAGE_SEARCH_RU.md).
 
 Pinned messages appear as a compact strip in group, direct, and discussion chats in `/ru/app`. Each message payload includes `is_pinned`, `pin_id`, and `pinned_at`, and the pinned strip can jump to the original message through the existing message-context loader. Deleted or archived messages are automatically removed from pins.
 
@@ -217,7 +229,7 @@ The group chat UI includes live update status, readable wrapped multi-line messa
 WebSocket real-time updates are available for group messages:
 
 - `WS /api/ws/groups/{group_id}?token=...`
-- Development clients pass the JWT token in the query string.
+- Current clients pass the JWT token in the query string; all production proxy access and error logs must redact it.
 - Sending and reaction changes happen through REST; WebSocket receives message lifecycle events and compact `*.message.reactions.updated` updates.
 - Current WebSocket manager is single-instance only. Multi-instance production should use Valkey pub/sub or another broker later.
 - Typing indicators are available; read receipts are not implemented yet.
@@ -320,10 +332,10 @@ docker compose down
 ## Release Bundle Commands
 
 ```bash
-bash scripts/release/create-release-bundle.sh
+OFFICECHAT_RELEASE_VERSION=VERSION bash scripts/release/create-release-bundle.sh
 sudo ./release/install-linux.sh
-sudo /opt/officechat/update-linux.sh 0.1.0-rc2
-sudo /opt/officechat/rollback-linux.sh 0.1.0-rc1
+sudo /opt/officechat/update-linux.sh VERSION
+sudo /opt/officechat/rollback-linux.sh PREVIOUS_VERSION
 /opt/officechat/officechatctl health
 ```
 

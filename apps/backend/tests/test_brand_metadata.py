@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest.mock import patch
 
 from app.api.routes.health import health
 from app.core.config import Settings
@@ -31,6 +33,22 @@ class BrandMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("build_sha", metadata)
         self.assertNotIn("build_date", metadata)
         self.assertEqual(metadata["product"], "OfficeChat")
+
+    def test_missing_version_metadata_uses_non_release_marker(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_VERSION", None)
+            os.environ.pop("OFFICECHAT_VERSION", None)
+            settings = Settings(_env_file=None)
+        self.assertEqual(settings.app_version, "development")
+        self.assertNotEqual(settings.app_version, "0.1.0-rc2")
+
+    def test_release_version_metadata_is_used_exactly(self):
+        settings = Settings(APP_VERSION="0.1.0-test-release")
+        self.assertEqual(settings.safe_service_metadata["version"], "0.1.0-test-release")
+
+    def test_blank_version_metadata_uses_non_release_marker(self):
+        settings = Settings(APP_VERSION="   ")
+        self.assertEqual(settings.safe_service_metadata["version"], "development")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "OfficeChat"
-    app_version: str = Field(default="0.1.0-rc2", validation_alias=AliasChoices("APP_VERSION", "OFFICECHAT_VERSION"))
+    app_version: str = Field(default="development", validation_alias=AliasChoices("APP_VERSION", "OFFICECHAT_VERSION"))
     app_build_sha: str | None = Field(default=None, validation_alias="OFFICECHAT_BUILD_SHA")
     app_build_date: str | None = Field(default=None, validation_alias="OFFICECHAT_BUILD_DATE")
     environment: str = "development"
@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     backup_agent_connect_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30)
     backup_agent_read_timeout_seconds: float = Field(default=5.0, ge=0.1, le=60)
     backup_agent_max_response_bytes: int = Field(default=1048576, ge=4096, le=4194304)
+
+    @field_validator("app_version", mode="before")
+    @classmethod
+    def normalize_app_version(cls, value: object) -> str:
+        normalized = str(value).strip() if value is not None else ""
+        return normalized or "development"
 
     @model_validator(mode="after")
     def require_persistent_production_secret(self) -> "Settings":

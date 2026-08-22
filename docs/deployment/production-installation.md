@@ -71,6 +71,11 @@ docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.y
 
 Caddy использует `tls internal`, перенаправляет HTTP на HTTPS и обращается к `frontend:3000`/`backend:8000` через Docker network.
 
+Не удаляйте `request>uri` filters из shipped Caddyfile: WebSocket JWT передаётся
+как `token` query parameter, а Caddy access и runtime/error logs не используют
+backend sanitizer. Для собственного reverse proxy настройте эквивалентную
+redaction query и path credentials во всех логгерах.
+
 ## 4. Проверка
 
 Публичные health endpoints через Caddy:

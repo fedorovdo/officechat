@@ -58,9 +58,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 Для multi-instance fanout живых WebSocket-событий из worker позже нужен Valkey pub/sub или другой брокер.
 
-## Release packaging 0.1.0-rc2
+## Release packaging
 
-Рекомендуемый путь для серверной установки RC2 - release bundle:
+Рекомендуемый путь для серверной установки - versioned release bundle:
 
 - `deploy/docker-compose.release.yml` использует GHCR images `ghcr.io/fedorovdo/officechat-backend:${OFFICECHAT_VERSION}` и `ghcr.io/fedorovdo/officechat-frontend:${OFFICECHAT_VERSION}`.
 - PostgreSQL и Valkey не публикуют порты наружу.
@@ -73,8 +73,8 @@ docker compose -f docker-compose.prod.yml up -d
 Release image tags:
 
 ```text
-ghcr.io/fedorovdo/officechat-backend:0.1.0-rc2
-ghcr.io/fedorovdo/officechat-frontend:0.1.0-rc2
+ghcr.io/fedorovdo/officechat-backend:<VERSION>
+ghcr.io/fedorovdo/officechat-frontend:<VERSION>
 ghcr.io/fedorovdo/officechat-backend:sha-<short_git_sha>
 ghcr.io/fedorovdo/officechat-frontend:sha-<short_git_sha>
 ```

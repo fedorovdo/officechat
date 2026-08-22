@@ -53,6 +53,21 @@ elif [[ -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
 fi
 [[ -n "$compose_source" ]] || fail "Release Compose file not found"
 
+caddy_source=""
+if [[ -f "${SCRIPT_DIR}/../../deploy/caddy/Caddyfile.example" ]]; then
+  caddy_source="${SCRIPT_DIR}/../../deploy/caddy/Caddyfile.example"
+elif [[ -f "${SCRIPT_DIR}/caddy/Caddyfile.example" ]]; then
+  caddy_source="${SCRIPT_DIR}/caddy/Caddyfile.example"
+fi
+[[ -n "$caddy_source" ]] || fail "Release Caddy template not found"
+caddy_target="${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
+caddy_compose_file="${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
+caddy_was_running=0
+if [[ -f "$caddy_compose_file" ]] && \
+  [[ -n "$(docker compose --env-file "$OFFICECHAT_ENV_FILE" -f "$caddy_compose_file" ps -q caddy 2>/dev/null || true)" ]]; then
+  caddy_was_running=1
+fi
+
 agent_source=""
 if [[ -f "${SCRIPT_DIR}/../backup_agent.py" ]]; then
   agent_source="${SCRIPT_DIR}/../backup_agent.py"
@@ -127,6 +142,7 @@ if is_dry_run; then
   atomic_update_env_metadata "$OFFICECHAT_ENV_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
   atomic_write_version_override "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
   log "DRY-RUN: install release Compose and agent assets"
+  log "DRY-RUN: install the release Caddy template and reload a running Caddy service"
   log "DRY-RUN: pull images, run Alembic upgrade, restart services and verify readiness"
   pass "OfficeChat update preflight completed; no production files or containers were changed."
   exit 0
@@ -173,6 +189,7 @@ snapshot_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
+snapshot_file "$caddy_target" Caddyfile.example
 
 rollback_update() {
   rollback_armed=0
@@ -191,6 +208,12 @@ rollback_update() {
   restore_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
+  restore_file "$caddy_target" Caddyfile.example
+  if [[ "$caddy_was_running" == "1" && -f "$caddy_compose_file" ]]; then
+    docker compose --env-file "$OFFICECHAT_ENV_FILE" -f "$caddy_compose_file" \
+      exec -T caddy caddy reload --config /etc/caddy/Caddyfile || \
+      warn "Previous Caddy configuration could not be reloaded automatically"
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
     if [[ "$agent_was_enabled" == "1" ]]; then
@@ -225,6 +248,15 @@ install -m 0644 "$compose_source" "$OFFICECHAT_COMPOSE_FILE"
 atomic_update_env_metadata "$OFFICECHAT_ENV_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
 atomic_write_version_override "$OFFICECHAT_VERSION_OVERRIDE_FILE" "$RELEASE_VERSION" "$RELEASE_REVISION" "$RELEASE_BUILD_DATE"
 install -m 0644 "$metadata_source" "${OFFICECHAT_INSTALL_DIR}/RELEASE.json"
+install -d -o root -g root -m 0755 "${OFFICECHAT_INSTALL_DIR}/caddy"
+install -o root -g root -m 0644 "$caddy_source" "$caddy_target"
+if [[ "$caddy_was_running" == "1" ]]; then
+  if ! docker compose --env-file "$OFFICECHAT_ENV_FILE" -f "$caddy_compose_file" \
+    exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
+    rollback_update
+    fail "Caddy rejected the updated proxy-log security configuration"
+  fi
+fi
 
 ensure_backup_agent_group
 ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"

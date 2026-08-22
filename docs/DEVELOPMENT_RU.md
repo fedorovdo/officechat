@@ -349,7 +349,7 @@ docker compose logs calendar-worker --tail=80
 
 ## Release Packaging v0.1
 
-Release Packaging v0.1 добавляет Linux bundle для `0.1.0-rc2`:
+Release Packaging v0.1 создаёт versioned Linux bundle с явно заданной версией:
 
 - `deploy/docker-compose.release.yml`
 - `scripts/release/create-release-bundle.sh`
@@ -363,10 +363,10 @@ Release Packaging v0.1 добавляет Linux bundle для `0.1.0-rc2`:
 Проверка release tooling без публикации:
 
 ```powershell
-docker compose -f deploy/docker-compose.release.yml config
+OFFICECHAT_VERSION=0.1.0-example docker compose -f deploy/docker-compose.release.yml config
 bash -n scripts/release/*.sh
 bash -n scripts/release/officechatctl
-bash scripts/release/create-release-bundle.sh --dry-run
+OFFICECHAT_RELEASE_VERSION=0.1.0-example bash scripts/release/create-release-bundle.sh --dry-run
 ```
 
 Workflow `.github/workflows/release-images.yml` публикует GHCR images только при tag `v*` или ручном `workflow_dispatch`; локальная разработка ничего не публикует.

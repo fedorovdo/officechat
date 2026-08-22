@@ -4,11 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+from fastapi import HTTPException
+
 from app.api.routes.admin_bots import post_rotate_token
 from app.api.routes.admin_users import create_user, patch_user, reset_password
 from app.models.audit import AuditEvent
 from app.schemas.user import AdminPasswordReset, AdminUserCreate, AdminUserUpdate
 from app.services.audit import record_audit_event, sanitize_audit_value
+from app.services.security import hash_password, verify_password
 
 
 class AuditSession:
@@ -166,6 +169,67 @@ class AuditPersistenceTests(unittest.IsolatedAsyncioTestCase):
             await post_rotate_token(bot.id, request(), session, actor())
         self.assertEqual(session.events[-1].details, {"token_rotated": True})
         self.assertNotIn("full-bot-token", json.dumps(session.events[-1].details))
+
+    async def test_superadmin_password_reset_commits_hash_and_audit(self):
+        session = AuditSession()
+        old_password = "old-password-123"
+        new_password = "new-password-456"
+        target = user(role="superadmin", password_hash=hash_password(old_password))
+        old_password_hash = target.password_hash
+
+        with patch("app.api.routes.admin_users.get_user_by_id", AsyncMock(return_value=target)):
+            updated = await reset_password(
+                target.id,
+                AdminPasswordReset(new_password=new_password),
+                request(),
+                session,
+                actor(role="superadmin"),
+            )
+
+        self.assertIs(updated, target)
+        self.assertEqual(session.commits, 1)
+        self.assertNotEqual(target.password_hash, old_password_hash)
+        self.assertFalse(verify_password(old_password, target.password_hash))
+        self.assertTrue(verify_password(new_password, target.password_hash))
+        self.assertEqual(session.events[-1].event_type, "user.password_reset")
+        self.assertEqual(session.events[-1].details, {"password_reset": True})
+        self.assertNotIn(new_password, json.dumps(session.events[-1].details))
+
+    async def test_admin_cannot_reset_superadmin_password(self):
+        session = AuditSession()
+        target = user(role="superadmin")
+
+        with patch("app.api.routes.admin_users.get_user_by_id", AsyncMock(return_value=target)):
+            with self.assertRaises(HTTPException) as context:
+                await reset_password(
+                    target.id,
+                    AdminPasswordReset(new_password="new-password-456"),
+                    request(),
+                    session,
+                    actor(role="admin"),
+                )
+
+        self.assertEqual(context.exception.status_code, 403)
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(session.events, [])
+
+    async def test_non_local_user_password_reset_is_rejected(self):
+        session = AuditSession()
+        target = user(auth_provider="ldap")
+
+        with patch("app.api.routes.admin_users.get_user_by_id", AsyncMock(return_value=target)):
+            with self.assertRaises(HTTPException) as context:
+                await reset_password(
+                    target.id,
+                    AdminPasswordReset(new_password="new-password-456"),
+                    request(),
+                    session,
+                    actor(role="superadmin"),
+                )
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(session.events, [])
 
 
 if __name__ == "__main__":

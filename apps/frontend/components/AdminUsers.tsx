@@ -80,6 +80,8 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
   const [accessDenied, setAccessDenied] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [passwordResetError, setPasswordResetError] = useState("");
+  const [passwordResetSuccess, setPasswordResetSuccess] = useState("");
   const createDrawerRef = useRef<HTMLElement>(null);
   const editDrawerRef = useRef<HTMLElement>(null);
 
@@ -202,6 +204,8 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
     setNewPassword("");
     setError("");
     setSuccess("");
+    setPasswordResetError("");
+    setPasswordResetSuccess("");
     if (currentUser?.role === "superadmin") {
       const token = getStoredAccessToken();
       if (!token) return;
@@ -304,6 +308,8 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
     event.preventDefault();
     setError("");
     setSuccess("");
+    setPasswordResetError("");
+    setPasswordResetSuccess("");
 
     const token = getStoredAccessToken();
     if (!token || !selectedUser) {
@@ -317,10 +323,9 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
       setSelectedUser(updatedUser);
       setNewPassword("");
       await reloadUsers(token);
-      setSuccess(dictionary.adminUsers.resetSuccess);
-    } catch (caughtError) {
-      setNewPassword("");
-      setError(caughtError instanceof Error ? caughtError.message : dictionary.adminUsers.resetError);
+      setPasswordResetSuccess(dictionary.adminUsers.resetSuccess);
+    } catch {
+      setPasswordResetError(dictionary.adminUsers.resetError);
     } finally {
       setIsResetting(false);
     }
@@ -656,13 +661,17 @@ export function AdminUsers({ dictionary, locale }: AdminUsersProps) {
               })}
               <div className="admin-user-drawer-actions"><button className="primary-button" disabled={isSaving} type="submit">{isSaving ? dictionary.adminUsers.saving : dictionary.adminUsers.saveSubmit}</button><button className="secondary-link" onClick={() => setSelectedUser(null)} type="button">{dictionary.adminUsers.cancel}</button></div>
             </form>
-            <form className="admin-form reset-form" onSubmit={handleResetPassword}>
-              <h3 className="compact-title">{dictionary.adminUsers.resetTitle}</h3>
-              <label className="field"><span className="field-label">{dictionary.adminUsers.fields.newPassword}</span><input autoComplete="new-password" className="field-input" minLength={8} onChange={(event) => setNewPassword(event.target.value)} required type="password" value={newPassword} /></label>
-              <button className="secondary-link" disabled={isResetting} type="submit">{isResetting ? dictionary.adminUsers.resetting : dictionary.adminUsers.resetSubmit}</button>
-            </form>
             {success ? <p className="form-success">{success}</p> : null}
             {error ? <p className="form-error">{error}</p> : null}
+            {selectedUser.auth_provider === "local" ? (
+              <form className="admin-form reset-form" onSubmit={handleResetPassword}>
+                <h3 className="compact-title">{dictionary.adminUsers.resetTitle}</h3>
+                <label className="field"><span className="field-label">{dictionary.adminUsers.fields.newPassword}</span><input autoComplete="new-password" className="field-input" minLength={8} onChange={(event) => { setNewPassword(event.target.value); setError(""); setSuccess(""); setPasswordResetError(""); setPasswordResetSuccess(""); }} required type="password" value={newPassword} /></label>
+                <button className="secondary-link" disabled={isResetting || newPassword.length < 8} type="submit">{isResetting ? dictionary.adminUsers.resetting : dictionary.adminUsers.resetSubmit}</button>
+                {passwordResetSuccess ? <p className="form-success">{passwordResetSuccess}</p> : null}
+                {passwordResetError ? <p className="form-error">{passwordResetError}</p> : null}
+              </form>
+            ) : null}
           </section>
         </div>
       ) : null}

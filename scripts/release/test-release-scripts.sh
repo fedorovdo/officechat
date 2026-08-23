@@ -3,6 +3,87 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+fail_test() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+test_non_root_rejection() {
+  [[ "$(id -u)" -ne 0 ]] || fail_test "Non-root rejection test must run with a non-root EUID"
+
+  local contract_dir contract_output contract_status user_name
+  contract_dir="$(mktemp -d)"
+  trap 'rm -rf -- "$contract_dir"' EXIT
+  mkdir -p "${contract_dir}/bin" "${contract_dir}/state"
+  printf 'unchanged\n' >"${contract_dir}/state/sentinel"
+  cat >"${contract_dir}/bin/docker" <<'EOF_CONTRACT_DOCKER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
+  printf 'Docker Compose version v2.test\n'
+  exit 0
+fi
+exit 1
+EOF_CONTRACT_DOCKER
+  chmod +x "${contract_dir}/bin/docker"
+
+  contract_status=0
+  contract_output="$(env \
+    PATH="${contract_dir}/bin:${PATH}" \
+    OFFICECHAT_INSTALL_DIR="${contract_dir}/state/install" \
+    OFFICECHAT_DATA_DIR="${contract_dir}/state/data" \
+    OFFICECHAT_BACKUP_DIR="${contract_dir}/state/backups" \
+    OFFICECHAT_ENV_FILE="${contract_dir}/state/officechat.env" \
+    OFFICECHAT_LOCK_FILE="${contract_dir}/state/update.lock" \
+    bash "${SCRIPT_DIR}/update-linux.sh" --dry-run 0.1.0-non-root-probe 2>&1)" || contract_status=$?
+
+  [[ "$contract_status" -ne 0 ]] || fail_test "update-linux.sh accepted non-root execution"
+  [[ "$contract_output" == *"FAIL: Run update-linux.sh as root"* ]] ||
+    fail_test "update-linux.sh did not report its root requirement clearly"
+  [[ "$(cat "${contract_dir}/state/sentinel")" == "unchanged" ]] ||
+    fail_test "Non-root update attempt changed test state"
+  [[ ! -e "${contract_dir}/state/update.lock" ]] ||
+    fail_test "Non-root update attempt acquired the lifecycle lock"
+  [[ -z "$(find "${contract_dir}/state" -mindepth 1 ! -name sentinel -print -quit)" ]] ||
+    fail_test "Non-root update attempt created test state"
+
+  rm -rf -- "$contract_dir"
+  trap - EXIT
+  user_name="$(whoami 2>/dev/null || printf 'uid-%s' "$(id -u)")"
+  printf 'non-root update rejection passed (uid=%s user=%s)\n' "$(id -u)" "$user_name"
+}
+
+mode="${1:-auto}"
+case "$mode" in
+  --non-root-rejection)
+    [[ $# -eq 1 ]] || fail_test "Unexpected arguments for non-root rejection test"
+    test_non_root_rejection
+    exit 0
+    ;;
+  --root-lifecycle)
+    [[ $# -eq 1 ]] || fail_test "Unexpected arguments for root lifecycle test"
+    [[ "$(id -u)" -eq 0 ]] || fail_test "Root lifecycle test requires actual EUID 0"
+    printf 'root lifecycle uid: %s\n' "$(id -u)"
+    printf 'root lifecycle user: %s\n' "$(whoami)"
+    ;;
+  auto)
+    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--root-lifecycle]"
+    if [[ "$(id -u)" -ne 0 ]]; then
+      test_non_root_rejection
+      [[ -x /usr/bin/sudo ]] ||
+        fail_test "Root lifecycle requires non-interactive /usr/bin/sudo on a non-root runner"
+      [[ -x /bin/bash ]] || fail_test "Root lifecycle requires /bin/bash"
+      exec /usr/bin/sudo -n -- /bin/bash "${SCRIPT_DIR}/test-release-scripts.sh" --root-lifecycle
+    fi
+    printf 'root lifecycle uid: %s\n' "$(id -u)"
+    printf 'root lifecycle user: %s\n' "$(whoami)"
+    ;;
+  *)
+    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--root-lifecycle]"
+    ;;
+esac
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 

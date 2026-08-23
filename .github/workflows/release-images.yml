@@ -87,7 +87,20 @@ jobs:
 
       - name: Optional Playwright smoke
         continue-on-error: true
-        run: docker compose run --rm frontend npm run test:e2e
+        run: |
+          set -euo pipefail
+          docker compose up -d backend
+          for attempt in {1..60}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8100/ready >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" -eq 60 ]]; then
+              echo "Backend did not become ready for the optional Playwright smoke" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          docker compose run --rm frontend npm run test:e2e
 
       - name: Compose validation
         run: |

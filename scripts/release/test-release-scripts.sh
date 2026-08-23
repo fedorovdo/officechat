@@ -241,6 +241,34 @@ if "continue-on-error" in migration_block:
     raise SystemExit("release database migration or verification may ignore failures")
 if "source .env.production.example" in workflow or "set -a" in workflow:
     raise SystemExit("release workflow must treat the production example as Compose dotenv data")
+
+shellcheck_start = workflow.index("      - name: ShellCheck")
+shellcheck_end = workflow.index("      - name: Release bundle dry run", shellcheck_start)
+shellcheck_block = workflow[shellcheck_start:shellcheck_end]
+for needle in (
+    "koalaman/shellcheck:stable",
+    "-x",
+    "-P /mnt/scripts/release",
+    "/mnt/scripts/release/lib.sh",
+):
+    if needle not in shellcheck_block:
+        raise SystemExit(f"release ShellCheck is missing mandatory option {needle!r}")
+if "continue-on-error" in shellcheck_block or "action-shellcheck" in shellcheck_block:
+    raise SystemExit("release ShellCheck may ignore failures or use non-canonical semantics")
+
+for needle in (
+    "sudo -n locale-gen ru_RU.UTF-8",
+    "^C\\.(utf8|UTF-8)$",
+    "^ru_RU\\.(utf8|UTF-8)$",
+    "ghcr_access_preflight_only",
+    "GHCR_PREFLIGHT_TAG: 0.1.0-rc13.5-stable-hardening",
+    '"Authorization: Bearer ${GHCR_PREFLIGHT_TOKEN}"',
+    'repository.get("full_name")',
+    'docker buildx imagetools inspect "${BACKEND_IMAGE}:${GHCR_PREFLIGHT_TAG}"',
+    'docker buildx imagetools inspect "${FRONTEND_IMAGE}:${GHCR_PREFLIGHT_TAG}"',
+):
+    if needle not in workflow:
+        raise SystemExit(f"release workflow is missing required gate {needle!r}")
 PY_WORKFLOW_ORDER
 
 [[ -f "$CADDY_FILE" ]] || { echo "Caddy template is missing" >&2; exit 1; }
@@ -650,6 +678,36 @@ mapfile -t tested_locales < <(
     tolower($0) == "ru_ru.utf-8"
   '
 )
+c_locale=""
+c_utf8_locale=""
+ru_utf8_locale=""
+for locale_name in "${tested_locales[@]}"; do
+  case "${locale_name,,}" in
+    c)
+      c_locale="$locale_name"
+      ;;
+    c.utf8|c.utf-8)
+      c_utf8_locale="$locale_name"
+      ;;
+    ru_ru.utf8|ru_ru.utf-8)
+      ru_utf8_locale="$locale_name"
+      ;;
+  esac
+done
+[[ -n "$c_locale" ]] || {
+  echo "Required C locale is unavailable" >&2
+  exit 1
+}
+[[ -n "$c_utf8_locale" ]] || {
+  echo "Required C UTF-8 locale is unavailable" >&2
+  exit 1
+}
+[[ -n "$ru_utf8_locale" ]] || {
+  echo "Required ru_RU UTF-8 locale is unavailable" >&2
+  exit 1
+}
+printf 'required locales: C=%s C_UTF8=%s RU_RU_UTF8=%s\n' \
+  "$c_locale" "$c_utf8_locale" "$ru_utf8_locale"
 for locale_name in "${tested_locales[@]}"; do
   for locale_variable in LC_ALL LC_COLLATE LANG; do
     signature="$(comparison_signature "$locale_name" "$locale_variable")"

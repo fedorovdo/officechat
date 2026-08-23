@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+      ghcr_access_preflight_only:
+        description: "Validate existing GHCR package access without publishing images or artifacts"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,6 +27,7 @@ permissions:
 env:
   BACKEND_IMAGE: ghcr.io/fedorovdo/officechat-backend
   FRONTEND_IMAGE: ghcr.io/fedorovdo/officechat-frontend
+  GHCR_PREFLIGHT_TAG: 0.1.0-rc13.5-stable-hardening
 
 jobs:
   build-test-package:
@@ -117,6 +123,25 @@ jobs:
             -f deploy/docker-compose.release.yml config >/dev/null
           bash scripts/release/test-compose-stack.sh
 
+      - name: Prepare required release locales
+        run: |
+          set -euo pipefail
+          echo "runner uid=$(id -u)"
+          echo "locale -a before:"
+          locale -a
+          if ! locale -a | grep -Eiq '^ru_RU\.(utf8|UTF-8)$'; then
+            if ! command -v locale-gen >/dev/null 2>&1; then
+              sudo -n apt-get update
+              sudo -n apt-get install -y --no-install-recommends locales
+            fi
+            sudo -n locale-gen ru_RU.UTF-8
+          fi
+          echo "locale -a after:"
+          locale -a
+          locale -a | grep -qx 'C'
+          locale -a | grep -Eiq '^C\.(utf8|UTF-8)$'
+          locale -a | grep -Eiq '^ru_RU\.(utf8|UTF-8)$'
+
       - name: Shell syntax
         run: |
           bash -n scripts/release/*.sh
@@ -127,10 +152,26 @@ jobs:
         run: bash scripts/release/test-caddy-access-log.sh
 
       - name: ShellCheck
-        uses: ludeeus/action-shellcheck@master
-        continue-on-error: true
-        with:
-          scandir: ./scripts/release
+        run: |
+          docker run --rm \
+            -v "$PWD:/mnt:ro" \
+            koalaman/shellcheck:stable \
+            -x \
+            -P /mnt/scripts/release \
+            /mnt/scripts/release/collect-diagnostics.sh \
+            /mnt/scripts/release/create-release-bundle.sh \
+            /mnt/scripts/release/export-images.sh \
+            /mnt/scripts/release/import-images.sh \
+            /mnt/scripts/release/install-linux.sh \
+            /mnt/scripts/release/lib.sh \
+            /mnt/scripts/release/rollback-linux.sh \
+            /mnt/scripts/release/test-caddy-access-log.sh \
+            /mnt/scripts/release/test-compose-stack.sh \
+            /mnt/scripts/release/test-release-scripts.sh \
+            /mnt/scripts/release/uninstall-linux.sh \
+            /mnt/scripts/release/update-linux.sh \
+            /mnt/scripts/release/verify-install.sh \
+            /mnt/scripts/release/officechatctl
 
       - name: Release bundle dry run
         env:
@@ -144,8 +185,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: GHCR package access preflight
+        env:
+          GHCR_PREFLIGHT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$tmp_dir"' EXIT
+          check_package() {
+            local package_name="$1"
+            local response_file="${tmp_dir}/${package_name}.json"
+            curl --fail --silent --show-error \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GHCR_PREFLIGHT_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package_name}" \
+              >"$response_file"
+            python3 - "$response_file" "$GITHUB_REPOSITORY" <<'PY_PACKAGE'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              package = json.load(handle)
+          repository = package.get("repository") or {}
+          if repository.get("full_name") != sys.argv[2]:
+              raise SystemExit(f"GHCR package is not linked to {sys.argv[2]}")
+          PY_PACKAGE
+          }
+          check_package officechat-backend
+          check_package officechat-frontend
+          docker buildx imagetools inspect "${BACKEND_IMAGE}:${GHCR_PREFLIGHT_TAG}" >/dev/null
+          docker buildx imagetools inspect "${FRONTEND_IMAGE}:${GHCR_PREFLIGHT_TAG}" >/dev/null
+
       - name: Backend metadata
         id: meta_backend
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.BACKEND_IMAGE }}
@@ -156,6 +230,7 @@ jobs:
 
       - name: Frontend metadata
         id: meta_frontend
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.FRONTEND_IMAGE }}
@@ -166,6 +241,7 @@ jobs:
 
       - name: Build and push backend image
         id: build_backend
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         uses: docker/build-push-action@v6
         with:
           context: ./apps/backend
@@ -176,6 +252,7 @@ jobs:
 
       - name: Build and push frontend image
         id: build_frontend
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         uses: docker/build-push-action@v6
         with:
           context: ./apps/frontend
@@ -189,6 +266,7 @@ jobs:
           labels: ${{ steps.meta_frontend.outputs.labels }}
 
       - name: Image digest metadata
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         run: |
           mkdir -p dist
           {
@@ -201,11 +279,13 @@ jobs:
           sha256sum dist/image-digests.txt > dist/image-digests.txt.sha256
 
       - name: Create release bundle
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         env:
           OFFICECHAT_RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/release/create-release-bundle.sh
 
       - name: Upload release artifacts
+        if: ${{ inputs.ghcr_access_preflight_only != true }}
         uses: actions/upload-artifact@v4
         with:
           name: officechat-${{ steps.version.outputs.version }}-release

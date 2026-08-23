@@ -303,7 +303,13 @@ describe("directory panel", () => {
     expect(await screen.findByRole("button", { name: en.directory.add })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.directoryImport.open })).toBeInTheDocument();
     expect(screen.getByLabelText(en.directory.activity)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: en.directory.edit }).length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(apiMocks.getDirectoryEntries).toHaveBeenCalledWith(
+        "token",
+        expect.objectContaining({ status: "active", page: 1, limit: 30 })
+      )
+    );
+    expect((await screen.findAllByRole("button", { name: en.directory.edit })).length).toBeGreaterThan(0);
   });
 
   it("uses active status by default and lets managers filter archived entries", async () => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminUsers } from "../components/AdminUsers";
@@ -16,9 +16,10 @@ const apiMocks = vi.hoisted(() => ({
   updateAdminUser: vi.fn(),
   updateAdminUserPermissions: vi.fn()
 }));
+const routerMocks = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() })
+  useRouter: () => routerMocks
 }));
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -42,13 +43,21 @@ const target = userFactory({
 });
 
 async function openTargetEditor() {
-  render(<AdminUsers dictionary={en} locale="en" />);
+  await act(async () => {
+    render(<AdminUsers dictionary={en} locale="en" />);
+  });
   const row = (await screen.findAllByText(target.display_name))
     .map((element) => element.closest("tr"))
     .find((candidate): candidate is HTMLTableRowElement => candidate !== null);
   expect(row).toBeDefined();
-  fireEvent.click(row!);
-  return screen.findByRole("dialog", { name: en.adminUsers.editTitle });
+  await act(async () => {
+    fireEvent.click(row!);
+  });
+  const dialog = await screen.findByRole("dialog", { name: en.adminUsers.editTitle });
+  await waitFor(() =>
+    expect(within(dialog).queryByText(en.adminUsers.permissions.loading)).not.toBeInTheDocument()
+  );
+  return dialog;
 }
 
 describe("admin user password reset", () => {
@@ -114,7 +123,9 @@ describe("admin user password reset", () => {
     expect(apiMocks.updateAdminUser).not.toHaveBeenCalled();
     expect(within(dialog).queryByText(en.adminUsers.resetSuccess)).not.toBeInTheDocument();
 
-    resolveReset(target);
+    await act(async () => {
+      resolveReset(target);
+    });
 
     expect(await within(dialog).findByText(en.adminUsers.resetSuccess)).toBeInTheDocument();
     expect(within(dialog).queryByText(en.adminUsers.updateSuccess)).not.toBeInTheDocument();
@@ -151,7 +162,9 @@ describe("admin user password reset", () => {
 
   it("clears stale profile success when the password operation starts", async () => {
     const dialog = await openTargetEditor();
-    fireEvent.click(within(dialog).getByRole("button", { name: en.adminUsers.saveSubmit }));
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: en.adminUsers.saveSubmit }));
+    });
     expect(await within(dialog).findByText(en.adminUsers.updateSuccess)).toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText(en.adminUsers.fields.newPassword), {
@@ -179,7 +192,9 @@ describe("admin user password reset", () => {
 
   it("does not submit a password shorter than eight characters", async () => {
     const dialog = await openTargetEditor();
-    fireEvent.click(within(dialog).getByRole("button", { name: en.adminUsers.saveSubmit }));
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: en.adminUsers.saveSubmit }));
+    });
     expect(await within(dialog).findByText(en.adminUsers.updateSuccess)).toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText(en.adminUsers.fields.newPassword), {

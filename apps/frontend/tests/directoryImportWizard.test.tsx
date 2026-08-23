@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DirectoryImportWizard } from "../components/DirectoryImportWizard";
@@ -553,8 +553,10 @@ describe("directory import wizard", () => {
         })
       )
     );
-    expect(screen.queryByRole("dialog", { name: en.directoryImport.detailsTitle })).not.toBeInTheDocument();
-    expect(screen.getAllByText("Updated User").length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: en.directoryImport.detailsTitle })).not.toBeInTheDocument()
+    );
+    expect((await screen.findAllByText("Updated User")).length).toBeGreaterThan(0);
   });
 
   it("renders raw source values as text and closes the detail drawer with Escape", async () => {
@@ -592,8 +594,11 @@ describe("directory import wizard", () => {
     });
     fireEvent.click(scope.getByRole("button", { name: en.directoryImport.saveRow }));
     await waitFor(() => expect(apiMocks.updateDirectoryImportRow).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: en.directoryImport.backToMapping })).toBeEnabled()
+    );
     fireEvent.click(screen.getByRole("button", { name: en.directoryImport.backToMapping }));
-    fireEvent.click(screen.getByRole("button", { name: en.directoryImport.reanalyze }));
+    fireEvent.click(await screen.findByRole("button", { name: en.directoryImport.reanalyze }));
 
     expect(confirm).toHaveBeenCalledWith(en.directoryImport.reanalyzeConfirm);
     expect(apiMocks.updateDirectoryImport).not.toHaveBeenCalled();
@@ -731,7 +736,9 @@ describe("directory import wizard", () => {
     window.dispatchEvent(pendingExit);
     expect(pendingExit.defaultPrevented).toBe(true);
 
-    resolveExecution?.(completedResult);
+    await act(async () => {
+      resolveExecution?.(completedResult);
+    });
     await screen.findByText(en.directoryImport.result.success);
     const completedExit = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(completedExit);

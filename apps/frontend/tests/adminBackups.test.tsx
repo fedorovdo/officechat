@@ -17,10 +17,10 @@ const apiMocks = vi.hoisted(() => ({
   requireStoredAccessToken: vi.fn(() => "test-token"),
   verifyBackup: vi.fn()
 }));
-const routerReplace = vi.fn();
+const routerMocks = vi.hoisted(() => ({ replace: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: routerReplace })
+  useRouter: () => routerMocks
 }));
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -165,7 +165,7 @@ describe("Backup Center", () => {
   it("redirects normal administrators away from the superadmin-only route", async () => {
     apiMocks.getCurrentUser.mockResolvedValue(userFactory({ role: "admin" }));
     render(<AdminBackups dictionary={en} locale="en" />);
-    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/en/dashboard"));
+    await waitFor(() => expect(routerMocks.replace).toHaveBeenCalledWith("/en/dashboard"));
     expect(apiMocks.getBackupStatus).not.toHaveBeenCalled();
   });
 
@@ -195,18 +195,7 @@ describe("Backup Center", () => {
   });
 
   it("polls an active job and clears polling when unmounted", async () => {
-    const intervals: Array<{
-      callback: TimerHandler;
-      delay: number | undefined;
-      id: ReturnType<typeof window.setInterval>;
-    }> = [];
-    let nextId = 1;
-    const intervalSpy = vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
-      const id = nextId++ as unknown as ReturnType<typeof window.setInterval>;
-      intervals.push({ callback, delay, id });
-      return id;
-    });
-    const clearSpy = vi.spyOn(window, "clearInterval").mockImplementation(() => undefined);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     apiMocks.getActiveBackupJob.mockResolvedValue({
       job: { ...job, state: "running", started_at: job.requested_at }
     });
@@ -221,20 +210,16 @@ describe("Backup Center", () => {
 
     const { unmount } = render(<AdminBackups dictionary={en} locale="en" />);
     await screen.findByText(en.backups.activeJobTitle);
-    const pollingInterval = intervals.find(({ delay }) => delay === 3_000);
-    expect(pollingInterval).toBeDefined();
+    await waitFor(() => expect(vi.getTimerCount()).toBe(3));
     const statusCallsBeforePoll = apiMocks.getBackupStatus.mock.calls.length;
     await act(async () => {
-      if (typeof pollingInterval?.callback === "function") pollingInterval.callback();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3_000);
     });
     await waitFor(() => expect(apiMocks.getBackupJob).toHaveBeenCalledWith("test-token", job.job_id));
     await waitFor(() => expect(apiMocks.getBackupStatus.mock.calls.length).toBeGreaterThan(statusCallsBeforePoll));
 
     unmount();
-    expect(clearSpy).toHaveBeenCalledWith(pollingInterval?.id);
-    intervalSpy.mockRestore();
-    clearSpy.mockRestore();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("keeps RU and EN dictionary key sets aligned", () => {

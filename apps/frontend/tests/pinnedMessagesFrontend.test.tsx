@@ -32,9 +32,10 @@ const apiMocks = vi.hoisted(() => ({
   unpinMessage: vi.fn(),
   updatePinnedMessage: vi.fn()
 }));
+const routerMocks = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() })
+  useRouter: () => routerMocks
 }));
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -340,11 +341,15 @@ describe("pinned message frontend integration", () => {
 
   it("updates the message state after a successful pin without reloading messages", async () => {
     render(<DirectChatPanel conversation={conversation} currentUser={currentUser} dictionary={en} locale="en" />);
+    await screen.findByText("Pin me");
+    const initialMessageLoads = apiMocks.getDirectMessages.mock.calls.length;
     await openActions();
     fireEvent.click(screen.getByRole("menuitem", { name: en.pins.pin }));
     fireEvent.click(screen.getByRole("button", { name: en.pins.pin }));
     await waitFor(() => expect(apiMocks.pinMessage).toHaveBeenCalledOnce());
-    expect(screen.getByText(en.pins.pinSuccess)).toBeInTheDocument();
+    expect(await screen.findByText(en.pins.pinSuccess)).toBeInTheDocument();
+    expect(await within(screen.getByRole("article")).findByText(en.pins.pinned)).toBeInTheDocument();
+    expect(apiMocks.getDirectMessages).toHaveBeenCalledTimes(initialMessageLoads);
   });
 
   it("unpinned messages use the actual pin id", async () => {
@@ -377,11 +382,15 @@ describe("pinned message frontend integration", () => {
     await openActions();
     expect(screen.queryByRole("menuitem", { name: en.pins.pin })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.messages.moreActions }));
-    rerender(<DirectChatPanel conversation={conversation} currentUser={currentUser} dictionary={en} locale="en" />);
+    await act(async () => {
+      rerender(<DirectChatPanel conversation={conversation} currentUser={currentUser} dictionary={en} locale="en" />);
+    });
     await openActions();
     expect(screen.getByRole("menuitem", { name: en.pins.pin })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.messages.moreActions }));
-    rerender(<DirectChatPanel conversation={conversation} currentUser={noPinUser} dictionary={en} locale="en" />);
+    await act(async () => {
+      rerender(<DirectChatPanel conversation={conversation} currentUser={noPinUser} dictionary={en} locale="en" />);
+    });
     await openActions();
     expect(screen.queryByRole("menuitem", { name: en.pins.pin })).not.toBeInTheDocument();
   });
@@ -419,7 +428,9 @@ describe("pinned message frontend integration", () => {
     await openActions(en.messages.moreActions);
     expect(screen.getByRole("menuitem", { name: en.pins.pin })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.messages.moreActions }));
-    rerender(<DirectChatPanel conversation={conversation} currentUser={currentUser} dictionary={ru} locale="ru" />);
+    await act(async () => {
+      rerender(<DirectChatPanel conversation={conversation} currentUser={currentUser} dictionary={ru} locale="ru" />);
+    });
     await openActions(ru.messages.moreActions);
     expect(screen.getByRole("menuitem", { name: ru.pins.pin })).toBeInTheDocument();
   });

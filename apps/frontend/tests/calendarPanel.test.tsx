@@ -308,7 +308,9 @@ describe("calendar panel", () => {
     fireEvent.change(screen.getByLabelText("Calendar date"), { target: { value: "2026-07-27" } });
 
     for (const viewName of ["Agenda", "Day", "Week", "Month"]) {
-      fireEvent.click(screen.getByRole("button", { name: viewName }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: viewName }));
+      });
       expect(screen.getByLabelText("Calendar date")).toHaveValue("2026-07-27");
     }
   });

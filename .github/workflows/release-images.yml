@@ -51,10 +51,30 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Start backend dependencies
-        run: docker compose up -d postgres valkey
+        run: docker compose up -d --wait postgres valkey
 
       - name: Build development images
         run: docker compose build backend frontend
+
+      - name: Migrate and verify test database
+        run: |
+          set -euo pipefail
+          docker compose run --rm backend alembic upgrade head
+          docker compose run --rm backend python -c '
+          import subprocess
+
+          def revisions(command):
+              output = subprocess.check_output(["alembic", command], text=True)
+              return [line.split()[0] for line in output.splitlines() if line.strip()]
+
+          heads = revisions("heads")
+          current = revisions("current")
+          if len(heads) != 1:
+              raise SystemExit(f"expected one Alembic head, found {len(heads)}")
+          if current != heads:
+              raise SystemExit(f"Alembic current {current!r} does not match head {heads!r}")
+          print(f"Alembic current=head: {heads[0]}")
+          '
 
       - name: Backend tests
         run: docker compose run --rm backend python -m pytest -q

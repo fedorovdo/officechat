@@ -16,6 +16,7 @@ COMPOSE_FILE="${ROOT_DIR}/deploy/docker-compose.release.yml"
 LOCK_DIR="${TMP_DIR}/officechat.lock"
 VERSION_FILE="${INSTALL_DIR}/VERSION"
 CADDY_FILE="${ROOT_DIR}/deploy/caddy/Caddyfile.example"
+RELEASE_WORKFLOW_FILE="${ROOT_DIR}/.github/workflows/release-images.yml"
 HTTPS_OVERRIDE_FILE="${INSTALL_DIR}/docker-compose.https-override.yml"
 VERSION_OVERRIDE_FILE="${INSTALL_DIR}/docker-compose.version-override.yml"
 RELEASE_METADATA_FILE="${TMP_DIR}/RELEASE.json"
@@ -132,6 +133,30 @@ export OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${TMP_DIR}/agent.sock"
 
 bash -n "${SCRIPT_DIR}"/*.sh
 bash -n "${SCRIPT_DIR}/officechatctl"
+
+python3 - "$RELEASE_WORKFLOW_FILE" <<'PY_WORKFLOW_ORDER'
+import sys
+from pathlib import Path
+
+workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
+needles = (
+    "docker compose up -d --wait postgres valkey",
+    "docker compose run --rm backend alembic upgrade head",
+    'heads = revisions("heads")',
+    'current = revisions("current")',
+    "docker compose run --rm backend python -m pytest -q",
+    "- name: Build and push backend image",
+)
+for needle in needles:
+    if workflow.count(needle) != 1:
+        raise SystemExit(f"release workflow must contain exactly one {needle!r}")
+positions = [workflow.index(needle) for needle in needles]
+if positions != sorted(positions):
+    raise SystemExit("release workflow does not migrate and verify the database before tests and publication")
+migration_block = workflow[positions[1] : positions[4]]
+if "continue-on-error" in migration_block:
+    raise SystemExit("release database migration or verification may ignore failures")
+PY_WORKFLOW_ORDER
 
 [[ -f "$CADDY_FILE" ]] || { echo "Caddy template is missing" >&2; exit 1; }
 grep -Fq '@frontend_health path /api/health /api/health/*' "$CADDY_FILE" || {

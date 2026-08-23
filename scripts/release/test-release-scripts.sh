@@ -145,6 +145,8 @@ needles = (
     'heads = revisions("heads")',
     'current = revisions("current")',
     "docker compose run --rm backend python -m pytest -q",
+    "docker compose --env-file .env.production.example",
+    "bash scripts/release/test-compose-stack.sh",
     "- name: Build and push backend image",
 )
 for needle in needles:
@@ -156,6 +158,8 @@ if positions != sorted(positions):
 migration_block = workflow[positions[1] : positions[4]]
 if "continue-on-error" in migration_block:
     raise SystemExit("release database migration or verification may ignore failures")
+if "source .env.production.example" in workflow or "set -a" in workflow:
+    raise SystemExit("release workflow must treat the production example as Compose dotenv data")
 PY_WORKFLOW_ORDER
 
 [[ -f "$CADDY_FILE" ]] || { echo "Caddy template is missing" >&2; exit 1; }

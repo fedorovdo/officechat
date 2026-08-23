@@ -15,9 +15,15 @@ legacy_override="${tmp_dir}/docker-compose.https-override.yml"
 version="0.1.0-rc12.1-backup-center-deployfix"
 revision="1212121212121212121212121212121212121212"
 build_date="2026-08-04T19:00:00Z"
+author_name="Dmitrii Fedorov"
+sentinel_file="${tmp_dir}/dotenv-command-executed"
+sentinel_value="\$(printf SHOULD_NOT_EXECUTE >${sentinel_file})"
 
 cp "${ROOT_DIR}/.env.production.example" "$env_file"
 chmod 0600 "$env_file"
+sed -i \
+  "s|^NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME=.*|NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME=${sentinel_value}|" \
+  "$env_file"
 
 missing_version_env="${tmp_dir}/missing-version.env"
 cp "${ROOT_DIR}/.env.production.example" "$missing_version_env"
@@ -42,6 +48,23 @@ services:
       NEXT_PUBLIC_OFFICECHAT_BUILD_SHA: old-revision
 EOF_HTTPS
 legacy_before="$(sha256sum "$legacy_override")"
+
+resolved_env_json="${tmp_dir}/resolved-env.json"
+compose_with_stack "$env_file" "${ROOT_DIR}/deploy/docker-compose.release.yml" \
+  "${tmp_dir}/missing-https.yml" "$version_override" config --format json >"$resolved_env_json"
+python3 - "$resolved_env_json" "$author_name" <<'PY_DOTENV'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    frontend_env = json.load(handle)["services"]["frontend"]["environment"]
+if frontend_env.get("NEXT_PUBLIC_OFFICECHAT_AUTHOR_NAME") != sys.argv[2]:
+    raise SystemExit("Compose did not preserve a dotenv value containing spaces")
+sentinel = frontend_env.get("NEXT_PUBLIC_OFFICECHAT_ORGANIZATION_NAME", "")
+if "printf SHOULD_NOT_EXECUTE" not in sentinel:
+    raise SystemExit("Compose did not preserve the dotenv sentinel as data")
+PY_DOTENV
+[[ ! -e "$sentinel_file" ]] || fail "Compose validation executed dotenv contents"
 
 compose_with_stack "$env_file" "${ROOT_DIR}/deploy/docker-compose.release.yml" \
   "$legacy_override" "$version_override" config --quiet

@@ -292,6 +292,7 @@ jobs:
           path: |
             dist/*
             release/*
+          include-hidden-files: true
 
       - name: Stop services
         if: always()

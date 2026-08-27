@@ -668,7 +668,7 @@ for bundled_doc in \
     exit 1
   }
 done
-grep -Fq 'Никогда не используйте `docker compose down -v`' \
+grep -Fq "Никогда не используйте \`docker compose down -v\`" \
   "${bundle_doc_fixture}/deployment/caddy-ca-backup-restore.md" || {
   echo "Caddy CA volume safety warning is missing from generated documentation" >&2
   exit 1

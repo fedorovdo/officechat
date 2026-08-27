@@ -21,6 +21,10 @@ release/
   RELEASE.json
   CHECKSUMS.sha256
   README_INSTALL_RU.md
+  caddy/
+    Caddyfile.example
+    docker-compose.caddy.yml
+  deployment/
 ```
 
 Архив: `officechat-<VERSION>-linux-amd64.tar.gz`.
@@ -55,18 +59,13 @@ release/
 VERSION=0.1.0-example
 tar -xzf "officechat-${VERSION}-linux-amd64.tar.gz"
 cd release
-sudo ./install-linux.sh
+sudo ./install-linux.sh --hostname chat.example.com
 ```
 
-Для реального сервера заранее задайте:
-
-```bash
-export PUBLIC_FRONTEND_URL=https://chat.example.com
-export PUBLIC_BACKEND_URL=https://chat.example.com
-export BACKEND_CORS_ORIGINS=https://chat.example.com
-```
-
-Скрипт сохраняет `.env` с правами `0600`, генерирует секреты, если файла еще нет, выполняет `alembic upgrade head`, запускает сервисы и проверяет `/ready`.
+Скрипт создаёт `/opt/officechat/.env` с правами `0600`, записывает public origin
+для hostname, генерирует секреты, если файла ещё нет, выполняет
+`alembic upgrade head`, запускает сервисы и проверяет `/ready`. Не создавайте
+`.env.production`: это имя используется только при установке из source checkout.
 
 ## 6. Первый администратор
 
@@ -148,11 +147,24 @@ PostgreSQL и uploads нужно хранить вместе, иначе вло�
 
 ## 12. Reverse proxy
 
-Примеры:
+После release-установки Caddy files находятся здесь:
 
-- `deploy/nginx/officechat.conf`
-- `deploy/caddy/Caddyfile.example`
-- `deploy/caddy/docker-compose.caddy.yml`
+- `/opt/officechat/caddy/Caddyfile.example`
+- `/opt/officechat/caddy/docker-compose.caddy.yml`
+
+Запуск установленного Caddy stack:
+
+```bash
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml config
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml up -d
+```
+
+Только в source checkout соответствующие примеры находятся в
+`deploy/nginx/officechat.conf`, `deploy/caddy/Caddyfile.example` и
+`deploy/caddy/docker-compose.caddy.yml`; для них используется
+`.env.production`.
 
 Для TLS используйте сертификаты своей организации, ACME или внутренний CA. Проверьте лимит тела запроса не ниже лимита вложений OfficeChat.
 

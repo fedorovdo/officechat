@@ -616,6 +616,63 @@ bundle_dry_run_output="$(OFFICECHAT_RELEASE_VERSION=0.1.0-test-release \
   echo "Bundle dry-run did not use the supplied version in the archive name" >&2
   exit 1
 }
+for bundled_doc in \
+  production-installation.md \
+  internal-https.md \
+  caddy-ca-backup-restore.md; do
+  [[ "$bundle_dry_run_output" == *"${ROOT_DIR}/docs/deployment/${bundled_doc} ${ROOT_DIR}/release/deployment/${bundled_doc}"* ]] || {
+    echo "Bundle dry-run did not copy ${bundled_doc}" >&2
+    exit 1
+  }
+done
+[[ "$bundle_dry_run_output" == *"${ROOT_DIR}/docs/INSTALL_RU.md ${ROOT_DIR}/release/README_INSTALL_RU.md"* ]] || {
+  echo "Bundle dry-run did not copy README_INSTALL_RU.md" >&2
+  exit 1
+}
+
+bundle_doc_fixture="${TMP_DIR}/generated-release-docs"
+mkdir -p "${bundle_doc_fixture}/deployment"
+for bundled_doc in \
+  production-installation.md \
+  internal-https.md \
+  caddy-ca-backup-restore.md; do
+  cp "${ROOT_DIR}/docs/deployment/${bundled_doc}" "${bundle_doc_fixture}/deployment/${bundled_doc}"
+done
+cp "${ROOT_DIR}/docs/INSTALL_RU.md" "${bundle_doc_fixture}/README_INSTALL_RU.md"
+for bundled_doc in \
+  "${bundle_doc_fixture}/deployment/production-installation.md" \
+  "${bundle_doc_fixture}/deployment/internal-https.md" \
+  "${bundle_doc_fixture}/deployment/caddy-ca-backup-restore.md" \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; do
+  grep -Fq '/opt/officechat/.env' "$bundled_doc" || {
+    echo "Generated release documentation lacks the installed .env path: ${bundled_doc}" >&2
+    exit 1
+  }
+  grep -Fq '/opt/officechat/caddy/docker-compose.caddy.yml' "$bundled_doc" || {
+    echo "Generated release documentation lacks the installed Caddy Compose path: ${bundled_doc}" >&2
+    exit 1
+  }
+done
+grep -Fq -- '--env-file .env.production -f docker-compose.prod.yml' \
+  "${bundle_doc_fixture}/deployment/production-installation.md" || {
+  echo "Source checkout application instructions were removed from production-installation.md" >&2
+  exit 1
+}
+for bundled_doc in \
+  "${bundle_doc_fixture}/deployment/production-installation.md" \
+  "${bundle_doc_fixture}/deployment/internal-https.md" \
+  "${bundle_doc_fixture}/deployment/caddy-ca-backup-restore.md" \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; do
+  grep -Fq 'deploy/caddy/docker-compose.caddy.yml' "$bundled_doc" || {
+    echo "Source checkout Caddy path was removed from ${bundled_doc}" >&2
+    exit 1
+  }
+done
+grep -Fq 'Никогда не используйте `docker compose down -v`' \
+  "${bundle_doc_fixture}/deployment/caddy-ca-backup-restore.md" || {
+  echo "Caddy CA volume safety warning is missing from generated documentation" >&2
+  exit 1
+}
 if env -u OFFICECHAT_RELEASE_VERSION \
   OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
   OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \

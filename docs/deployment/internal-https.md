@@ -30,8 +30,21 @@ token может сохраниться в proxy log и стать доступ�
 
 Экспортируйте только `root.crt`:
 
+После установки из release bundle:
+
 ```bash
-docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.yml \
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml \
+  cp caddy:/data/caddy/pki/authorities/local/root.crt ./officechat-root.crt
+chmod 644 ./officechat-root.crt
+openssl x509 -in ./officechat-root.crt -noout -fingerprint -sha256
+```
+
+Только из source checkout:
+
+```bash
+docker compose --env-file .env.production \
+  -f deploy/caddy/docker-compose.caddy.yml \
   cp caddy:/data/caddy/pki/authorities/local/root.crt ./officechat-root.crt
 chmod 644 ./officechat-root.crt
 openssl x509 -in ./officechat-root.crt -noout -fingerprint -sha256

@@ -2,6 +2,12 @@
 
 Volume `officechat_caddy_data` содержит private root/intermediate keys. Потеря volume создаст новый CA и потребует повторной установки `root.crt` на всех клиентах. Архив CA является критическим секретом.
 
+Operational Compose-команды ниже предназначены для установки из release bundle
+и используют `/opt/officechat/.env` и установленный Caddy Compose-файл. При
+работе непосредственно из source checkout используйте явно исходные пути
+`.env.production` и `deploy/caddy/docker-compose.caddy.yml`; не смешивайте два
+layout в одной операции.
+
 ## Backup
 
 Создайте каталог в защищённом администраторском backup storage:
@@ -33,22 +39,37 @@ chmod 600 "$BACKUP_DIR/caddy-ca-${STAMP}.tar.gz.sha256"
 
 ```bash
 sha256sum -c /secure/admin-backups/officechat-caddy/caddy-ca-BACKUP_TIMESTAMP.tar.gz.sha256
-docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.yml stop caddy
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml stop caddy
 docker volume inspect officechat_caddy_data
 docker run --rm --entrypoint sh \
   -v officechat_caddy_data:/target \
   -v /secure/admin-backups/officechat-caddy:/backup:ro \
   caddy:2.10-alpine \
   -eu -c 'find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; tar -xzf /backup/caddy-ca-BACKUP_TIMESTAMP.tar.gz -C /target'
-docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.yml up -d
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml up -d
 ```
 
 После запуска снова экспортируйте `root.crt` и сравните SHA-256 certificate fingerprint с зафиксированным до аварии:
 
 ```bash
-docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.yml \
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml \
   cp caddy:/data/caddy/pki/authorities/local/root.crt ./officechat-root-restored.crt
 openssl x509 -in ./officechat-root-restored.crt -noout -fingerprint -sha256
 ```
 
 Если fingerprint изменился, не продолжайте rollout: клиенты доверяют другому CA. Никогда не используйте `docker compose down -v` для обслуживания или обновления Caddy.
+
+Эквивалентные команды только для source checkout используют:
+
+```bash
+docker compose --env-file .env.production \
+  -f deploy/caddy/docker-compose.caddy.yml stop caddy
+docker compose --env-file .env.production \
+  -f deploy/caddy/docker-compose.caddy.yml up -d
+docker compose --env-file .env.production \
+  -f deploy/caddy/docker-compose.caddy.yml \
+  cp caddy:/data/caddy/pki/authorities/local/root.crt ./officechat-root-restored.crt
+```

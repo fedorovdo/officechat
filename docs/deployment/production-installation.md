@@ -2,9 +2,33 @@
 
 Эта схема публикует OfficeChat только через Caddy на портах 80/443. Диагностические порты frontend `3100` и backend `8100` привязаны к `127.0.0.1` и недоступны из LAN.
 
-## 1. Подготовка
+## 1. Выбор режима установки
 
 Требуются Linux amd64, Docker Engine, Docker Compose v2 и DNS-имя. Во всех примерах используется placeholder `officechat.example.local`.
+
+### Установка из release bundle
+
+Распакуйте release bundle, перейдите в его каталог `release/` и запустите installer
+с production hostname:
+
+```bash
+sudo ./install-linux.sh --hostname officechat.example.local
+```
+
+Installer создаёт приватный `/opt/officechat/.env` с правами `0600`, записывает
+production public origin для указанного hostname, устанавливает Compose и Caddy
+файлы в `/opt/officechat` и запускает основной application stack. Не копируйте
+`.env.production.example`: этого source-tree файла в установленном release layout
+нет.
+
+Installer не запускает Caddy автоматически, поэтому offline-установка основного
+приложения не зависит от загрузки proxy image. Backup timer также не включается
+автоматически. После проверки `/etc/officechat/backup.conf` включите его вручную
+либо передайте installer `--enable-backup-timer`.
+
+### Установка из source checkout
+
+Следующие команды относятся только к checkout исходного кода:
 
 ```bash
 cp .env.production.example .env.production
@@ -22,11 +46,13 @@ BACKEND_BIND_ADDRESS=127.0.0.1
 FRONTEND_BIND_ADDRESS=127.0.0.1
 ```
 
-Файл `.env.production` нельзя добавлять в Git. Для release bundle используйте его `docker-compose.yml`; для установки из исходников используется `docker-compose.prod.yml`.
+Файл `.env.production` нельзя добавлять в Git. Для source checkout используется
+`docker-compose.prod.yml`; release installer вместо этого создаёт
+`/opt/officechat/.env` и устанавливает `/opt/officechat/docker-compose.yml`.
 
 ## 2. Запуск OfficeChat
 
-Из исходников:
+Из source checkout:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml config
@@ -34,16 +60,9 @@ docker compose --env-file .env.production -f docker-compose.prod.yml run --rm ba
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
-Release installer поддерживает hostname при новой установке:
-
-```bash
-sudo ./install-linux.sh --hostname officechat.example.local
-```
-
-Installer не запускает Caddy автоматически, поэтому offline-установка основного приложения не зависит от загрузки proxy image.
-Backup timer также не включается автоматически. После проверки
-`/etc/officechat/backup.conf` включите его вручную либо передайте installer
-`--enable-backup-timer`.
+Для release bundle основной stack уже запущен installer. Проверяйте и управляйте
+им через `/opt/officechat/officechatctl`, не смешивая installed и source Compose
+paths.
 
 ## Слои Compose и обновления
 
@@ -64,9 +83,22 @@ sudo /opt/officechat/officechatctl integrity-check
 
 Создайте внутреннюю DNS A-запись `officechat.example.local`, указывающую на адрес сервера. После запуска основного Compose сеть `officechat_public` уже существует.
 
+После установки из release bundle:
+
 ```bash
-docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.yml config
-docker compose --env-file .env.production -f deploy/caddy/docker-compose.caddy.yml up -d
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml config
+docker compose --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml up -d
+```
+
+Только для source checkout:
+
+```bash
+docker compose --env-file .env.production \
+  -f deploy/caddy/docker-compose.caddy.yml config
+docker compose --env-file .env.production \
+  -f deploy/caddy/docker-compose.caddy.yml up -d
 ```
 
 Caddy использует `tls internal`, перенаправляет HTTP на HTTPS и обращается к `frontend:3000`/`backend:8000` через Docker network.

@@ -38,6 +38,10 @@ release/
 
 Не используйте `latest` для production.
 
+Production release images являются приватными packages в GHCR. Для их загрузки
+нужна предварительная Docker authentication от GitHub account с доступом к этим
+packages. Token/PAT должен иметь только необходимый scope `read:packages`.
+
 ## 3. Каталоги
 
 - `/opt/officechat` - compose, `.env`, `VERSION`, служебные скрипты.
@@ -55,6 +59,25 @@ release/
 
 ## 5. Установка
 
+Installer обычно запускается через `sudo`, поэтому Docker login должен быть
+выполнен в том же root-контексте. Token передаётся только через stdin:
+
+```bash
+sudo -v
+read -rp "GitHub user: " GHCR_USER
+read -rsp "GHCR token: " GHCR_TOKEN
+echo
+printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io \
+  --username "$GHCR_USER" --password-stdin
+unset GHCR_TOKEN GHCR_USER
+```
+
+Не указывайте token в аргументах команды, не сохраняйте его в OfficeChat `.env` и
+не вставляйте в конфигурацию OfficeChat. За хранение Docker credentials отвечает
+операционная система и настроенный Docker credential store. Если installer
+запускается без `sudo` пользователем из группы Docker, выполните `docker login` и
+installer без `sudo` от одного пользователя.
+
 ```bash
 VERSION=0.1.0-example
 tar -xzf "officechat-${VERSION}-linux-amd64.tar.gz"
@@ -66,6 +89,14 @@ sudo ./install-linux.sh --hostname chat.example.com
 для hostname, генерирует секреты, если файла ещё нет, выполняет
 `alembic upgrade head`, запускает сервисы и проверяет `/ready`. Не создавайте
 `.env.production`: это имя используется только при установке из source checkout.
+До создания `/opt/officechat`, `/var/lib/officechat`, `/etc/officechat`, runtime
+configuration и systemd units installer проверяет доступ к точным backend и
+frontend images выбранной версии. При недоступном private image он завершается с
+подсказкой о GHCR login и ничего не устанавливает.
+
+При установке из source checkout `.env.production` и source Compose files остаются
+допустимыми. GHCR authentication нужна только если такой checkout использует
+приватные release images, а не локально собранные development images.
 
 ## 6. Первый администратор
 

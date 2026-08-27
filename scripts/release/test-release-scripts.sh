@@ -54,11 +54,149 @@ EOF_CONTRACT_DOCKER
   printf 'non-root update rejection passed (uid=%s user=%s)\n' "$(id -u)" "$user_name"
 }
 
+test_install_image_preflight() {
+  local compose_line contract_dir contract_output contract_status env_line failed_image
+  local mutation_line preflight_line release_version systemd_line
+  contract_dir="$(mktemp -d)"
+  PREFLIGHT_CONTRACT_DIR="$contract_dir"
+  trap 'rm -rf -- "$PREFLIGHT_CONTRACT_DIR"' EXIT
+  mkdir -p "${contract_dir}/bin" "${contract_dir}/state"
+  release_version="9.8.7-private-image-test"
+
+  cat >"${contract_dir}/bin/docker" <<'EOF_PREFLIGHT_DOCKER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\n' "$*" >>"${OFFICECHAT_FAKE_DOCKER_LOG}"
+if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
+  printf 'Docker Compose version v2.test\n'
+  exit 0
+fi
+if [[ "${1:-}" == "pull" && "${2:-}" == "--quiet" ]]; then
+  [[ "${3:-}" != "${OFFICECHAT_FAKE_PULL_FAIL_IMAGE:-}" ]] || exit 42
+  exit 0
+fi
+exit 0
+EOF_PREFLIGHT_DOCKER
+  chmod +x "${contract_dir}/bin/docker"
+
+  cat >"${contract_dir}/bin/install" <<'EOF_PREFLIGHT_INSTALL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'UNEXPECTED install %s\n' "$*" >>"${OFFICECHAT_FAKE_MUTATION_LOG}"
+exit 97
+EOF_PREFLIGHT_INSTALL
+  chmod +x "${contract_dir}/bin/install"
+
+  cat >"${contract_dir}/bin/sudo" <<'EOF_PREFLIGHT_SUDO'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'UNEXPECTED sudo %s\n' "$*" >>"${OFFICECHAT_FAKE_MUTATION_LOG}"
+exit 98
+EOF_PREFLIGHT_SUDO
+  chmod +x "${contract_dir}/bin/sudo"
+
+  : >"${contract_dir}/docker.log"
+  : >"${contract_dir}/mutation.log"
+  contract_output="$(env \
+    PATH="${contract_dir}/bin:${PATH}" \
+    OFFICECHAT_FAKE_DOCKER_LOG="${contract_dir}/docker.log" \
+    OFFICECHAT_FAKE_MUTATION_LOG="${contract_dir}/mutation.log" \
+    OFFICECHAT_RELEASE_VERSION="$release_version" \
+    OFFICECHAT_INSTALL_DIR="${contract_dir}/state/install" \
+    OFFICECHAT_DATA_DIR="${contract_dir}/state/data" \
+    OFFICECHAT_BACKUP_DIR="${contract_dir}/state/backups" \
+    OFFICECHAT_ENV_FILE="${contract_dir}/state/install/.env" \
+    OFFICECHAT_LOCK_FILE="${contract_dir}/state/install.lock" \
+    bash "${SCRIPT_DIR}/install-linux.sh" --dry-run 2>&1)"
+  for failed_image in \
+    "ghcr.io/fedorovdo/officechat-backend:${release_version}" \
+    "ghcr.io/fedorovdo/officechat-frontend:${release_version}"; do
+    [[ "$contract_output" == *"DRY-RUN: verify release image access with docker pull --quiet ${failed_image}"* ]] ||
+      fail_test "Install dry-run omitted release image preflight for ${failed_image}"
+  done
+  if grep -Eq '^pull([[:space:]]|$)' "${contract_dir}/docker.log"; then
+    fail_test "Install dry-run performed a registry pull"
+  fi
+  [[ ! -s "${contract_dir}/mutation.log" ]] ||
+    fail_test "Install dry-run invoked a mutation command"
+  [[ ! -e "${contract_dir}/state/install" && ! -e "${contract_dir}/state/data" &&
+    ! -e "${contract_dir}/state/backups" ]] ||
+    fail_test "Install dry-run created target directories"
+
+  for failed_image in \
+    "ghcr.io/fedorovdo/officechat-backend:${release_version}" \
+    "ghcr.io/fedorovdo/officechat-frontend:${release_version}"; do
+    : >"${contract_dir}/docker.log"
+    : >"${contract_dir}/mutation.log"
+    contract_status=0
+    contract_output="$(env \
+      PATH="${contract_dir}/bin:${PATH}" \
+      OFFICECHAT_FAKE_DOCKER_LOG="${contract_dir}/docker.log" \
+      OFFICECHAT_FAKE_MUTATION_LOG="${contract_dir}/mutation.log" \
+      OFFICECHAT_FAKE_PULL_FAIL_IMAGE="$failed_image" \
+      OFFICECHAT_RELEASE_VERSION="$release_version" \
+      OFFICECHAT_INSTALL_DIR="${contract_dir}/state/install" \
+      OFFICECHAT_DATA_DIR="${contract_dir}/state/data" \
+      OFFICECHAT_BACKUP_DIR="${contract_dir}/state/backups" \
+      OFFICECHAT_ENV_FILE="${contract_dir}/state/install/.env" \
+      OFFICECHAT_LOCK_FILE="${contract_dir}/state/install.lock" \
+      bash "${SCRIPT_DIR}/install-linux.sh" 2>&1)" || contract_status=$?
+
+    [[ "$contract_status" -ne 0 ]] ||
+      fail_test "Installer accepted inaccessible release image ${failed_image}"
+    [[ "$contract_output" == *"Private GHCR release images require prior Docker authentication"* &&
+      "$contract_output" == *"docker login ghcr.io --password-stdin"* &&
+      "$contract_output" == *"read:packages"* ]] ||
+      fail_test "Installer did not explain private GHCR authentication requirements"
+    grep -Fq "pull --quiet ${failed_image}" "${contract_dir}/docker.log" ||
+      fail_test "Installer did not test exact release image ${failed_image}"
+    [[ ! -s "${contract_dir}/mutation.log" ]] ||
+      fail_test "Image preflight failure allowed an installation mutation"
+    [[ ! -e "${contract_dir}/state/install" && ! -e "${contract_dir}/state/data" &&
+      ! -e "${contract_dir}/state/backups" ]] ||
+      fail_test "Image preflight failure created target directories"
+  done
+
+  compose_line="$(grep -nF 'require_docker_compose' "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
+  preflight_line="$(grep -nF 'preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"' \
+    "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
+  mutation_line="$(grep -nF 'as_root install -d -o root -g root -m 0755 "$OFFICECHAT_INSTALL_DIR"' \
+    "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
+  env_line="$(grep -nF 'write_env_if_missing "$OFFICECHAT_ENV_FILE"' \
+    "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
+  systemd_line="$(grep -nF 'as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup.service"' \
+    "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
+  [[ "$compose_line" -lt "$preflight_line" && "$preflight_line" -lt "$mutation_line" &&
+    "$preflight_line" -lt "$env_line" && "$preflight_line" -lt "$systemd_line" ]] ||
+    fail_test "Release image preflight is not before installation mutation"
+
+  for auth_doc in \
+    "${ROOT_DIR}/docs/INSTALL_RU.md" \
+    "${ROOT_DIR}/docs/deployment/production-installation.md"; do
+    grep -Fq 'docker login ghcr.io' "$auth_doc" ||
+      fail_test "GHCR login prerequisite is missing from ${auth_doc}"
+    grep -Fq -- '--password-stdin' "$auth_doc" ||
+      fail_test "Secure GHCR password stdin form is missing from ${auth_doc}"
+    grep -Fq 'read:packages' "$auth_doc" ||
+      fail_test "GHCR package read scope is missing from ${auth_doc}"
+  done
+
+  rm -rf -- "$contract_dir"
+  trap - EXIT
+  unset PREFLIGHT_CONTRACT_DIR
+  printf 'install release image preflight tests passed\n'
+}
+
 mode="${1:-auto}"
 case "$mode" in
   --non-root-rejection)
     [[ $# -eq 1 ]] || fail_test "Unexpected arguments for non-root rejection test"
     test_non_root_rejection
+    exit 0
+    ;;
+  --install-image-preflight)
+    [[ $# -eq 1 ]] || fail_test "Unexpected arguments for install image preflight test"
+    test_install_image_preflight
     exit 0
     ;;
   --root-lifecycle)
@@ -68,7 +206,8 @@ case "$mode" in
     printf 'root lifecycle user: %s\n' "$(whoami)"
     ;;
   auto)
-    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--root-lifecycle]"
+    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--root-lifecycle]"
+    test_install_image_preflight
     if [[ "$(id -u)" -ne 0 ]]; then
       test_non_root_rejection
       [[ -x /usr/bin/sudo ]] ||
@@ -80,7 +219,7 @@ case "$mode" in
     printf 'root lifecycle user: %s\n' "$(whoami)"
     ;;
   *)
-    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--root-lifecycle]"
+    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--root-lifecycle]"
     ;;
 esac
 
@@ -673,6 +812,22 @@ grep -Fq "Никогда не используйте \`docker compose down -v\`"
   echo "Caddy CA volume safety warning is missing from generated documentation" >&2
   exit 1
 }
+for auth_doc in \
+  "${bundle_doc_fixture}/deployment/production-installation.md" \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; do
+  grep -Fq 'docker login ghcr.io' "$auth_doc" || {
+    echo "Generated release documentation lacks the GHCR login prerequisite: ${auth_doc}" >&2
+    exit 1
+  }
+  grep -Fq -- '--password-stdin' "$auth_doc" || {
+    echo "Generated release documentation lacks secure GHCR token input: ${auth_doc}" >&2
+    exit 1
+  }
+  grep -Fq 'read:packages' "$auth_doc" || {
+    echo "Generated release documentation lacks the GHCR package read scope: ${auth_doc}" >&2
+    exit 1
+  }
+done
 if env -u OFFICECHAT_RELEASE_VERSION \
   OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
   OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \

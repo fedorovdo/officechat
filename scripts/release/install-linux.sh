@@ -36,6 +36,30 @@ EOF_HELP
   exit 0
 fi
 
+preflight_release_image_access() {
+  local version="$1"
+  local image
+  local -a images=(
+    "ghcr.io/fedorovdo/officechat-backend:${version}"
+    "ghcr.io/fedorovdo/officechat-frontend:${version}"
+  )
+
+  if is_dry_run; then
+    for image in "${images[@]}"; do
+      log "DRY-RUN: verify release image access with docker pull --quiet ${image}"
+    done
+    return 0
+  fi
+
+  for image in "${images[@]}"; do
+    log "Checking release image access: ${image}"
+    if ! docker pull --quiet "$image" >/dev/null 2>&1; then
+      fail "Cannot access release image ${image}. Private GHCR release images require prior Docker authentication. Use docker login ghcr.io --password-stdin with an account authorized to read these packages; the token needs only read:packages."
+    fi
+  done
+  pass "Release backend and frontend images are accessible."
+}
+
 release_metadata_source="${SCRIPT_DIR}/RELEASE.json"
 if [[ -f "$release_metadata_source" ]]; then
   read_release_metadata "$release_metadata_source"
@@ -68,6 +92,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 require_docker_compose
 require_command tar
+preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"
 
 available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
 if [[ "${available_kb:-0}" -lt 2097152 ]]; then

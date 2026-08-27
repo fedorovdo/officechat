@@ -11,6 +11,28 @@
 Распакуйте release bundle, перейдите в его каталог `release/` и запустите installer
 с production hostname:
 
+Release images в GHCR являются приватными. До запуска installer выполните Docker
+login от имени того же системного пользователя, который будет выполнять pull.
+Для показанного ниже запуска через `sudo` авторизация также должна выполняться через
+`sudo docker`. Используйте GitHub account, которому разрешено читать эти packages;
+достаточно token/PAT только с scope `read:packages`:
+
+```bash
+sudo -v
+read -rp "GitHub user: " GHCR_USER
+read -rsp "GHCR token: " GHCR_TOKEN
+echo
+printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io \
+  --username "$GHCR_USER" --password-stdin
+unset GHCR_TOKEN GHCR_USER
+```
+
+Не передавайте token аргументом команды, не записывайте его в OfficeChat `.env` и
+не вставляйте в конфигурацию OfficeChat. За безопасное хранение Docker credentials
+отвечают настройки credential store и защита учётной записи операционной системы.
+Если installer запускается без `sudo` пользователем из группы Docker, выполняйте и
+`docker login`, и installer без `sudo` в одном пользовательском контексте.
+
 ```bash
 sudo ./install-linux.sh --hostname officechat.example.local
 ```
@@ -19,7 +41,10 @@ Installer создаёт приватный `/opt/officechat/.env` с права
 production public origin для указанного hostname, устанавливает Compose и Caddy
 файлы в `/opt/officechat` и запускает основной application stack. Не копируйте
 `.env.production.example`: этого source-tree файла в установленном release layout
-нет.
+нет. Перед первой записью в `/opt/officechat`, `/var/lib/officechat` или
+`/etc/officechat` installer проверяет доступ к точным backend и frontend images.
+При отсутствии GHCR authentication установка завершается без частично созданного
+runtime layout.
 
 Installer не запускает Caddy автоматически, поэтому offline-установка основного
 приложения не зависит от загрузки proxy image. Backup timer также не включается
@@ -29,6 +54,9 @@ Installer не запускает Caddy автоматически, поэтом
 ### Установка из source checkout
 
 Следующие команды относятся только к checkout исходного кода:
+
+GHCR login выше является обязательным для приватных release image tags. Для
+локальной source/development сборки собственных images он не требуется.
 
 ```bash
 cp .env.production.example .env.production

@@ -158,13 +158,13 @@ EOF_PREFLIGHT_SUDO
   done
 
   compose_line="$(grep -nF 'require_docker_compose' "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
-  preflight_line="$(grep -nF 'preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"' \
+  preflight_line="$(grep -nF "preflight_release_image_access \"\$OFFICECHAT_RELEASE_VERSION\"" \
     "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
-  mutation_line="$(grep -nF 'as_root install -d -o root -g root -m 0755 "$OFFICECHAT_INSTALL_DIR"' \
+  mutation_line="$(grep -nF "as_root install -d -o root -g root -m 0755 \"\$OFFICECHAT_INSTALL_DIR\"" \
     "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
-  env_line="$(grep -nF 'write_env_if_missing "$OFFICECHAT_ENV_FILE"' \
+  env_line="$(grep -nF "write_env_if_missing \"\$OFFICECHAT_ENV_FILE\"" \
     "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
-  systemd_line="$(grep -nF 'as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup.service"' \
+  systemd_line="$(grep -nF "as_root install -o root -g root -m 0644 \"\${systemd_source}/officechat-backup.service\"" \
     "${SCRIPT_DIR}/install-linux.sh" | head -n 1 | cut -d: -f1)"
   [[ "$compose_line" -lt "$preflight_line" && "$preflight_line" -lt "$mutation_line" &&
     "$preflight_line" -lt "$env_line" && "$preflight_line" -lt "$systemd_line" ]] ||

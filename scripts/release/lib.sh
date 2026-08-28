@@ -366,6 +366,26 @@ generate_secret() {
   fi
 }
 
+percent_encode_url_component() {
+  local LC_ALL=C
+  local value="$1"
+  local character encoded="" encoded_byte index
+
+  for ((index = 0; index < ${#value}; index++)); do
+    character="${value:index:1}"
+    case "$character" in
+      [A-Za-z0-9._~-])
+        encoded+="$character"
+        ;;
+      *)
+        printf -v encoded_byte '%%%02X' "'${character}"
+        encoded+="$encoded_byte"
+        ;;
+    esac
+  done
+  printf '%s' "$encoded"
+}
+
 write_env_if_missing() {
   local env_file="$1"
   if [[ -f "$env_file" ]]; then
@@ -377,8 +397,9 @@ write_env_if_missing() {
     return
   fi
 
-  local postgres_password app_secret public_frontend_url public_backend_url
+  local postgres_password postgres_password_url app_secret public_frontend_url public_backend_url
   postgres_password="$(generate_secret)"
+  postgres_password_url="$(percent_encode_url_component "$postgres_password")"
   app_secret="$(generate_secret)"
   if [[ -n "${OFFICECHAT_HOSTNAME:-}" ]]; then
     public_frontend_url="https://${OFFICECHAT_HOSTNAME}"
@@ -397,7 +418,7 @@ APP_SECRET_KEY=${app_secret}
 POSTGRES_DB=officechat
 POSTGRES_USER=officechat
 POSTGRES_PASSWORD=${postgres_password}
-DATABASE_URL=postgresql://officechat:${postgres_password}@postgres:5432/officechat
+DATABASE_URL=postgresql://officechat:${postgres_password_url}@postgres:5432/officechat
 OFFICECHAT_HOSTNAME=${OFFICECHAT_HOSTNAME:-}
 PUBLIC_FRONTEND_URL=${public_frontend_url}
 PUBLIC_BACKEND_URL=${public_backend_url}

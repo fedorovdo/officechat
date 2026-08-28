@@ -181,6 +181,40 @@ EOF_PREFLIGHT_SUDO
       fail_test "GHCR package read scope is missing from ${auth_doc}"
   done
 
+  (
+    local database_authority database_url raw_password written_password
+    raw_password='Reserved+/?#@:%=Value'
+    OFFICECHAT_RELEASE_VERSION="$release_version"
+    OFFICECHAT_RELEASE_REVISION=""
+    OFFICECHAT_RELEASE_BUILD_DATE=""
+    OFFICECHAT_DATA_DIR="${contract_dir}/state/encoded-data"
+    OFFICECHAT_HOSTNAME=""
+    PUBLIC_FRONTEND_URL="http://localhost:3100"
+    PUBLIC_BACKEND_URL="http://localhost:8100"
+    BACKEND_CORS_ORIGINS="http://localhost:3100"
+    NEXT_PUBLIC_FRONTEND_URL="http://localhost:3100"
+    NEXT_PUBLIC_BACKEND_URL="http://localhost:8100"
+    # shellcheck source=lib.sh
+    . "${SCRIPT_DIR}/lib.sh"
+    generate_secret() {
+      printf '%s' "$raw_password"
+    }
+
+    write_env_if_missing "${contract_dir}/state/encoded.env"
+    written_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "${contract_dir}/state/encoded.env")"
+    database_url="$(sed -n 's/^DATABASE_URL=//p' "${contract_dir}/state/encoded.env")"
+    [[ "$written_password" == "$raw_password" ]] ||
+      fail_test "Generated environment changed the raw PostgreSQL password"
+    [[ "$database_url" == 'postgresql://officechat:Reserved%2B%2F%3F%23%40%3A%25%3DValue@postgres:5432/officechat' ]] ||
+      fail_test "Generated DATABASE_URL did not encode reserved credential characters"
+    [[ "$database_url" != *"$raw_password"* ]] ||
+      fail_test "Generated DATABASE_URL embedded the raw reserved password"
+    database_authority="${database_url#postgresql://}"
+    database_authority="${database_authority#*@}"
+    [[ "${database_authority%%/*}" == "postgres:5432" ]] ||
+      fail_test "Generated DATABASE_URL did not resolve to postgres:5432"
+  )
+
   rm -rf -- "$contract_dir"
   trap - EXIT
   unset PREFLIGHT_CONTRACT_DIR

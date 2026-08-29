@@ -54,6 +54,51 @@ EOF_CONTRACT_DOCKER
   printf 'non-root update rejection passed (uid=%s user=%s)\n' "$(id -u)" "$user_name"
 }
 
+run_database_url_encoding_contract() {
+  local contract_dir="$1" release_version="$2"
+  local BACKEND_CORS_ORIGINS DRY_RUN NEXT_PUBLIC_BACKEND_URL NEXT_PUBLIC_FRONTEND_URL
+  local OFFICECHAT_BACKUP_AGENT_CONFIG_FILE OFFICECHAT_BACKUP_AGENT_SOCKET_FILE
+  local OFFICECHAT_BACKUP_AGENT_UNIT_FILE OFFICECHAT_BACKUP_CONFIG_FILE OFFICECHAT_BACKUP_DIR
+  local OFFICECHAT_BACKUP_GROUP OFFICECHAT_BACKUP_JOB_UNIT_FILE OFFICECHAT_BACKUP_VERIFY_UNIT_FILE
+  local OFFICECHAT_COMPOSE_FILE OFFICECHAT_DATA_DIR OFFICECHAT_ENV_FILE OFFICECHAT_HOSTNAME
+  local OFFICECHAT_HTTPS_OVERRIDE_FILE OFFICECHAT_INSTALL_DIR OFFICECHAT_LOCK_FILE OFFICECHAT_PROJECT_NAME
+  local OFFICECHAT_RELEASE_BUILD_DATE OFFICECHAT_RELEASE_REVISION OFFICECHAT_RELEASE_VERSION
+  local OFFICECHAT_VERSION_OVERRIDE_FILE PUBLIC_BACKEND_URL PUBLIC_FRONTEND_URL
+  local database_authority database_url raw_password written_password
+  raw_password='Reserved+/?#@:%=Value'
+  OFFICECHAT_RELEASE_VERSION="$release_version"
+  OFFICECHAT_RELEASE_REVISION=""
+  OFFICECHAT_RELEASE_BUILD_DATE=""
+  OFFICECHAT_INSTALL_DIR="${contract_dir}/state/encoded-install"
+  OFFICECHAT_DATA_DIR="${contract_dir}/state/encoded-data"
+  OFFICECHAT_BACKUP_DIR="${contract_dir}/state/encoded-backups"
+  OFFICECHAT_HOSTNAME=""
+  PUBLIC_FRONTEND_URL="http://localhost:3100"
+  PUBLIC_BACKEND_URL="http://localhost:8100"
+  BACKEND_CORS_ORIGINS="http://localhost:3100"
+  NEXT_PUBLIC_FRONTEND_URL="http://localhost:3100"
+  NEXT_PUBLIC_BACKEND_URL="http://localhost:8100"
+  # shellcheck source=lib.sh
+  . "${SCRIPT_DIR}/lib.sh"
+  generate_secret() {
+    printf '%s' "$raw_password"
+  }
+
+  write_env_if_missing "${contract_dir}/state/encoded.env"
+  written_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "${contract_dir}/state/encoded.env")"
+  database_url="$(sed -n 's/^DATABASE_URL=//p' "${contract_dir}/state/encoded.env")"
+  [[ "$written_password" == "$raw_password" ]] ||
+    fail_test "Generated environment changed the raw PostgreSQL password"
+  [[ "$database_url" == 'postgresql://officechat:Reserved%2B%2F%3F%23%40%3A%25%3DValue@postgres:5432/officechat' ]] ||
+    fail_test "Generated DATABASE_URL did not encode reserved credential characters"
+  [[ "$database_url" != *"$raw_password"* ]] ||
+    fail_test "Generated DATABASE_URL embedded the raw reserved password"
+  database_authority="${database_url#postgresql://}"
+  database_authority="${database_authority#*@}"
+  [[ "${database_authority%%/*}" == "postgres:5432" ]] ||
+    fail_test "Generated DATABASE_URL did not resolve to postgres:5432"
+}
+
 test_install_image_preflight() {
   local compose_line contract_dir contract_output contract_status env_line failed_image
   local mutation_line preflight_line release_version systemd_line
@@ -182,47 +227,7 @@ EOF_PREFLIGHT_SUDO
   done
 
   (
-    local BACKEND_CORS_ORIGINS DRY_RUN NEXT_PUBLIC_BACKEND_URL NEXT_PUBLIC_FRONTEND_URL
-    local OFFICECHAT_BACKUP_AGENT_CONFIG_FILE OFFICECHAT_BACKUP_AGENT_SOCKET_FILE
-    local OFFICECHAT_BACKUP_AGENT_UNIT_FILE OFFICECHAT_BACKUP_CONFIG_FILE OFFICECHAT_BACKUP_DIR
-    local OFFICECHAT_BACKUP_GROUP OFFICECHAT_BACKUP_JOB_UNIT_FILE OFFICECHAT_BACKUP_VERIFY_UNIT_FILE
-    local OFFICECHAT_COMPOSE_FILE OFFICECHAT_DATA_DIR OFFICECHAT_ENV_FILE OFFICECHAT_HOSTNAME
-    local OFFICECHAT_HTTPS_OVERRIDE_FILE OFFICECHAT_INSTALL_DIR OFFICECHAT_LOCK_FILE OFFICECHAT_PROJECT_NAME
-    local OFFICECHAT_RELEASE_BUILD_DATE OFFICECHAT_RELEASE_REVISION OFFICECHAT_RELEASE_VERSION
-    local OFFICECHAT_VERSION_OVERRIDE_FILE PUBLIC_BACKEND_URL PUBLIC_FRONTEND_URL
-    local database_authority database_url raw_password written_password
-    raw_password='Reserved+/?#@:%=Value'
-    OFFICECHAT_RELEASE_VERSION="$release_version"
-    OFFICECHAT_RELEASE_REVISION=""
-    OFFICECHAT_RELEASE_BUILD_DATE=""
-    OFFICECHAT_INSTALL_DIR="${contract_dir}/state/encoded-install"
-    OFFICECHAT_DATA_DIR="${contract_dir}/state/encoded-data"
-    OFFICECHAT_BACKUP_DIR="${contract_dir}/state/encoded-backups"
-    OFFICECHAT_HOSTNAME=""
-    PUBLIC_FRONTEND_URL="http://localhost:3100"
-    PUBLIC_BACKEND_URL="http://localhost:8100"
-    BACKEND_CORS_ORIGINS="http://localhost:3100"
-    NEXT_PUBLIC_FRONTEND_URL="http://localhost:3100"
-    NEXT_PUBLIC_BACKEND_URL="http://localhost:8100"
-    # shellcheck source=lib.sh
-    . "${SCRIPT_DIR}/lib.sh"
-    generate_secret() {
-      printf '%s' "$raw_password"
-    }
-
-    write_env_if_missing "${contract_dir}/state/encoded.env"
-    written_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "${contract_dir}/state/encoded.env")"
-    database_url="$(sed -n 's/^DATABASE_URL=//p' "${contract_dir}/state/encoded.env")"
-    [[ "$written_password" == "$raw_password" ]] ||
-      fail_test "Generated environment changed the raw PostgreSQL password"
-    [[ "$database_url" == 'postgresql://officechat:Reserved%2B%2F%3F%23%40%3A%25%3DValue@postgres:5432/officechat' ]] ||
-      fail_test "Generated DATABASE_URL did not encode reserved credential characters"
-    [[ "$database_url" != *"$raw_password"* ]] ||
-      fail_test "Generated DATABASE_URL embedded the raw reserved password"
-    database_authority="${database_url#postgresql://}"
-    database_authority="${database_authority#*@}"
-    [[ "${database_authority%%/*}" == "postgres:5432" ]] ||
-      fail_test "Generated DATABASE_URL did not resolve to postgres:5432"
+    run_database_url_encoding_contract "$contract_dir" "$release_version"
   )
 
   rm -rf -- "$contract_dir"

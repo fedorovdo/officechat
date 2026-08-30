@@ -128,7 +128,7 @@ run chmod 0644 \
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
     archive_stage="$(mktemp -d)"

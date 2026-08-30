@@ -236,6 +236,86 @@ EOF_PREFLIGHT_SUDO
   printf 'install release image preflight tests passed\n'
 }
 
+test_release_bundle_checksums() (
+  local bundle_root contract_dir manifest release_dir
+  contract_dir="$(mktemp -d)"
+  trap 'rm -rf -- "$contract_dir"' EXIT
+  bundle_root="${contract_dir}/source"
+
+  mkdir -p "$bundle_root"
+  cp -a "${ROOT_DIR}/scripts" "${bundle_root}/scripts"
+  cp -a "${ROOT_DIR}/deploy" "${bundle_root}/deploy"
+  cp -a "${ROOT_DIR}/docs" "${bundle_root}/docs"
+  cp "${ROOT_DIR}/.env.production.example" "${bundle_root}/.env.production.example"
+
+  OFFICECHAT_RELEASE_VERSION=0.1.0-test-bundle-checksums \
+    OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
+    OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
+    bash "${bundle_root}/scripts/release/create-release-bundle.sh" >/dev/null
+
+  release_dir="${bundle_root}/release"
+  manifest="${release_dir}/CHECKSUMS.sha256"
+  [[ -f "$manifest" ]] || fail_test "Generated release bundle is missing CHECKSUMS.sha256"
+  (
+    cd "$release_dir"
+    sha256sum -c CHECKSUMS.sha256 >/dev/null
+  ) || fail_test "Generated release bundle failed sha256sum verification"
+  printf 'BUNDLE_CHECKSUM_SHA256SUM_C=passed\n'
+
+  python3 - "$release_dir" <<'PY_CHECKSUM_COVERAGE'
+from __future__ import annotations
+
+from collections import Counter
+from pathlib import Path
+import re
+import sys
+
+release_dir = Path(sys.argv[1])
+manifest_path = release_dir / "CHECKSUMS.sha256"
+entry_pattern = re.compile(r"^[0-9a-fA-F]{64} [ *](.+)$")
+manifest_paths: list[str] = []
+
+for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), 1):
+    match = entry_pattern.fullmatch(line)
+    if match is None:
+        raise SystemExit(f"Invalid CHECKSUMS.sha256 entry on line {line_number}")
+    manifest_paths.append(match.group(1))
+
+actual_paths = sorted(
+    path.relative_to(release_dir).as_posix()
+    for path in release_dir.rglob("*")
+    if path.is_file() and not path.is_symlink() and path != manifest_path
+)
+path_counts = Counter(manifest_paths)
+duplicate_paths = sorted(path for path, count in path_counts.items() if count != 1)
+manifest_path_set = set(manifest_paths)
+actual_path_set = set(actual_paths)
+missing_paths = sorted(manifest_path_set - actual_path_set)
+unlisted_paths = sorted(actual_path_set - manifest_path_set)
+root_lib_entries = path_counts["lib.sh"]
+
+print(f"BUNDLE_CHECKSUM_ACTUAL_FILES={len(actual_paths)}")
+print(f"BUNDLE_CHECKSUM_MANIFEST_ENTRIES={len(manifest_paths)}")
+print(f"BUNDLE_CHECKSUM_MISSING={len(missing_paths)}")
+print(f"BUNDLE_CHECKSUM_UNLISTED={len(unlisted_paths)}")
+print(f"BUNDLE_CHECKSUM_DUPLICATE_PATHS={len(duplicate_paths)}")
+print(f"BUNDLE_CHECKSUM_ROOT_LIB_ENTRIES={root_lib_entries}")
+
+if duplicate_paths:
+    raise SystemExit(f"Duplicate CHECKSUMS.sha256 paths: {duplicate_paths}")
+if missing_paths:
+    raise SystemExit(f"CHECKSUMS.sha256 references missing files: {missing_paths}")
+if unlisted_paths:
+    raise SystemExit(f"Release files missing from CHECKSUMS.sha256: {unlisted_paths}")
+if root_lib_entries != 1:
+    raise SystemExit(f"Expected exactly one root lib.sh entry, found {root_lib_entries}")
+if manifest_path_set != actual_path_set or len(manifest_paths) != len(actual_paths):
+    raise SystemExit("CHECKSUMS.sha256 paths do not exactly match release files")
+PY_CHECKSUM_COVERAGE
+
+  printf 'release bundle checksum coverage tests passed\n'
+)
+
 mode="${1:-auto}"
 case "$mode" in
   --non-root-rejection)
@@ -248,6 +328,11 @@ case "$mode" in
     test_install_image_preflight
     exit 0
     ;;
+  --release-bundle)
+    [[ $# -eq 1 ]] || fail_test "Unexpected arguments for release bundle test"
+    test_release_bundle_checksums
+    exit 0
+    ;;
   --root-lifecycle)
     [[ $# -eq 1 ]] || fail_test "Unexpected arguments for root lifecycle test"
     [[ "$(id -u)" -eq 0 ]] || fail_test "Root lifecycle test requires actual EUID 0"
@@ -255,8 +340,9 @@ case "$mode" in
     printf 'root lifecycle user: %s\n' "$(whoami)"
     ;;
   auto)
-    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--root-lifecycle]"
+    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--release-bundle|--root-lifecycle]"
     test_install_image_preflight
+    test_release_bundle_checksums
     if [[ "$(id -u)" -ne 0 ]]; then
       test_non_root_rejection
       [[ -x /usr/bin/sudo ]] ||
@@ -268,7 +354,7 @@ case "$mode" in
     printf 'root lifecycle user: %s\n' "$(whoami)"
     ;;
   *)
-    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--root-lifecycle]"
+    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--release-bundle|--root-lifecycle]"
     ;;
 esac
 

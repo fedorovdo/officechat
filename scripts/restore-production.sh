@@ -252,12 +252,12 @@ PY
     "$POSTGRES_VERIFY_IMAGE" >/dev/null
   TEMP_CONTAINER_CREATED=1
   for _ in {1..60}; do
-    if docker exec "$TEMP_CONTAINER" pg_isready -q -U officechat_restore -d officechat_restore; then
+    if docker exec "$TEMP_CONTAINER" pg_isready -q -h 127.0.0.1 -U officechat_restore -d officechat_restore; then
       break
     fi
     sleep 1
   done
-  docker exec "$TEMP_CONTAINER" pg_isready -q -U officechat_restore -d officechat_restore ||
+  docker exec "$TEMP_CONTAINER" pg_isready -q -h 127.0.0.1 -U officechat_restore -d officechat_restore ||
     fail "Temporary PostgreSQL did not become ready"
   target_postgres_version="$(docker exec "$TEMP_CONTAINER" postgres --version | tr -d '\r')"
   assert_postgres_compatible "$backup_postgres_version" "$target_postgres_version"

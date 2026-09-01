@@ -86,7 +86,25 @@ if [[ "${1:-}" == "compose" && "$*" == *" images -q "* ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
-  printf 'backend\tofficechat/backend:test\tsha256:fake-image\t\tamd64\n'
+  format="${4:-}"
+  if [[ "$format" == *'{{join .RepoTags ","}}'* ||
+        "$format" == *'{{join .RepoDigests ","}}'* ]]; then
+    printf '%s\n' 'Docker 28-compatible test rejected join on image metadata' >&2
+    exit 64
+  fi
+  repo_tags_range="{{range \$i, \$v := .RepoTags}}"
+  repo_digests_range="{{range \$i, \$v := .RepoDigests}}"
+  [[ "$format" == *"$repo_tags_range"* ]] || {
+    printf '%s\n' 'image metadata format does not iterate RepoTags' >&2
+    exit 65
+  }
+  [[ "$format" == *"$repo_digests_range"* ]] || {
+    printf '%s\n' 'image metadata format does not iterate RepoDigests' >&2
+    exit 66
+  }
+  service="${format%%$'\t'*}"
+  printf '%s\tofficechat/%s:test,officechat/%s:latest\tsha256:fake-image\tofficechat/%s@sha256:fake-digest\tamd64\n' \
+    "$service" "$service" "$service" "$service"
   exit 0
 fi
 if [[ "${1:-}" == "save" && "${2:-}" == "-o" ]]; then

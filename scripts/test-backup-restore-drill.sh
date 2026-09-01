@@ -60,12 +60,12 @@ docker run -d --name "$source_container" \
   -e POSTGRES_DB=officechat \
   postgres:16-alpine >/dev/null
 for _ in {1..60}; do
-  if docker exec "$source_container" pg_isready -q -U officechat -d officechat; then
+  if docker exec "$source_container" pg_isready -q -h 127.0.0.1 -U officechat -d officechat; then
     break
   fi
   sleep 1
 done
-docker exec "$source_container" pg_isready -q -U officechat -d officechat ||
+docker exec "$source_container" pg_isready -q -h 127.0.0.1 -U officechat -d officechat ||
   fail "Isolated source PostgreSQL did not become ready"
 docker exec "$source_container" psql -v ON_ERROR_STOP=1 -U officechat -d officechat \
   -c "create table alembic_version (version_num varchar(64) primary key);" \

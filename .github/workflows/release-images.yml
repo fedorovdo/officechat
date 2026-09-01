@@ -146,7 +146,20 @@ jobs:
         run: |
           bash -n scripts/release/*.sh
           bash -n scripts/release/officechatctl
-          bash scripts/release/test-release-scripts.sh
+          bash -n scripts/backup/*.sh
+          bash -n scripts/backup-production.sh
+          bash -n scripts/verify-backup.sh
+          bash -n scripts/restore-production.sh
+          bash -n scripts/test-backup-scripts.sh
+          bash -n scripts/test-backup-restore-drill.sh
+
+      - name: Release script tests
+        run: bash scripts/release/test-release-scripts.sh
+
+      - name: Backup script tests
+        run: |
+          bash scripts/test-backup-scripts.sh
+          bash scripts/test-backup-restore-drill.sh
 
       - name: Caddy access/runtime log redaction
         run: bash scripts/release/test-caddy-access-log.sh
@@ -157,7 +170,14 @@ jobs:
             -v "$PWD:/mnt:ro" \
             koalaman/shellcheck:stable \
             -x \
+            -P /mnt/scripts \
             -P /mnt/scripts/release \
+            /mnt/scripts/backup-production.sh \
+            /mnt/scripts/verify-backup.sh \
+            /mnt/scripts/restore-production.sh \
+            /mnt/scripts/backup/lib.sh \
+            /mnt/scripts/test-backup-scripts.sh \
+            /mnt/scripts/test-backup-restore-drill.sh \
             /mnt/scripts/release/collect-diagnostics.sh \
             /mnt/scripts/release/create-release-bundle.sh \
             /mnt/scripts/release/export-images.sh \

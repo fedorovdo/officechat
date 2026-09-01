@@ -445,8 +445,10 @@ for service in "${image_services[@]}"; do
     warnings+=("image metadata unavailable for service ${service}")
     continue
   }
+  # Docker Engine 28 may expose image reference lists as []interface{} to Go templates.
+  # shellcheck disable=SC2016
   docker image inspect --format \
-    "${service}"$'\t''{{join .RepoTags ","}}'$'\t''{{.Id}}'$'\t''{{join .RepoDigests ","}}'$'\t''{{.Architecture}}' \
+    "${service}"$'\t''{{range $i, $v := .RepoTags}}{{if $i}},{{end}}{{$v}}{{end}}'$'\t''{{.Id}}'$'\t''{{range $i, $v := .RepoDigests}}{{if $i}},{{end}}{{$v}}{{end}}'$'\t''{{.Architecture}}' \
     "$image_id" >>"${PARTIAL_DIR}/metadata/image-digests.txt"
   if [[ "$INCLUDE_IMAGES" == "1" ]]; then
     docker save -o "${PARTIAL_DIR}/images/${service}.tar" "$image_id"

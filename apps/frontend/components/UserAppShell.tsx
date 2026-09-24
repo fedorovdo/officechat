@@ -2437,22 +2437,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                     title={dictionary.appShell.resetDiscussionWidth}
                   />
                   <DiscussionPanel
-                  currentUser={currentUser}
-                  dictionary={dictionary}
-                  discussionId={activeDiscussionId}
-                  locale={locale}
-                  onClose={() => {
-                    setActiveDiscussionId(null);
-                    clearMessageContext();
-                  }}
-                  presenceByUserId={presenceByUserId}
-                  onMarkRead={(messageId) => unreadStore.markRead("discussion", activeDiscussionId, messageId)}
-                  unread={unreadStore.getChat("discussion", activeDiscussionId)}
-                  unreadReady={unreadStore.isReady}
-                  messageContext={messageContext?.chat_type === "discussion" && messageContext.chat_id === activeDiscussionId ? messageContext : null}
-                  onContextClosed={clearMessageContext}
-                  onContextExpand={expandMessageContext}
-                  onJumpToMessage={(messageId) => openMessageContext("discussion", activeDiscussionId, messageId, selectedGroup.id)}
+                    currentUser={currentUser}
+                    dictionary={dictionary}
+                    discussionId={activeDiscussionId}
+                    locale={locale}
+                    onClose={() => {
+                      setActiveDiscussionId(null);
+                      clearMessageContext();
+                    }}
+                    presenceByUserId={presenceByUserId}
+                    onMarkRead={(messageId) => unreadStore.markRead("discussion", activeDiscussionId, messageId)}
+                    unread={unreadStore.getChat("discussion", activeDiscussionId)}
+                    unreadReady={unreadStore.isReady}
+                    messageContext={messageContext?.chat_type === "discussion" && messageContext.chat_id === activeDiscussionId ? messageContext : null}
+                    onContextClosed={clearMessageContext}
+                    onContextExpand={expandMessageContext}
+                    onJumpToMessage={(messageId) => openMessageContext("discussion", activeDiscussionId, messageId, selectedGroup.id)}
                   />
                 </>
               ) : null}

@@ -339,4 +339,62 @@ describe("calendar panel", () => {
     expect(screen.getAllByText("Сегодня").length).toBeGreaterThan(0);
     expect(screen.getByText("Завтра")).toBeInTheDocument();
   });
+  it("keeps dates synchronized while toggling all-day mode", async () => {
+    renderCalendar();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create event" })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Create event" }));
+    fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2026-07-26T09:00" } });
+    fireEvent.change(screen.getByLabelText("Ends"), { target: { value: "2026-07-27T10:00" } });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "All day" }));
+    expect(screen.getByLabelText("Start date")).toHaveValue("2026-07-26");
+    expect(screen.getByLabelText("End date")).toHaveValue("2026-07-27");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "All day" }));
+    expect(screen.getByLabelText("Starts")).toHaveValue("2026-07-26T09:00");
+    expect(screen.getByLabelText("Ends")).toHaveValue("2026-07-27T10:00");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "All day" }));
+    fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-07-28" } });
+    fireEvent.change(screen.getByLabelText("End date"), { target: { value: "2026-07-29" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "All day" }));
+
+    expect(screen.getByLabelText("Starts")).toHaveValue("2026-07-28T09:00");
+    expect(screen.getByLabelText("Ends")).toHaveValue("2026-07-29T10:00");
+  });
+
+  it("clamps an invalid range when enabling all-day mode", async () => {
+    renderCalendar();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create event" })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Create event" }));
+    fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2026-07-26T09:00" } });
+    fireEvent.change(screen.getByLabelText("Ends"), { target: { value: "2026-07-24T10:00" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "All day" }));
+
+    expect(screen.getByLabelText("Start date")).toHaveValue("2026-07-26");
+    expect(screen.getByLabelText("End date")).toHaveValue("2026-07-26");
+  });
+
+  it("shows localized time validation inside the event editor", async () => {
+    apiMocks.createCalendarEvent.mockClear();
+    renderCalendar("superadmin", ru);
+    await waitFor(() => expect(screen.getByRole("button", { name: ru.calendar.create })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: ru.calendar.create }));
+    fireEvent.change(screen.getByLabelText(ru.calendar.fields.startsAt), {
+      target: { value: "2026-07-26T09:00" }
+    });
+    fireEvent.change(screen.getByLabelText(ru.calendar.fields.endsAt), {
+      target: { value: "2026-07-24T10:00" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: ru.calendar.save }));
+
+    const editor = screen.getByLabelText(ru.calendar.editorTitle);
+    expect(within(editor).getByRole("alert")).toHaveTextContent(
+      ru.calendar.timedEndAfterStart
+    );
+    expect(apiMocks.createCalendarEvent).not.toHaveBeenCalled();
+  });
 });

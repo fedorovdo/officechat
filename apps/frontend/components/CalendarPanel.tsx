@@ -344,6 +344,60 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     setForm((current) => ({ ...current, ...patch }));
     setIsPreviewStale(true);
     setPreview(null);
+    setError(null);
+  }
+
+  function handleAllDayChange(isAllDay: boolean) {
+    setForm((current) => {
+      if (isAllDay) {
+        const startDate = current.starts_at?.slice(0, 10)
+          || current.all_day_start_date
+          || todayValue;
+        const requestedEndDate = current.ends_at?.slice(0, 10)
+          || current.all_day_end_date
+          || startDate;
+        const endDate = requestedEndDate < startDate
+          ? startDate
+          : requestedEndDate;
+
+        return {
+          ...current,
+          is_all_day: true,
+          all_day_start_date: startDate,
+          all_day_end_date: endDate
+        };
+      }
+
+      const startDate = current.all_day_start_date
+        || current.starts_at?.slice(0, 10)
+        || todayValue;
+      const requestedEndDate = current.all_day_end_date
+        || current.ends_at?.slice(0, 10)
+        || startDate;
+      const endDate = requestedEndDate < startDate
+        ? startDate
+        : requestedEndDate;
+      const startTime = current.starts_at?.slice(11, 16) || "09:00";
+      const endTime = current.ends_at?.slice(11, 16) || "10:00";
+      const startsAt = `${startDate}T${startTime}`;
+      let endsAt = `${endDate}T${endTime}`;
+
+      if (endsAt <= startsAt) {
+        const later = new Date(`${startsAt}:00`);
+        later.setHours(later.getHours() + 1);
+        endsAt = toLocalDateTimeValue(later.toISOString()) || `${startDate}T10:00`;
+      }
+
+      return {
+        ...current,
+        is_all_day: false,
+        starts_at: startsAt,
+        ends_at: endsAt
+      };
+    });
+    setIsPreviewStale(true);
+    setPreview(null);
+    setError(null);
   }
 
   function openCreateForm(date: Date = anchorDate, hour = 9, opener?: HTMLElement | null) {
@@ -509,6 +563,38 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
     );
   }
 
+  function validateEventTime(): string | null {
+    if (form.is_all_day) {
+      if (!form.all_day_start_date || !form.all_day_end_date) {
+        return dictionary.calendar.dateRangeRequired;
+      }
+      if (form.all_day_end_date < form.all_day_start_date) {
+        return dictionary.calendar.allDayEndBeforeStart;
+      }
+      return null;
+    }
+
+    if (!form.starts_at || !form.ends_at) {
+      return dictionary.calendar.dateRangeRequired;
+    }
+    if (form.ends_at <= form.starts_at) {
+      return dictionary.calendar.timedEndAfterStart;
+    }
+    return null;
+  }
+
+  function localizedSaveError(err: unknown): string {
+    const message = err instanceof Error ? err.message : "";
+
+    if (message.includes("End time must be after start time")) {
+      return dictionary.calendar.timedEndAfterStart;
+    }
+    if (message.includes("End date cannot be before start date")) {
+      return dictionary.calendar.allDayEndBeforeStart;
+    }
+    return message || dictionary.calendar.saveError;
+  }
+
   function buildPayload(): CalendarEventPayload {
     return {
       ...form,
@@ -545,6 +631,13 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
   async function handleSave() {
     const token = getStoredAccessToken();
     if (!token) return;
+
+    const validationError = validateEventTime();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
@@ -557,7 +650,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
       setIsEditorOpen(false);
       await Promise.all([loadEvents(), loadUpcomingEvents()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : dictionary.calendar.saveError);
+      setError(localizedSaveError(err));
     } finally {
       setIsSaving(false);
     }
@@ -872,7 +965,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
         </div>
       </div>
       {message ? <p className="form-success">{message}</p> : null}
-      {error ? <p className="form-error">{error}</p> : null}
+      {error && !isEditorOpen ? <p className="form-error" role="alert">{error}</p> : null}
       {isLoading ? <p className="muted">{dictionary.calendar.loading}</p> : null}
       {view === "month" ? renderMonth() : view === "agenda" ? renderAgenda() : renderLinearView()}
 
@@ -928,7 +1021,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
             <div className="calendar-form-grid">
               <label className="field"><span className="field-label">{dictionary.calendar.fields.title}</span><input className="field-input" onChange={(event) => updateForm({ title: event.target.value })} value={form.title} /></label>
               <label className="field"><span className="field-label">{dictionary.calendar.fields.type}</span><select className="field-input" onChange={(event) => updateForm({ event_type: event.target.value as CalendarEventType })} value={form.event_type}>{eventTypes.map((item) => <option key={item} value={item}>{dictionary.calendar.eventTypes[item]}</option>)}</select></label>
-              <label className="checkbox-field"><input checked={form.is_all_day} onChange={(event) => updateForm({ is_all_day: event.target.checked })} type="checkbox" /> <span>{dictionary.calendar.allDay}</span></label>
+              <label className="checkbox-field"><input checked={form.is_all_day} onChange={(event) => handleAllDayChange(event.target.checked)} type="checkbox" /> <span>{dictionary.calendar.allDay}</span></label>
               {form.is_all_day ? (
                 <>
                   <label className="field"><span className="field-label">{dictionary.calendar.fields.startDate}</span><input className="field-input" onChange={(event) => updateForm({ all_day_start_date: event.target.value })} type="date" value={form.all_day_start_date ?? ""} /></label>
@@ -972,6 +1065,7 @@ export function CalendarPanel({ currentUser, dictionary, groups, locale, users, 
                 </div>
               </fieldset>
             </div>
+            {error ? <p className="form-error" role="alert">{error}</p> : null}
             <div className="actions">
               <button className="secondary-link" onClick={() => void handlePreviewAudience()} type="button">{dictionary.calendar.previewAudience}</button>
               <button className="primary-button" disabled={isSaveDisabled} onClick={() => void handleSave()} type="button">{isSaving ? dictionary.calendar.saving : dictionary.calendar.save}</button>

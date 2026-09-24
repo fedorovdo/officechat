@@ -78,6 +78,15 @@ import {
 } from "../lib/notificationState";
 import { DirectChatPanel } from "./DirectChatPanel";
 import { DiscussionPanel } from "./DiscussionPanel";
+import {
+  clampDiscussionPanelWidth,
+  defaultDiscussionWidth,
+  discussionWidthKey,
+  getDiscussionResizeDirection,
+  getDiscussionResizeKeyboardDelta,
+  maximumDiscussionWidth,
+  minimumDiscussionWidth
+} from "../lib/discussionPanelResize";
 import { GroupChatPanel } from "./GroupChatPanel";
 import { LegacyUnreadRepairControl } from "./LegacyUnreadRepairControl";
 import { MessageSearchPanel } from "./MessageSearchPanel";
@@ -338,6 +347,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDirectUsername, setPendingDirectUsername] = useState<string | null>(null);
   const [activeDiscussionId, setActiveDiscussionId] = useState<string | null>(null);
+  const discussionLayoutRef = useRef<HTMLDivElement | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
@@ -346,6 +356,7 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
   const [isAvatarUploading, setIsAvatarUploading] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(defaultSidebarWidth);
+  const [discussionWidth, setDiscussionWidth] = useState(defaultDiscussionWidth);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("all");
   const [sidebarPreferencesLoaded, setSidebarPreferencesLoaded] = useState(false);
@@ -499,7 +510,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     [isSidebarCollapsed, selected.type, settings]
   );
   const appShellStyle = {
-    "--sidebar-width": `${isSidebarCollapsed ? 72 : sidebarWidth}px`
+    "--sidebar-width": `${isSidebarCollapsed ? 72 : sidebarWidth}px`,
+    "--discussion-width": `${discussionWidth}px`
   } as CSSProperties;
 
   const shortTimeFormatter = useMemo(
@@ -971,6 +983,16 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
     if (Number.isFinite(storedWidth) && storedWidth >= minimumSidebarWidth && storedWidth <= maximumSidebarWidth) {
       setSidebarWidth(storedWidth);
     }
+
+    const storedDiscussionWidth = Number(localStorage.getItem(discussionWidthKey));
+    if (
+      Number.isFinite(storedDiscussionWidth) &&
+      storedDiscussionWidth >= minimumDiscussionWidth &&
+      storedDiscussionWidth <= maximumDiscussionWidth
+    ) {
+      setDiscussionWidth(storedDiscussionWidth);
+    }
+
     setIsSidebarCollapsed(localStorage.getItem(sidebarCollapsedKey) === "true");
     const storedTab = localStorage.getItem(sidebarTabKey);
     if (storedTab === "all" || storedTab === "groups" || storedTab === "direct") {
@@ -984,9 +1006,40 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
       return;
     }
     localStorage.setItem(sidebarWidthKey, String(sidebarWidth));
+    localStorage.setItem(discussionWidthKey, String(discussionWidth));
     localStorage.setItem(sidebarCollapsedKey, String(isSidebarCollapsed));
     localStorage.setItem(sidebarTabKey, sidebarTab);
-  }, [isSidebarCollapsed, sidebarPreferencesLoaded, sidebarTab, sidebarWidth]);
+  }, [discussionWidth, isSidebarCollapsed, sidebarPreferencesLoaded, sidebarTab, sidebarWidth]);
+
+  useEffect(() => {
+    if (!activeDiscussionId || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const layout = discussionLayoutRef.current;
+    if (!layout) {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      if (
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 1180px)").matches
+      ) {
+        return;
+      }
+
+      const containerWidth =
+        entries[0]?.contentRect.width ?? layout.getBoundingClientRect().width;
+
+      setDiscussionWidth((currentWidth) =>
+        clampDiscussionPanelWidth(currentWidth, containerWidth)
+      );
+    });
+
+    observer.observe(layout);
+    return () => observer.disconnect();
+  }, [activeDiscussionId]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -1602,6 +1655,67 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
         Math.min(maximumSidebarWidth, Math.max(minimumSidebarWidth, currentWidth + delta))
       );
     }
+  }
+
+  function getDiscussionLayoutWidth() {
+    return discussionLayoutRef.current?.getBoundingClientRect().width ?? 0;
+  }
+
+  function resetDiscussionWidth() {
+    setDiscussionWidth(
+      clampDiscussionPanelWidth(defaultDiscussionWidth, getDiscussionLayoutWidth())
+    );
+  }
+
+  function handleDiscussionResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = discussionWidth;
+    const direction = getDiscussionResizeDirection(settings.sidebarSide);
+    document.body.classList.add("discussion-resizing");
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      const requestedWidth =
+        startWidth + (pointerEvent.clientX - startX) * direction;
+
+      setDiscussionWidth(
+        clampDiscussionPanelWidth(requestedWidth, getDiscussionLayoutWidth())
+      );
+    }
+
+    function handlePointerEnd() {
+      document.body.classList.remove("discussion-resizing");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+  }
+
+  function handleDiscussionResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const delta = getDiscussionResizeKeyboardDelta(
+      event.key,
+      settings.sidebarSide
+    );
+
+    if (delta === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    setDiscussionWidth((currentWidth) =>
+      clampDiscussionPanelWidth(
+        currentWidth + delta,
+        getDiscussionLayoutWidth()
+      )
+    );
   }
 
   function handleLanguageChange(nextLocale: Locale) {
@@ -2268,7 +2382,10 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
           ) : null}
 
           {selectedGroup && currentUser ? (
-            <div className={activeDiscussionId ? "user-app-chat-layout user-app-chat-layout-discussion" : "user-app-chat-layout"}>
+            <div
+              className={activeDiscussionId ? "user-app-chat-layout user-app-chat-layout-discussion" : "user-app-chat-layout"}
+              ref={discussionLayoutRef}
+            >
               <div className="user-app-chat-primary">
                 <div className="user-app-chat-heading">
                   <button className="mobile-chat-back" onClick={closeChatOnSmallScreen} type="button">
@@ -2304,7 +2421,22 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                 />
               </div>
               {activeDiscussionId ? (
-                <DiscussionPanel
+                <>
+                  <div
+                    aria-label={dictionary.appShell.resizeDiscussion}
+                    aria-orientation="vertical"
+                    aria-valuemax={maximumDiscussionWidth}
+                    aria-valuemin={minimumDiscussionWidth}
+                    aria-valuenow={discussionWidth}
+                    className="discussion-resize-handle"
+                    onDoubleClick={resetDiscussionWidth}
+                    onKeyDown={handleDiscussionResizeKeyDown}
+                    onPointerDown={handleDiscussionResizeStart}
+                    role="separator"
+                    tabIndex={0}
+                    title={dictionary.appShell.resetDiscussionWidth}
+                  />
+                  <DiscussionPanel
                   currentUser={currentUser}
                   dictionary={dictionary}
                   discussionId={activeDiscussionId}
@@ -2321,7 +2453,8 @@ export function UserAppShell({ dictionary, locale }: UserAppShellProps) {
                   onContextClosed={clearMessageContext}
                   onContextExpand={expandMessageContext}
                   onJumpToMessage={(messageId) => openMessageContext("discussion", activeDiscussionId, messageId, selectedGroup.id)}
-                />
+                  />
+                </>
               ) : null}
             </div>
           ) : null}

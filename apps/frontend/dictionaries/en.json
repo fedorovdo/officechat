@@ -501,6 +501,8 @@
     "expandSidebar": "Expand sidebar",
     "resizeSidebar": "Resize sidebar",
     "resetSidebarWidth": "Reset sidebar width",
+    "resizeDiscussion": "Resize discussion panel",
+    "resetDiscussionWidth": "Reset discussion panel width",
     "backToChats": "Chats",
     "membersCount": "{count} members",
     "onlineStatusPlaceholder": "status unavailable",

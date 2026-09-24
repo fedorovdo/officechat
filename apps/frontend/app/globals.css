@@ -4012,9 +4012,33 @@ a {
 }
 
 .sidebar-resizing,
-.sidebar-resizing * {
+.sidebar-resizing *,
+.discussion-resizing,
+.discussion-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
+}
+
+.discussion-resize-handle {
+  position: relative;
+  z-index: 6;
+  width: 6px;
+  min-width: 6px;
+  cursor: col-resize;
+  background: var(--divider);
+  touch-action: none;
+}
+
+.discussion-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: transparent;
+}
+
+.discussion-resize-handle:hover::after,
+.discussion-resize-handle:focus-visible::after {
+  background: var(--app-accent);
 }
 
 .user-app-sidebar-collapsed .messenger-brand-copy,
@@ -4156,17 +4180,21 @@ a {
 }
 
 .user-app-chat-layout-discussion {
-  grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 520px);
+  grid-template-columns: minmax(0, 1fr) 6px var(--discussion-width, 480px);
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
   align-items: stretch;
 }
 
 .user-app-shell-sidebar-right .user-app-chat-layout-discussion {
-  grid-template-columns: clamp(360px, 28vw, 520px) minmax(0, 1fr);
+  grid-template-columns: var(--discussion-width, 480px) 6px minmax(0, 1fr);
 }
 
 .user-app-shell-sidebar-right .user-app-chat-layout-discussion .user-app-chat-primary {
+  order: 3;
+}
+
+.user-app-shell-sidebar-right .user-app-chat-layout-discussion .discussion-resize-handle {
   order: 2;
 }
 
@@ -6041,6 +6069,10 @@ select:focus-visible,
   .user-app-chat-layout-discussion,
   .user-app-shell-sidebar-right .user-app-chat-layout-discussion {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .discussion-resize-handle {
+    display: none;
   }
 
   .user-app-chat-layout-discussion .discussion-panel,

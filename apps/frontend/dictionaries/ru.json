@@ -501,6 +501,8 @@
     "expandSidebar": "Развернуть боковую панель",
     "resizeSidebar": "Изменить ширину боковой панели",
     "resetSidebarWidth": "Сбросить ширину боковой панели",
+    "resizeDiscussion": "Изменить ширину панели обсуждения",
+    "resetDiscussionWidth": "Сбросить ширину панели обсуждения",
     "backToChats": "Чаты",
     "membersCount": "Участников: {count}",
     "onlineStatusPlaceholder": "статус недоступен",

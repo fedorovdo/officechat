@@ -111,6 +111,193 @@ require_docker_compose() {
   docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 }
 
+read_supported_os_release() {
+  local os_release_file key value
+  os_release_file="${OFFICECHAT_OS_RELEASE_FILE:-/etc/os-release}"
+  [[ -f "$os_release_file" ]] ||
+    fail "Operating system metadata is missing: ${os_release_file}"
+
+  OFFICECHAT_OS_ID=""
+  OFFICECHAT_OS_VERSION_ID=""
+  OFFICECHAT_OS_VERSION_CODENAME=""
+
+  while IFS='=' read -r key value; do
+    value="${value%$'\r'}"
+    case "$value" in
+      \"*\")
+        value="${value#\"}"
+        value="${value%\"}"
+        ;;
+      \'*\')
+        value="${value#\'}"
+        value="${value%\'}"
+        ;;
+    esac
+
+    case "$key" in
+      ID)
+        OFFICECHAT_OS_ID="$value"
+        ;;
+      VERSION_ID)
+        OFFICECHAT_OS_VERSION_ID="$value"
+        ;;
+      VERSION_CODENAME)
+        OFFICECHAT_OS_VERSION_CODENAME="$value"
+        ;;
+    esac
+  done <"$os_release_file"
+
+  [[ -n "$OFFICECHAT_OS_ID" && -n "$OFFICECHAT_OS_VERSION_ID" ]] ||
+    fail "Operating system ID or version is missing from ${os_release_file}"
+}
+
+detect_supported_docker_platform() {
+  read_supported_os_release
+
+  case "${OFFICECHAT_OS_ID}:${OFFICECHAT_OS_VERSION_ID}" in
+    rocky:10|rocky:10.*)
+      OFFICECHAT_DOCKER_PLATFORM="rocky"
+      ;;
+    debian:12|debian:12.*)
+      OFFICECHAT_DOCKER_PLATFORM="debian"
+      if [[ -z "$OFFICECHAT_OS_VERSION_CODENAME" ]]; then
+        OFFICECHAT_OS_VERSION_CODENAME="bookworm"
+      fi
+      ;;
+    *)
+      fail "Automatic Docker installation supports only Rocky Linux 10 and Debian 12; detected ${OFFICECHAT_OS_ID} ${OFFICECHAT_OS_VERSION_ID}"
+      ;;
+  esac
+
+  export OFFICECHAT_DOCKER_PLATFORM
+  export OFFICECHAT_OS_ID
+  export OFFICECHAT_OS_VERSION_ID
+  export OFFICECHAT_OS_VERSION_CODENAME
+}
+
+install_docker_engine() {
+  local architecture docker_key_fingerprint key_file platform repo_file
+
+  detect_supported_docker_platform
+  platform="$OFFICECHAT_DOCKER_PLATFORM"
+
+  log "Detected Docker installation platform: ${OFFICECHAT_OS_ID} ${OFFICECHAT_OS_VERSION_ID}"
+
+  if ! is_dry_run; then
+    require_root_or_sudo
+    require_command systemctl
+  fi
+
+  case "$platform" in
+    rocky)
+      as_root dnf -y install \
+        dnf-plugins-core \
+        ca-certificates \
+        curl \
+        tar \
+        gzip \
+        openssl \
+        python3
+
+      if is_dry_run; then
+        log "DRY-RUN: configure official Docker repository https://download.docker.com/linux/centos/docker-ce.repo"
+      else
+        if ! as_root dnf config-manager --add-repo \
+          https://download.docker.com/linux/centos/docker-ce.repo; then
+          as_root dnf config-manager addrepo \
+            --from-repofile=https://download.docker.com/linux/centos/docker-ce.repo
+        fi
+      fi
+
+      as_root dnf -y install \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin
+      ;;
+
+    debian)
+      as_root apt-get update
+      as_root apt-get install -y \
+        ca-certificates \
+        curl \
+        gnupg \
+        tar \
+        gzip \
+        openssl \
+        python3
+
+      if is_dry_run; then
+        log "DRY-RUN: install official Docker APT signing key in /etc/apt/keyrings/docker.gpg"
+        log "DRY-RUN: configure official Docker repository https://download.docker.com/linux/debian ${OFFICECHAT_OS_VERSION_CODENAME} stable"
+      else
+        require_command curl
+        require_command dpkg
+        require_command gpg
+        require_command mktemp
+
+        architecture="$(dpkg --print-architecture)"
+        [[ "$architecture" == "amd64" ]] ||
+          fail "Only Debian amd64 is supported; detected ${architecture}"
+
+        key_file="$(mktemp)"
+        if ! curl -fsSL https://download.docker.com/linux/debian/gpg |
+          gpg --batch --dearmor >"$key_file"; then
+          rm -f -- "$key_file"
+          fail "Could not download or convert the Docker APT signing key"
+        fi
+
+        docker_key_fingerprint="$(
+          gpg --batch --show-keys --with-colons "$key_file" |
+            awk -F: '$1 == "fpr" {print $10; exit}'
+        )"
+
+        if [[ "$docker_key_fingerprint" != "9DC858229FC7DD38854AE2D88D81803C0EBFCD88" ]]; then
+          rm -f -- "$key_file"
+          fail "Docker APT signing key fingerprint mismatch"
+        fi
+
+        as_root install -d -o root -g root -m 0755 /etc/apt/keyrings
+        as_root install -o root -g root -m 0644 \
+          "$key_file" /etc/apt/keyrings/docker.gpg
+        rm -f -- "$key_file"
+
+        repo_file="$(mktemp)"
+        printf '%s\n' \
+          "deb [arch=${architecture} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian ${OFFICECHAT_OS_VERSION_CODENAME} stable" \
+          >"$repo_file"
+        as_root install -o root -g root -m 0644 \
+          "$repo_file" /etc/apt/sources.list.d/docker.list
+        rm -f -- "$repo_file"
+      fi
+
+      as_root apt-get update
+      as_root apt-get install -y \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin
+      ;;
+
+    *)
+      fail "Internal error: unsupported Docker platform ${platform}"
+      ;;
+  esac
+
+  as_root systemctl enable --now docker
+
+  if is_dry_run; then
+    log "DRY-RUN: Docker Engine and Compose v2 would be installed and enabled"
+  else
+    require_docker_compose
+    docker info >/dev/null 2>&1 ||
+      fail "Docker service is installed but unavailable"
+    pass "Docker Engine and Compose v2 are installed and running."
+  fi
+}
+
 validate_version() {
   local version="$1"
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]] || fail "Invalid OfficeChat version: $version"

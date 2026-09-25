@@ -84,13 +84,31 @@ case "$arch" in
   *) fail "Only linux/amd64 is supported by this release bundle; detected ${arch}" ;;
 esac
 
-if ! command -v docker >/dev/null 2>&1; then
-  if [[ "$INSTALL_DOCKER" == "1" ]]; then
-    fail "Automatic Docker installation is intentionally not implemented. Install Docker Engine and Compose v2, then rerun."
-  fi
-  fail "Docker is not installed. Install Docker Engine and Compose v2 first."
+docker_compose_ready=0
+if command -v docker >/dev/null 2>&1 &&
+  docker compose version >/dev/null 2>&1; then
+  docker_compose_ready=1
 fi
-require_docker_compose
+
+if [[ "$docker_compose_ready" != "1" ]]; then
+  if [[ "$INSTALL_DOCKER" == "1" ]]; then
+    install_docker_engine
+  else
+    fail "Docker Engine and Compose v2 are required. Rerun with --install-docker on Rocky Linux 10 or Debian 12, or install them manually."
+  fi
+elif [[ "$INSTALL_DOCKER" == "1" ]]; then
+  if is_dry_run; then
+    log "DRY-RUN: ensure the existing Docker service is enabled and running"
+  elif command -v systemctl >/dev/null 2>&1; then
+    as_root systemctl enable --now docker
+  fi
+fi
+
+if is_dry_run && [[ "$docker_compose_ready" != "1" ]]; then
+  log "DRY-RUN: assume Docker Compose v2 after the planned Docker installation"
+else
+  require_docker_compose
+fi
 require_command tar
 preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"
 

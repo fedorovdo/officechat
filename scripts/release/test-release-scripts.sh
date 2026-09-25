@@ -872,6 +872,99 @@ if grep -Fq 'systemctl enable --now officechat-backup-agent.service' "${SCRIPT_D
   exit 1
 fi
 
+platform_contract_dir="${TMP_DIR}/docker-platform-contract"
+mkdir -p "$platform_contract_dir"
+
+cat >"${platform_contract_dir}/rocky-os-release" <<'EOF_ROCKY_OS'
+ID="rocky"
+VERSION_ID="10.0"
+EOF_ROCKY_OS
+
+cat >"${platform_contract_dir}/debian-os-release" <<'EOF_DEBIAN_OS'
+ID=debian
+VERSION_ID="12"
+VERSION_CODENAME=bookworm
+EOF_DEBIAN_OS
+
+cat >"${platform_contract_dir}/unsupported-os-release" <<'EOF_UNSUPPORTED_OS'
+ID=ubuntu
+VERSION_ID="24.04"
+VERSION_CODENAME=noble
+EOF_UNSUPPORTED_OS
+
+rocky_platform="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
+    bash -c '. "$1"; detect_supported_docker_platform; printf "%s" "$OFFICECHAT_DOCKER_PLATFORM"' \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$rocky_platform" == "rocky" ]] ||
+  fail_test "Rocky Linux 10 platform detection failed"
+
+rocky_install_output="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
+    bash -c '. "$1"; install_docker_engine' \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$rocky_install_output" == *"https://download.docker.com/linux/centos/docker-ce.repo"* ]] ||
+  fail_test "Rocky Docker plan omitted the official Docker repository"
+
+[[ "$rocky_install_output" == *"docker-compose-plugin"* ]] ||
+  fail_test "Rocky Docker plan omitted the Compose v2 plugin"
+
+[[ "$rocky_install_output" == *"systemctl enable --now docker"* ]] ||
+  fail_test "Rocky Docker plan omitted Docker service enablement"
+
+debian_platform="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
+    bash -c '. "$1"; detect_supported_docker_platform; printf "%s" "$OFFICECHAT_DOCKER_PLATFORM"' \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$debian_platform" == "debian" ]] ||
+  fail_test "Debian 12 platform detection failed"
+
+debian_install_output="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
+    bash -c '. "$1"; install_docker_engine' \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$debian_install_output" == *"https://download.docker.com/linux/debian"* ]] ||
+  fail_test "Debian Docker plan omitted the official Docker repository"
+
+[[ "$debian_install_output" == *"bookworm stable"* ]] ||
+  fail_test "Debian Docker plan omitted the Bookworm repository"
+
+[[ "$debian_install_output" == *"docker-compose-plugin"* ]] ||
+  fail_test "Debian Docker plan omitted the Compose v2 plugin"
+
+unsupported_status=0
+unsupported_output="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/unsupported-os-release" \
+    bash -c '. "$1"; detect_supported_docker_platform' \
+    _ "${SCRIPT_DIR}/lib.sh" 2>&1
+)" || unsupported_status=$?
+
+[[ "$unsupported_status" -ne 0 ]] ||
+  fail_test "Unsupported operating system was accepted"
+
+[[ "$unsupported_output" == *"supports only Rocky Linux 10 and Debian 12"* ]] ||
+  fail_test "Unsupported operating system failure is unclear"
+
+printf 'Docker installation platform contracts passed\n'
+
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/rollback-linux.sh" --help >/dev/null

@@ -8,15 +8,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHOW_HELP=0
 INSTALL_DOCKER=0
 START_CADDY=0
+CREATE_ADMIN=0
 ENABLE_BACKUP_TIMER=0
 CADDY_IMAGE="caddy:2.10-alpine"
 OFFICECHAT_HOSTNAME="${OFFICECHAT_HOSTNAME:-}"
+ADMIN_USERNAME="admin"
+ADMIN_DISPLAY_NAME="OfficeChat Admin"
+INITIAL_ADMIN_PASSWORD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) SHOW_HELP=1; shift ;;
     --dry-run) set_dry_run; shift ;;
     --install-docker) INSTALL_DOCKER=1; shift ;;
     --start-caddy) START_CADDY=1; shift ;;
+    --create-admin) CREATE_ADMIN=1; shift ;;
+    --admin-username)
+      [[ $# -ge 2 ]] || fail "--admin-username requires a value"
+      ADMIN_USERNAME="$2"
+      shift 2
+      ;;
+    --admin-display-name)
+      [[ $# -ge 2 ]] || fail "--admin-display-name requires a value"
+      ADMIN_DISPLAY_NAME="$2"
+      shift 2
+      ;;
     --enable-backup-timer) ENABLE_BACKUP_TIMER=1; shift ;;
     --hostname)
       [[ $# -ge 2 ]] || fail "--hostname requires a value"
@@ -30,11 +45,16 @@ done
 if [[ "$SHOW_HELP" == "1" ]]; then
   cat <<'EOF_HELP'
 Usage: install-linux.sh [--dry-run] [--install-docker] [--hostname HOSTNAME]
-                        [--start-caddy] [--enable-backup-timer]
+                        [--start-caddy] [--create-admin]
+                        [--admin-username USERNAME]
+                        [--admin-display-name DISPLAY_NAME]
+                        [--enable-backup-timer]
 
 Installs OfficeChat into /opt/officechat and data into /var/lib/officechat.
 Production requires HTTPS. --hostname configures the public HTTPS origin for a new install.
 --start-caddy starts the bundled internal-HTTPS reverse proxy and exports its public CA certificate.
+--create-admin securely prompts twice for the initial superadmin password.
+The password is passed to the backend only through standard input.
 The backup timer is installed but enabled only with --enable-backup-timer.
 EOF_HELP
   exit 0
@@ -151,6 +171,74 @@ start_caddy_stack() {
   pass "Caddy internal HTTPS is ready for ${OFFICECHAT_HOSTNAME}."
   pass "Public CA certificate exported to ${ca_target}."
 }
+
+prompt_initial_admin_password() {
+  local first_password=""
+  local second_password=""
+
+  [[ "$CREATE_ADMIN" == "1" ]] || return 0
+
+  if is_dry_run; then
+    log "DRY-RUN: securely prompt twice for the initial superadmin password"
+    return 0
+  fi
+
+  [[ -r /dev/tty && -w /dev/tty ]] ||
+    fail "Creating the initial administrator requires an interactive terminal. Rerun from a terminal or use --no-create-admin with the standalone bootstrap."
+
+  printf 'Initial administrator password: ' >/dev/tty
+  if ! IFS= read -r -s first_password </dev/tty; then
+    printf '\n' >/dev/tty
+    fail "Could not read the initial administrator password"
+  fi
+  printf '\n' >/dev/tty
+
+  printf 'Repeat initial administrator password: ' >/dev/tty
+  if ! IFS= read -r -s second_password </dev/tty; then
+    printf '\n' >/dev/tty
+    unset first_password
+    fail "Could not read the password confirmation"
+  fi
+  printf '\n' >/dev/tty
+
+  if (( ${#first_password} < 8 )); then
+    unset first_password second_password
+    fail "Initial administrator password must contain at least 8 characters"
+  fi
+
+  if [[ "$first_password" != "$second_password" ]]; then
+    unset first_password second_password
+    fail "Initial administrator passwords do not match"
+  fi
+
+  INITIAL_ADMIN_PASSWORD="$first_password"
+  unset first_password second_password
+}
+
+create_initial_superadmin() {
+  [[ "$CREATE_ADMIN" == "1" ]] || return 0
+
+  if is_dry_run; then
+    log "DRY-RUN: create initial superadmin '${ADMIN_USERNAME}' using password input from standard input"
+    return 0
+  fi
+
+  [[ -n "$INITIAL_ADMIN_PASSWORD" ]] ||
+    fail "Initial administrator password was not prepared"
+
+  if ! printf '%s\n' "$INITIAL_ADMIN_PASSWORD" |
+    compose run --rm -T backend python -m app.cli create-admin \
+      --username "$ADMIN_USERNAME" \
+      --display-name "$ADMIN_DISPLAY_NAME" \
+      --password-stdin; then
+    unset INITIAL_ADMIN_PASSWORD
+    fail "Could not create the initial administrator"
+  fi
+
+  unset INITIAL_ADMIN_PASSWORD
+  pass "Initial superadmin '${ADMIN_USERNAME}' is ready."
+}
+
 release_metadata_source="${SCRIPT_DIR}/RELEASE.json"
 if [[ -f "$release_metadata_source" ]]; then
   read_release_metadata "$release_metadata_source"
@@ -165,6 +253,15 @@ if [[ -n "$OFFICECHAT_HOSTNAME" && ! "$OFFICECHAT_HOSTNAME" =~ ^[A-Za-z0-9]([A-Z
 fi
 if [[ "$START_CADDY" == "1" && -z "$OFFICECHAT_HOSTNAME" ]]; then
   fail "--start-caddy requires --hostname"
+fi
+if [[ "$CREATE_ADMIN" == "1" ]]; then
+  [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] ||
+    fail "Invalid initial administrator username"
+  [[ "$ADMIN_DISPLAY_NAME" =~ [^[:space:]] ]] ||
+    fail "Initial administrator display name must not be empty"
+  [[ "$ADMIN_DISPLAY_NAME" != *$'\n'* &&
+    "$ADMIN_DISPLAY_NAME" != *$'\r'* ]] ||
+    fail "Initial administrator display name must be one line"
 fi
 require_safe_path "$OFFICECHAT_INSTALL_DIR"
 require_safe_path "$OFFICECHAT_DATA_DIR"
@@ -232,6 +329,7 @@ if [[ "$START_CADDY" == "1" ]]; then
 fi
 
 preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"
+prompt_initial_admin_password
 
 available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
 if [[ "${available_kb:-0}" -lt 2097152 ]]; then
@@ -391,6 +489,7 @@ run_cmd compose run --rm backend alembic upgrade head
 run_cmd compose run --rm backend alembic current
 run_cmd compose up -d postgres valkey backend calendar-worker frontend
 wait_for_ready || fail "Backend readiness check failed"
+create_initial_superadmin
 record_version "$OFFICECHAT_RELEASE_VERSION"
 
 if [[ "$START_CADDY" == "1" ]]; then
@@ -407,12 +506,6 @@ else
   warn "systemd is unavailable; backup units were not enabled."
 fi
 
-if [[ -n "${OFFICECHAT_ADMIN_USERNAME:-}" && -n "${OFFICECHAT_ADMIN_DISPLAY_NAME:-}" && -n "${OFFICECHAT_ADMIN_PASSWORD_FILE:-}" ]]; then
-  run_cmd compose run --rm backend python -m app.cli create-admin \
-    --username "$OFFICECHAT_ADMIN_USERNAME" \
-    --display-name "$OFFICECHAT_ADMIN_DISPLAY_NAME" \
-    --password-file "$OFFICECHAT_ADMIN_PASSWORD_FILE"
-fi
 
 pass "OfficeChat ${OFFICECHAT_RELEASE_VERSION} installed."
 warn "Do not expose ports 3100 or 8100 to the LAN."

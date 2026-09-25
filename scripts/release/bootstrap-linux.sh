@@ -6,6 +6,9 @@ VERSION=""
 HOSTNAME_VALUE=""
 INSTALL_DOCKER=1
 START_CADDY="auto"
+CREATE_ADMIN=1
+ADMIN_USERNAME="admin"
+ADMIN_DISPLAY_NAME="OfficeChat Admin"
 ENABLE_BACKUP_TIMER=0
 DRY_RUN=0
 RELEASE_BASE_URL="${OFFICECHAT_RELEASE_BASE_URL:-https://github.com/fedorovdo/officechat/releases/download}"
@@ -31,6 +34,10 @@ Options:
   --no-install-docker     Require an existing Docker Engine and Compose v2.
   --start-caddy           Start bundled internal HTTPS; requires --hostname.
   --no-start-caddy        Do not start Caddy.
+  --create-admin          Create the initial superadmin (default).
+  --no-create-admin       Skip initial administrator creation.
+  --admin-username NAME   Initial administrator username (default: admin).
+  --admin-display-name N  Initial administrator display name.
   --enable-backup-timer   Enable the scheduled backup timer.
   --dry-run               Verify the bundle and run the installer preflight.
   --help                  Show this help.
@@ -73,6 +80,24 @@ while [[ $# -gt 0 ]]; do
       START_CADDY=0
       shift
       ;;
+    --create-admin)
+      CREATE_ADMIN=1
+      shift
+      ;;
+    --no-create-admin)
+      CREATE_ADMIN=0
+      shift
+      ;;
+    --admin-username)
+      [[ $# -ge 2 ]] || fail "--admin-username requires a value"
+      ADMIN_USERNAME="$2"
+      shift 2
+      ;;
+    --admin-display-name)
+      [[ $# -ge 2 ]] || fail "--admin-display-name requires a value"
+      ADMIN_DISPLAY_NAME="$2"
+      shift 2
+      ;;
     --enable-backup-timer)
       ENABLE_BACKUP_TIMER=1
       shift
@@ -94,6 +119,16 @@ done
 [[ -n "$VERSION" ]] || fail "--version is required"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]] ||
   fail "Invalid OfficeChat version: $VERSION"
+
+if [[ "$CREATE_ADMIN" == "1" ]]; then
+  [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] ||
+    fail "Invalid initial administrator username"
+  [[ "$ADMIN_DISPLAY_NAME" =~ [^[:space:]] ]] ||
+    fail "Initial administrator display name must not be empty"
+  [[ "$ADMIN_DISPLAY_NAME" != *$'\n'* &&
+    "$ADMIN_DISPLAY_NAME" != *$'\r'* ]] ||
+    fail "Initial administrator display name must be one line"
+fi
 
 if [[ -n "$HOSTNAME_VALUE" &&
   ! "$HOSTNAME_VALUE" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
@@ -277,6 +312,13 @@ if [[ -n "$HOSTNAME_VALUE" ]]; then
 fi
 if [[ "$START_CADDY" == "1" ]]; then
   install_args+=(--start-caddy)
+fi
+if [[ "$CREATE_ADMIN" == "1" ]]; then
+  install_args+=(
+    --create-admin
+    --admin-username "$ADMIN_USERNAME"
+    --admin-display-name "$ADMIN_DISPLAY_NAME"
+  )
 fi
 if [[ "$ENABLE_BACKUP_TIMER" == "1" ]]; then
   install_args+=(--enable-backup-timer)

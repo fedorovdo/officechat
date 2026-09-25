@@ -13,6 +13,7 @@ from app.api.routes.ws import WS_FORBIDDEN, WS_UNAUTHORIZED, group_messages_webs
 from app.core.config import Settings, settings
 from app.core.logging import SensitiveDataFilter, redact_sensitive_query_parameters
 from app.main import create_app
+from app.services.bootstrap import should_bootstrap_superadmin
 from app.services.security import create_access_token
 
 
@@ -113,6 +114,12 @@ class ConfigurationTests(unittest.TestCase):
     def test_production_rejects_development_secret(self):
         with self.assertRaises(ValueError):
             Settings(environment="production", app_secret_key="change-me-in-production")
+
+    def test_production_disables_automatic_superadmin(self):
+        self.assertFalse(should_bootstrap_superadmin("production"))
+        self.assertFalse(should_bootstrap_superadmin(" Production "))
+        self.assertTrue(should_bootstrap_superadmin("development"))
+        self.assertTrue(should_bootstrap_superadmin("test"))
 
 
 class ErrorResponseTests(unittest.IsolatedAsyncioTestCase):

@@ -976,6 +976,18 @@ grep -Fq "https://\${OFFICECHAT_HOSTNAME}/ready" "${SCRIPT_DIR}/install-linux.sh
   fail_test "Release installer does not verify HTTPS readiness through Caddy"
 grep -Fq -- '--no-start-caddy' "${SCRIPT_DIR}/bootstrap-linux.sh" ||
   fail_test "Bootstrap does not provide the Caddy opt-out"
+grep -Fq -- '--create-admin' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not expose explicit administrator creation"
+grep -Fq -- '--no-create-admin' "${SCRIPT_DIR}/bootstrap-linux.sh" ||
+  fail_test "Bootstrap does not provide the administrator creation opt-out"
+grep -Fq 'compose run --rm -T backend python -m app.cli create-admin' \
+  "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not create the administrator without a TTY"
+grep -Fq -- '--password-stdin' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not pass the administrator password through standard input"
+if grep -Fq 'OFFICECHAT_ADMIN_PASSWORD_FILE' "${SCRIPT_DIR}/install-linux.sh"; then
+  fail_test "Release installer still references a host password file"
+fi
 
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/rollback-linux.sh" --help >/dev/null
@@ -1080,6 +1092,11 @@ for expected_argument in \
   '--hostname' \
   'chat.example.test' \
   '--start-caddy' \
+  '--create-admin' \
+  '--admin-username' \
+  'admin' \
+  '--admin-display-name' \
+  'OfficeChat Admin' \
   '--enable-backup-timer' \
   '--dry-run'; do
   grep -Fxq "ARG=${expected_argument}" \
@@ -1099,6 +1116,7 @@ bootstrap_no_caddy_output="$(
       --version "$bootstrap_version" \
       --hostname chat.example.test \
       --no-start-caddy \
+      --no-create-admin \
       --dry-run
 )"
 
@@ -1108,6 +1126,16 @@ bootstrap_no_caddy_output="$(
 if grep -Fxq 'ARG=--start-caddy' \
   "${bootstrap_contract_dir}/install.log"; then
   fail_test "Bootstrap passed --start-caddy despite explicit opt-out"
+fi
+if grep -Fxq 'ARG=--create-admin' \
+  "${bootstrap_contract_dir}/install.log"; then
+  fail_test "Bootstrap passed --create-admin despite explicit opt-out"
+fi
+if grep -Fxq 'ARG=--admin-username' \
+  "${bootstrap_contract_dir}/install.log" ||
+  grep -Fxq 'ARG=--admin-display-name' \
+    "${bootstrap_contract_dir}/install.log"; then
+  fail_test "Bootstrap passed administrator identity despite explicit opt-out"
 fi
 
 printf '%064d  %s\n' 0 "$bootstrap_bundle" \

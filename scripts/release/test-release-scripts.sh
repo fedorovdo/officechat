@@ -1255,9 +1255,38 @@ for auth_doc in \
     exit 1
   }
 done
+
+for simple_install_doc in \
+  "${bundle_doc_fixture}/deployment/production-installation.md" \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; do
+  grep -Fq 'officechat-install.sh' "$simple_install_doc" || {
+    echo "Simple installer asset is missing from ${simple_install_doc}" >&2
+    exit 1
+  }
+  grep -Fq -- '--no-create-admin' "$simple_install_doc" || {
+    echo "Administrator opt-out is missing from ${simple_install_doc}" >&2
+    exit 1
+  }
+  grep -Fq '/opt/officechat/officechat-root.crt' "$simple_install_doc" || {
+    echo "Exported Caddy CA path is missing from ${simple_install_doc}" >&2
+    exit 1
+  }
+done
+
+if grep -Fq 'Скрипты не устанавливают Docker молча' \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; then
+  echo "README still contains outdated Docker guidance" >&2
+  exit 1
+fi
+
+if grep -Fq 'Installer не запускает Caddy автоматически' \
+  "${bundle_doc_fixture}/deployment/production-installation.md"; then
+  echo "Production guide still contains outdated Caddy guidance" >&2
+  exit 1
+fi
+
 if env -u OFFICECHAT_RELEASE_VERSION \
-  OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
-  OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
+  OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \  OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
   bash "${SCRIPT_DIR}/create-release-bundle.sh" --dry-run >/dev/null 2>&1; then
   echo "Bundle creation accepted missing release version metadata" >&2
   exit 1

@@ -7,13 +7,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SHOW_HELP=0
 INSTALL_DOCKER=0
+START_CADDY=0
+CREATE_ADMIN=0
 ENABLE_BACKUP_TIMER=0
+CADDY_IMAGE="caddy:2.10-alpine"
 OFFICECHAT_HOSTNAME="${OFFICECHAT_HOSTNAME:-}"
+ADMIN_USERNAME="admin"
+ADMIN_DISPLAY_NAME="OfficeChat Admin"
+INITIAL_ADMIN_PASSWORD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) SHOW_HELP=1; shift ;;
     --dry-run) set_dry_run; shift ;;
     --install-docker) INSTALL_DOCKER=1; shift ;;
+    --start-caddy) START_CADDY=1; shift ;;
+    --create-admin) CREATE_ADMIN=1; shift ;;
+    --admin-username)
+      [[ $# -ge 2 ]] || fail "--admin-username requires a value"
+      ADMIN_USERNAME="$2"
+      shift 2
+      ;;
+    --admin-display-name)
+      [[ $# -ge 2 ]] || fail "--admin-display-name requires a value"
+      ADMIN_DISPLAY_NAME="$2"
+      shift 2
+      ;;
     --enable-backup-timer) ENABLE_BACKUP_TIMER=1; shift ;;
     --hostname)
       [[ $# -ge 2 ]] || fail "--hostname requires a value"
@@ -27,10 +45,16 @@ done
 if [[ "$SHOW_HELP" == "1" ]]; then
   cat <<'EOF_HELP'
 Usage: install-linux.sh [--dry-run] [--install-docker] [--hostname HOSTNAME]
+                        [--start-caddy] [--create-admin]
+                        [--admin-username USERNAME]
+                        [--admin-display-name DISPLAY_NAME]
                         [--enable-backup-timer]
 
 Installs OfficeChat into /opt/officechat and data into /var/lib/officechat.
 Production requires HTTPS. --hostname configures the public HTTPS origin for a new install.
+--start-caddy starts the bundled internal-HTTPS reverse proxy and exports its public CA certificate.
+--create-admin securely prompts twice for the initial superadmin password.
+The password is passed to the backend only through standard input.
 The backup timer is installed but enabled only with --enable-backup-timer.
 EOF_HELP
   exit 0
@@ -60,6 +84,161 @@ preflight_release_image_access() {
   pass "Release backend and frontend images are accessible."
 }
 
+caddy_compose() {
+  docker compose \
+    --env-file "$OFFICECHAT_ENV_FILE" \
+    -f "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml" \
+    "$@"
+}
+
+start_caddy_stack() {
+  local attempt
+  local ca_container_path="/data/caddy/pki/authorities/local/root.crt"
+  local ca_ready=0
+  local ca_target="${OFFICECHAT_INSTALL_DIR}/officechat-root.crt"
+  local ca_temp_dir
+  local https_ready=0
+
+  if is_dry_run; then
+    log "DRY-RUN: validate the installed Caddy Compose configuration"
+    log "DRY-RUN: start the bundled Caddy internal-HTTPS reverse proxy"
+    log "DRY-RUN: wait for the Caddy internal CA certificate"
+    log "DRY-RUN: export the public CA certificate to ${ca_target}"
+    log "DRY-RUN: verify https://${OFFICECHAT_HOSTNAME}/ready through Caddy"
+    return 0
+  fi
+
+  caddy_compose config >/dev/null
+  caddy_compose up -d
+
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    if caddy_compose exec -T caddy \
+      test -s "$ca_container_path" >/dev/null 2>&1; then
+      ca_ready=1
+      break
+    fi
+    sleep 1
+  done
+
+  [[ "$ca_ready" == "1" ]] ||
+    fail "Caddy internal CA certificate did not become ready"
+
+  ca_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/officechat-ca.XXXXXX")"
+
+  if ! caddy_compose cp \
+    "caddy:${ca_container_path}" \
+    "${ca_temp_dir}/officechat-root.crt"; then
+    rm -rf -- "$ca_temp_dir"
+    fail "Could not export the Caddy public CA certificate"
+  fi
+
+  if [[ ! -s "${ca_temp_dir}/officechat-root.crt" ||
+    -L "${ca_temp_dir}/officechat-root.crt" ]]; then
+    rm -rf -- "$ca_temp_dir"
+    fail "Exported Caddy public CA certificate is missing or unsafe"
+  fi
+
+  if ! as_root install \
+    -o root \
+    -g root \
+    -m 0644 \
+    "${ca_temp_dir}/officechat-root.crt" \
+    "$ca_target"; then
+    rm -rf -- "$ca_temp_dir"
+    fail "Could not install the Caddy public CA certificate"
+  fi
+
+  rm -rf -- "$ca_temp_dir"
+
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    if curl \
+      --fail \
+      --silent \
+      --show-error \
+      --cacert "$ca_target" \
+      --resolve "${OFFICECHAT_HOSTNAME}:443:127.0.0.1" \
+      "https://${OFFICECHAT_HOSTNAME}/ready" \
+      >/dev/null 2>&1; then
+      https_ready=1
+      break
+    fi
+    sleep 1
+  done
+
+  [[ "$https_ready" == "1" ]] ||
+    fail "OfficeChat HTTPS readiness check through Caddy failed"
+
+  pass "Caddy internal HTTPS is ready for ${OFFICECHAT_HOSTNAME}."
+  pass "Public CA certificate exported to ${ca_target}."
+}
+
+prompt_initial_admin_password() {
+  local first_password=""
+  local second_password=""
+
+  [[ "$CREATE_ADMIN" == "1" ]] || return 0
+
+  if is_dry_run; then
+    log "DRY-RUN: securely prompt twice for the initial superadmin password"
+    return 0
+  fi
+
+  [[ -r /dev/tty && -w /dev/tty ]] ||
+    fail "Creating the initial administrator requires an interactive terminal. Rerun from a terminal or use --no-create-admin with the standalone bootstrap."
+
+  printf 'Initial administrator password: ' >/dev/tty
+  if ! IFS= read -r -s first_password </dev/tty; then
+    printf '\n' >/dev/tty
+    fail "Could not read the initial administrator password"
+  fi
+  printf '\n' >/dev/tty
+
+  printf 'Repeat initial administrator password: ' >/dev/tty
+  if ! IFS= read -r -s second_password </dev/tty; then
+    printf '\n' >/dev/tty
+    unset first_password
+    fail "Could not read the password confirmation"
+  fi
+  printf '\n' >/dev/tty
+
+  if (( ${#first_password} < 8 )); then
+    unset first_password second_password
+    fail "Initial administrator password must contain at least 8 characters"
+  fi
+
+  if [[ "$first_password" != "$second_password" ]]; then
+    unset first_password second_password
+    fail "Initial administrator passwords do not match"
+  fi
+
+  INITIAL_ADMIN_PASSWORD="$first_password"
+  unset first_password second_password
+}
+
+create_initial_superadmin() {
+  [[ "$CREATE_ADMIN" == "1" ]] || return 0
+
+  if is_dry_run; then
+    log "DRY-RUN: create initial superadmin '${ADMIN_USERNAME}' using password input from standard input"
+    return 0
+  fi
+
+  [[ -n "$INITIAL_ADMIN_PASSWORD" ]] ||
+    fail "Initial administrator password was not prepared"
+
+  if ! printf '%s\n' "$INITIAL_ADMIN_PASSWORD" |
+    compose run --rm -T backend python -m app.cli create-admin \
+      --username "$ADMIN_USERNAME" \
+      --display-name "$ADMIN_DISPLAY_NAME" \
+      --password-stdin; then
+    unset INITIAL_ADMIN_PASSWORD
+    fail "Could not create the initial administrator"
+  fi
+
+  unset INITIAL_ADMIN_PASSWORD
+  pass "Initial superadmin '${ADMIN_USERNAME}' is ready."
+}
+
 release_metadata_source="${SCRIPT_DIR}/RELEASE.json"
 if [[ -f "$release_metadata_source" ]]; then
   read_release_metadata "$release_metadata_source"
@@ -71,6 +250,18 @@ fi
 validate_version "$OFFICECHAT_RELEASE_VERSION"
 if [[ -n "$OFFICECHAT_HOSTNAME" && ! "$OFFICECHAT_HOSTNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   fail "Invalid OfficeChat hostname"
+fi
+if [[ "$START_CADDY" == "1" && -z "$OFFICECHAT_HOSTNAME" ]]; then
+  fail "--start-caddy requires --hostname"
+fi
+if [[ "$CREATE_ADMIN" == "1" ]]; then
+  [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] ||
+    fail "Invalid initial administrator username"
+  [[ "$ADMIN_DISPLAY_NAME" =~ [^[:space:]] ]] ||
+    fail "Initial administrator display name must not be empty"
+  [[ "$ADMIN_DISPLAY_NAME" != *$'\n'* &&
+    "$ADMIN_DISPLAY_NAME" != *$'\r'* ]] ||
+    fail "Initial administrator display name must be one line"
 fi
 require_safe_path "$OFFICECHAT_INSTALL_DIR"
 require_safe_path "$OFFICECHAT_DATA_DIR"
@@ -84,15 +275,61 @@ case "$arch" in
   *) fail "Only linux/amd64 is supported by this release bundle; detected ${arch}" ;;
 esac
 
-if ! command -v docker >/dev/null 2>&1; then
-  if [[ "$INSTALL_DOCKER" == "1" ]]; then
-    fail "Automatic Docker installation is intentionally not implemented. Install Docker Engine and Compose v2, then rerun."
-  fi
-  fail "Docker is not installed. Install Docker Engine and Compose v2 first."
+docker_compose_ready=0
+if command -v docker >/dev/null 2>&1 &&
+  docker compose version >/dev/null 2>&1; then
+  docker_compose_ready=1
 fi
-require_docker_compose
+
+if [[ "$docker_compose_ready" != "1" ]]; then
+  if [[ "$INSTALL_DOCKER" == "1" ]]; then
+    install_docker_engine
+  else
+    fail "Docker Engine and Compose v2 are required. Rerun with --install-docker on Rocky Linux 10 or Debian 12, or install them manually."
+  fi
+elif [[ "$INSTALL_DOCKER" == "1" ]]; then
+  if is_dry_run; then
+    log "DRY-RUN: ensure the existing Docker service is enabled and running"
+  elif command -v systemctl >/dev/null 2>&1; then
+    as_root systemctl enable --now docker
+  fi
+fi
+
+if is_dry_run && [[ "$docker_compose_ready" != "1" ]]; then
+  log "DRY-RUN: assume Docker Compose v2 after the planned Docker installation"
+else
+  require_docker_compose
+fi
 require_command tar
+
+caddy_source_dir=""
+if [[ -d "${SCRIPT_DIR}/../../deploy/caddy" ]]; then
+  caddy_source_dir="${SCRIPT_DIR}/../../deploy/caddy"
+elif [[ -d "${SCRIPT_DIR}/caddy" ]]; then
+  caddy_source_dir="${SCRIPT_DIR}/caddy"
+fi
+
+if [[ "$START_CADDY" == "1" ]]; then
+  [[ -n "$caddy_source_dir" ]] ||
+    fail "Bundled Caddy configuration is missing"
+  [[ -f "${caddy_source_dir}/Caddyfile.example" &&
+    ! -L "${caddy_source_dir}/Caddyfile.example" ]] ||
+    fail "Bundled Caddyfile is missing or unsafe"
+  [[ -f "${caddy_source_dir}/docker-compose.caddy.yml" &&
+    ! -L "${caddy_source_dir}/docker-compose.caddy.yml" ]] ||
+    fail "Bundled Caddy Compose file is missing or unsafe"
+
+  require_command curl
+
+  if is_dry_run; then
+    log "DRY-RUN: verify Caddy image access with docker pull --quiet ${CADDY_IMAGE}"
+  elif ! docker pull --quiet "$CADDY_IMAGE" >/dev/null; then
+    fail "Cannot access the required Caddy image ${CADDY_IMAGE}"
+  fi
+fi
+
 preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"
+prompt_initial_admin_password
 
 available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
 if [[ "${available_kb:-0}" -lt 2097152 ]]; then
@@ -197,14 +434,14 @@ if [[ -n "$systemd_source" ]]; then
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" /etc/systemd/system/officechat-backup-job.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" /etc/systemd/system/officechat-backup-verify@.service
 fi
-if [[ -d "${SCRIPT_DIR}/../../deploy/caddy" ]]; then
+if [[ -n "$caddy_source_dir" ]]; then
   as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
-  as_root cp "${SCRIPT_DIR}/../../deploy/caddy/Caddyfile.example" "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
-  as_root cp "${SCRIPT_DIR}/../../deploy/caddy/docker-compose.caddy.yml" "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
-elif [[ -d "${SCRIPT_DIR}/caddy" ]]; then
-  as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
-  as_root cp "${SCRIPT_DIR}/caddy/Caddyfile.example" "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
-  as_root cp "${SCRIPT_DIR}/caddy/docker-compose.caddy.yml" "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
+  as_root cp \
+    "${caddy_source_dir}/Caddyfile.example" \
+    "${OFFICECHAT_INSTALL_DIR}/caddy/Caddyfile.example"
+  as_root cp \
+    "${caddy_source_dir}/docker-compose.caddy.yml" \
+    "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
 fi
 as_root chown root:root "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
 as_root chmod 0755 "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl" "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
@@ -252,7 +489,13 @@ run_cmd compose run --rm backend alembic upgrade head
 run_cmd compose run --rm backend alembic current
 run_cmd compose up -d postgres valkey backend calendar-worker frontend
 wait_for_ready || fail "Backend readiness check failed"
+create_initial_superadmin
 record_version "$OFFICECHAT_RELEASE_VERSION"
+
+if [[ "$START_CADDY" == "1" ]]; then
+  start_caddy_stack
+fi
+
 if command -v systemctl >/dev/null 2>&1 && [[ -n "$systemd_source" ]]; then
   if [[ "$ENABLE_BACKUP_TIMER" == "1" ]]; then
     as_root systemctl enable --now officechat-backup.timer
@@ -263,18 +506,18 @@ else
   warn "systemd is unavailable; backup units were not enabled."
 fi
 
-if [[ -n "${OFFICECHAT_ADMIN_USERNAME:-}" && -n "${OFFICECHAT_ADMIN_DISPLAY_NAME:-}" && -n "${OFFICECHAT_ADMIN_PASSWORD_FILE:-}" ]]; then
-  run_cmd compose run --rm backend python -m app.cli create-admin \
-    --username "$OFFICECHAT_ADMIN_USERNAME" \
-    --display-name "$OFFICECHAT_ADMIN_DISPLAY_NAME" \
-    --password-file "$OFFICECHAT_ADMIN_PASSWORD_FILE"
-fi
 
 pass "OfficeChat ${OFFICECHAT_RELEASE_VERSION} installed."
-warn "Production access requires HTTPS; do not expose ports 3100 or 8100 to the LAN."
-if [[ -n "$OFFICECHAT_HOSTNAME" ]]; then
-  log "Start internal HTTPS after DNS is ready:"
+warn "Do not expose ports 3100 or 8100 to the LAN."
+
+if [[ "$START_CADDY" == "1" ]]; then
+  log "OfficeChat URL: https://${OFFICECHAT_HOSTNAME}"
+  log "Install this public CA certificate on client devices:"
+  log "  ${OFFICECHAT_INSTALL_DIR}/officechat-root.crt"
+elif [[ -n "$OFFICECHAT_HOSTNAME" ]]; then
+  warn "Production access requires HTTPS; bundled Caddy was not started."
+  log "Start internal HTTPS manually:"
   log "  docker compose --env-file ${OFFICECHAT_ENV_FILE} -f ${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml up -d"
-  log "Export only the public CA certificate:"
-  log "  docker compose --env-file ${OFFICECHAT_ENV_FILE} -f ${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./officechat-root.crt"
+else
+  warn "Production access requires HTTPS and a configured hostname."
 fi

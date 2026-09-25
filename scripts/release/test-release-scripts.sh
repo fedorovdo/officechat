@@ -872,12 +872,296 @@ if grep -Fq 'systemctl enable --now officechat-backup-agent.service' "${SCRIPT_D
   exit 1
 fi
 
+platform_contract_dir="${TMP_DIR}/docker-platform-contract"
+mkdir -p "$platform_contract_dir"
+
+cat >"${platform_contract_dir}/rocky-os-release" <<'EOF_ROCKY_OS'
+ID="rocky"
+VERSION_ID="10.0"
+EOF_ROCKY_OS
+
+cat >"${platform_contract_dir}/debian-os-release" <<'EOF_DEBIAN_OS'
+ID=debian
+VERSION_ID="12"
+VERSION_CODENAME=bookworm
+EOF_DEBIAN_OS
+
+cat >"${platform_contract_dir}/unsupported-os-release" <<'EOF_UNSUPPORTED_OS'
+ID=ubuntu
+VERSION_ID="24.04"
+VERSION_CODENAME=noble
+EOF_UNSUPPORTED_OS
+
+rocky_platform="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
+    bash -c ". \"\$1\"; detect_supported_docker_platform; printf '%s' \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$rocky_platform" == "rocky" ]] ||
+  fail_test "Rocky Linux 10 platform detection failed"
+
+rocky_install_output="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
+    bash -c ". \"\$1\"; install_docker_engine" \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$rocky_install_output" == *"https://download.docker.com/linux/centos/docker-ce.repo"* ]] ||
+  fail_test "Rocky Docker plan omitted the official Docker repository"
+
+[[ "$rocky_install_output" == *"docker-compose-plugin"* ]] ||
+  fail_test "Rocky Docker plan omitted the Compose v2 plugin"
+
+[[ "$rocky_install_output" == *"systemctl enable --now docker"* ]] ||
+  fail_test "Rocky Docker plan omitted Docker service enablement"
+
+debian_platform="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
+    bash -c ". \"\$1\"; detect_supported_docker_platform; printf '%s' \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$debian_platform" == "debian" ]] ||
+  fail_test "Debian 12 platform detection failed"
+
+debian_install_output="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
+    bash -c ". \"\$1\"; install_docker_engine" \
+    _ "${SCRIPT_DIR}/lib.sh"
+)"
+
+[[ "$debian_install_output" == *"https://download.docker.com/linux/debian"* ]] ||
+  fail_test "Debian Docker plan omitted the official Docker repository"
+
+[[ "$debian_install_output" == *"bookworm stable"* ]] ||
+  fail_test "Debian Docker plan omitted the Bookworm repository"
+
+[[ "$debian_install_output" == *"docker-compose-plugin"* ]] ||
+  fail_test "Debian Docker plan omitted the Compose v2 plugin"
+
+unsupported_status=0
+unsupported_output="$(
+  env \
+    DRY_RUN=1 \
+    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/unsupported-os-release" \
+    bash -c ". \"\$1\"; detect_supported_docker_platform" \
+    _ "${SCRIPT_DIR}/lib.sh" 2>&1
+)" || unsupported_status=$?
+
+[[ "$unsupported_status" -ne 0 ]] ||
+  fail_test "Unsupported operating system was accepted"
+
+[[ "$unsupported_output" == *"supports only Rocky Linux 10 and Debian 12"* ]] ||
+  fail_test "Unsupported operating system failure is unclear"
+
+printf 'Docker installation platform contracts passed\n'
+
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
+bash "${SCRIPT_DIR}/bootstrap-linux.sh" --help >/dev/null
+
+grep -Fq -- '--start-caddy' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not expose --start-caddy"
+grep -Fq 'officechat-root.crt' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not export the Caddy public CA certificate"
+grep -Fq "https://\${OFFICECHAT_HOSTNAME}/ready" "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not verify HTTPS readiness through Caddy"
+grep -Fq -- '--no-start-caddy' "${SCRIPT_DIR}/bootstrap-linux.sh" ||
+  fail_test "Bootstrap does not provide the Caddy opt-out"
+grep -Fq -- '--create-admin' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not expose explicit administrator creation"
+grep -Fq -- '--no-create-admin' "${SCRIPT_DIR}/bootstrap-linux.sh" ||
+  fail_test "Bootstrap does not provide the administrator creation opt-out"
+grep -Fq 'compose run --rm -T backend python -m app.cli create-admin' \
+  "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not create the administrator without a TTY"
+grep -Fq -- '--password-stdin' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not pass the administrator password through standard input"
+if grep -Fq 'OFFICECHAT_ADMIN_PASSWORD_FILE' "${SCRIPT_DIR}/install-linux.sh"; then
+  fail_test "Release installer still references a host password file"
+fi
+
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/rollback-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/uninstall-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/verify-install.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/officechatctl" --help >/dev/null
+bootstrap_contract_dir="${TMP_DIR}/bootstrap-contract"
+bootstrap_version="9.8.7-bootstrap-contract"
+bootstrap_bundle="officechat-${bootstrap_version}-linux-amd64.tar.gz"
+mkdir -p \
+  "${bootstrap_contract_dir}/assets" \
+  "${bootstrap_contract_dir}/bin" \
+  "${bootstrap_contract_dir}/payload/release"
+
+cat >"${bootstrap_contract_dir}/payload/release/install-linux.sh" <<'EOF_BOOTSTRAP_INSTALLER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+: "${OFFICECHAT_BOOTSTRAP_INSTALL_LOG:?}"
+for argument in "$@"; do
+  printf 'ARG=%s\n' "$argument"
+done >"$OFFICECHAT_BOOTSTRAP_INSTALL_LOG"
+EOF_BOOTSTRAP_INSTALLER
+chmod +x "${bootstrap_contract_dir}/payload/release/install-linux.sh"
+
+printf '%s\n' "$bootstrap_version" \
+  >"${bootstrap_contract_dir}/payload/release/VERSION"
+
+printf '{"version":"%s"}\n' "$bootstrap_version" \
+  >"${bootstrap_contract_dir}/payload/release/RELEASE.json"
+
+(
+  cd "${bootstrap_contract_dir}/payload/release"
+  sha256sum \
+    install-linux.sh \
+    VERSION \
+    RELEASE.json \
+    >CHECKSUMS.sha256
+)
+
+tar \
+  -C "${bootstrap_contract_dir}/payload" \
+  -czf "${bootstrap_contract_dir}/assets/${bootstrap_bundle}" \
+  release
+
+(
+  cd "${bootstrap_contract_dir}/assets"
+  sha256sum "$bootstrap_bundle" >"${bootstrap_bundle}.sha256"
+)
+
+cat >"${bootstrap_contract_dir}/bin/curl" <<'EOF_BOOTSTRAP_CURL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+output=""
+url=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      output="$2"
+      shift 2
+      ;;
+    --retry)
+      shift 2
+      ;;
+    --fail|--location|--silent|--show-error)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$output" && -n "$url" ]]
+cp -- \
+  "${OFFICECHAT_BOOTSTRAP_FIXTURE_DIR:?}/${url##*/}" \
+  "$output"
+EOF_BOOTSTRAP_CURL
+chmod +x "${bootstrap_contract_dir}/bin/curl"
+
+bootstrap_output="$(
+  env \
+    PATH="${bootstrap_contract_dir}/bin:${PATH}" \
+    OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+    OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${bootstrap_contract_dir}/assets" \
+    OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${bootstrap_contract_dir}/install.log" \
+    bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+      --version "$bootstrap_version" \
+      --hostname chat.example.test \
+      --enable-backup-timer \
+      --dry-run
+)"
+
+[[ "$bootstrap_output" == *"PASS: Bundle SHA-256 verified."* ]] ||
+  fail_test "Bootstrap did not verify the outer bundle checksum"
+[[ "$bootstrap_output" == *"PASS: Inner release checksums verified."* ]] ||
+  fail_test "Bootstrap did not verify the inner release checksums"
+
+for expected_argument in \
+  '--install-docker' \
+  '--hostname' \
+  'chat.example.test' \
+  '--start-caddy' \
+  '--create-admin' \
+  '--admin-username' \
+  'admin' \
+  '--admin-display-name' \
+  'OfficeChat Admin' \
+  '--enable-backup-timer' \
+  '--dry-run'; do
+  grep -Fxq "ARG=${expected_argument}" \
+    "${bootstrap_contract_dir}/install.log" ||
+    fail_test "Bootstrap omitted installer argument: ${expected_argument}"
+done
+
+rm -f -- "${bootstrap_contract_dir}/install.log"
+
+bootstrap_no_caddy_output="$(
+  env \
+    PATH="${bootstrap_contract_dir}/bin:${PATH}" \
+    OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+    OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${bootstrap_contract_dir}/assets" \
+    OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${bootstrap_contract_dir}/install.log" \
+    bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+      --version "$bootstrap_version" \
+      --hostname chat.example.test \
+      --no-start-caddy \
+      --no-create-admin \
+      --dry-run
+)"
+
+[[ "$bootstrap_no_caddy_output" == *"PASS: OfficeChat ${bootstrap_version} bootstrap completed."* ]] ||
+  fail_test "Bootstrap Caddy opt-out run did not complete"
+
+if grep -Fxq 'ARG=--start-caddy' \
+  "${bootstrap_contract_dir}/install.log"; then
+  fail_test "Bootstrap passed --start-caddy despite explicit opt-out"
+fi
+if grep -Fxq 'ARG=--create-admin' \
+  "${bootstrap_contract_dir}/install.log"; then
+  fail_test "Bootstrap passed --create-admin despite explicit opt-out"
+fi
+if grep -Fxq 'ARG=--admin-username' \
+  "${bootstrap_contract_dir}/install.log" ||
+  grep -Fxq 'ARG=--admin-display-name' \
+    "${bootstrap_contract_dir}/install.log"; then
+  fail_test "Bootstrap passed administrator identity despite explicit opt-out"
+fi
+
+printf '%064d  %s\n' 0 "$bootstrap_bundle" \
+  >"${bootstrap_contract_dir}/assets/${bootstrap_bundle}.sha256"
+rm -f -- "${bootstrap_contract_dir}/install.log"
+
+bootstrap_status=0
+bootstrap_failure_output="$(
+  env \
+    PATH="${bootstrap_contract_dir}/bin:${PATH}" \
+    OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+    OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${bootstrap_contract_dir}/assets" \
+    OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${bootstrap_contract_dir}/install.log" \
+    bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+      --version "$bootstrap_version" \
+      --dry-run 2>&1
+)" || bootstrap_status=$?
+
+[[ "$bootstrap_status" -ne 0 ]] ||
+  fail_test "Bootstrap accepted a bundle with an invalid checksum"
+[[ "$bootstrap_failure_output" == *"Bundle SHA-256 mismatch"* ]] ||
+  fail_test "Bootstrap checksum failure was unclear"
+[[ ! -e "${bootstrap_contract_dir}/install.log" ]] ||
+  fail_test "Bootstrap invoked the installer after checksum failure"
+
+printf 'Bootstrap download and checksum contracts passed\n'
 bundle_dry_run_output="$(OFFICECHAT_RELEASE_VERSION=0.1.0-test-release \
   OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
   OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
@@ -888,6 +1172,14 @@ bundle_dry_run_output="$(OFFICECHAT_RELEASE_VERSION=0.1.0-test-release \
 }
 [[ "$bundle_dry_run_output" == *"officechat-0.1.0-test-release-linux-amd64.tar.gz"* ]] || {
   echo "Bundle dry-run did not use the supplied version in the archive name" >&2
+  exit 1
+}
+[[ "$bundle_dry_run_output" == *"${ROOT_DIR}/scripts/release/bootstrap-linux.sh ${ROOT_DIR}/dist/officechat-install.sh"* ]] || {
+  echo "Bundle dry-run did not package the standalone installer" >&2
+  exit 1
+}
+[[ "$bundle_dry_run_output" == *"${ROOT_DIR}/dist/officechat-install.sh.sha256"* ]] || {
+  echo "Bundle dry-run did not create the standalone installer checksum" >&2
   exit 1
 }
 for bundled_doc in \
@@ -963,9 +1255,38 @@ for auth_doc in \
     exit 1
   }
 done
+
+for simple_install_doc in \
+  "${bundle_doc_fixture}/deployment/production-installation.md" \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; do
+  grep -Fq 'officechat-install.sh' "$simple_install_doc" || {
+    echo "Simple installer asset is missing from ${simple_install_doc}" >&2
+    exit 1
+  }
+  grep -Fq -- '--no-create-admin' "$simple_install_doc" || {
+    echo "Administrator opt-out is missing from ${simple_install_doc}" >&2
+    exit 1
+  }
+  grep -Fq '/opt/officechat/officechat-root.crt' "$simple_install_doc" || {
+    echo "Exported Caddy CA path is missing from ${simple_install_doc}" >&2
+    exit 1
+  }
+done
+
+if grep -Fq 'Скрипты не устанавливают Docker молча' \
+  "${bundle_doc_fixture}/README_INSTALL_RU.md"; then
+  echo "README still contains outdated Docker guidance" >&2
+  exit 1
+fi
+
+if grep -Fq 'Installer не запускает Caddy автоматически' \
+  "${bundle_doc_fixture}/deployment/production-installation.md"; then
+  echo "Production guide still contains outdated Caddy guidance" >&2
+  exit 1
+fi
+
 if env -u OFFICECHAT_RELEASE_VERSION \
-  OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
-  OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
+  OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \  OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
   bash "${SCRIPT_DIR}/create-release-bundle.sh" --dry-run >/dev/null 2>&1; then
   echo "Bundle creation accepted missing release version metadata" >&2
   exit 1

@@ -4,66 +4,91 @@
 
 ## 1. Выбор режима установки
 
-Требуются Linux amd64, Docker Engine, Docker Compose v2 и DNS-имя. Во всех примерах используется placeholder `officechat.example.local`.
+Для production нужны Linux `amd64`, внутреннее DNS-имя и доступ клиентов к TCP
+80/443. Рекомендуемые платформы для полностью автоматической установки:
+Rocky Linux 10 и Debian 12.
 
-### Установка из release bundle
+Во всех примерах используется hostname `officechat.example.local`.
 
-Распакуйте release bundle, перейдите в его каталог `release/` и запустите installer
-с production hostname:
+### Рекомендуемая простая установка
 
-Release images в GHCR являются приватными. До запуска installer выполните Docker
-login от имени того же системного пользователя, который будет выполнять pull.
-Для показанного ниже запуска через `sudo` авторизация также должна выполняться через
-`sudo docker`. Используйте GitHub account, которому разрешено читать эти packages;
-достаточно token/PAT только с scope `read:packages`:
+Создайте DNS A-запись, указывающую на новый сервер. Затем авторизуйте root Docker
+в приватном GHCR, используя token только с `read:packages`:
 
 ```bash
 sudo -v
 read -rp "GitHub user: " GHCR_USER
-read -rsp "GHCR token: " GHCR_TOKEN
+read -rsp "GHCR token (read:packages): " GHCR_TOKEN
 echo
 printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io \
-  --username "$GHCR_USER" --password-stdin
+  --username "$GHCR_USER" \
+  --password-stdin
 unset GHCR_TOKEN GHCR_USER
 ```
 
-Не передавайте token аргументом команды, не записывайте его в OfficeChat `.env` и
-не вставляйте в конфигурацию OfficeChat. За безопасное хранение Docker credentials
-отвечают настройки credential store и защита учётной записи операционной системы.
-Если installer запускается без `sudo` пользователем из группы Docker, выполняйте и
-`docker login`, и installer без `sudo` в одном пользовательском контексте.
+Если Docker отсутствует, сначала скачайте standalone installer по инструкции
+ниже и один раз запустите обычную команду установки. Installer установит Docker
+и остановится на проверке доступа к приватным образам GHCR до создания рабочей
+установки OfficeChat. Затем выполните Docker login из блока выше и повторите ту
+же команду установки.
+
+Скачайте standalone installer и checksum с нужного GitHub Release:
 
 ```bash
-sudo ./install-linux.sh --hostname officechat.example.local
+VERSION=0.1.0-example
+TAG="v${VERSION}"
+BASE_URL="https://github.com/fedorovdo/officechat/releases/download/${TAG}"
+
+curl --fail --location --show-error \
+  --output officechat-install.sh \
+  "${BASE_URL}/officechat-install.sh"
+curl --fail --location --show-error \
+  --output officechat-install.sh.sha256 \
+  "${BASE_URL}/officechat-install.sh.sha256"
+sha256sum --check officechat-install.sh.sha256
+chmod 0755 officechat-install.sh
 ```
 
-Installer создаёт приватный `/opt/officechat/.env` с правами `0600`, записывает
-production public origin для указанного hostname, устанавливает Compose и Caddy
-файлы в `/opt/officechat` и запускает основной application stack. Не копируйте
-`.env.production.example`: этого source-tree файла в установленном release layout
-нет. Перед первой записью в `/opt/officechat`, `/var/lib/officechat` или
-`/etc/officechat` installer проверяет доступ к точным backend и frontend images.
-При отсутствии GHCR authentication установка завершается без частично созданного
-runtime layout.
+Запустите:
 
-Installer не запускает Caddy автоматически, поэтому offline-установка основного
-приложения не зависит от загрузки proxy image. Backup timer также не включается
-автоматически. После проверки `/etc/officechat/backup.conf` включите его вручную
-либо передайте installer `--enable-backup-timer`.
+```bash
+sudo ./officechat-install.sh \
+  --version "$VERSION" \
+  --hostname officechat.example.local \
+  --admin-username admin \
+  --admin-display-name "OfficeChat Admin"
+```
+
+Installer безопасно запросит пароль администратора два раза, установит Docker при
+необходимости, запустит OfficeChat и Caddy, проверит HTTPS и сохранит публичный CA
+в `/opt/officechat/officechat-root.crt`.
+
+Для автоматизации доступны `--no-install-docker`, `--no-start-caddy` и
+`--no-create-admin`. Backup timer включается только по явному
+`--enable-backup-timer`.
+
+### Установка из release bundle
+
+```bash
+sudo ./install-linux.sh \
+  --install-docker \
+  --hostname officechat.example.local \
+  --start-caddy \
+  --create-admin \
+  --admin-username admin \
+  --admin-display-name "OfficeChat Admin"
+```
 
 ### Установка из source checkout
 
 Следующие команды относятся только к checkout исходного кода:
-
-GHCR login выше является обязательным для приватных release image tags. Для
-локальной source/development сборки собственных images он не требуется.
 
 ```bash
 cp .env.production.example .env.production
 chmod 600 .env.production
 ```
 
-Замените все secret placeholders и задайте:
+Задайте в `.env.production`:
 
 ```dotenv
 OFFICECHAT_HOSTNAME=officechat.example.local
@@ -74,10 +99,9 @@ BACKEND_BIND_ADDRESS=127.0.0.1
 FRONTEND_BIND_ADDRESS=127.0.0.1
 ```
 
-Файл `.env.production` нельзя добавлять в Git. Для source checkout используется
-`docker-compose.prod.yml`; release installer вместо этого создаёт
-`/opt/officechat/.env` и устанавливает `/opt/officechat/docker-compose.yml`.
-
+Для source checkout используется `docker-compose.prod.yml`; release installer
+создаёт `/opt/officechat/.env` и устанавливает
+`/opt/officechat/docker-compose.yml`.
 ## 2. Запуск OfficeChat
 
 Из source checkout:
@@ -107,35 +131,38 @@ sudo /opt/officechat/officechatctl integrity-check
 `sudo ./officechatctl update VERSION`. Не редактируйте legacy HTTPS override и не
 выполняйте эксплуатационные команды с одним `-f docker-compose.yml`.
 
-## 3. DNS и Caddy
+## 3. DNS, Caddy и CA-сертификат
 
-Создайте внутреннюю DNS A-запись `officechat.example.local`, указывающую на адрес сервера. После запуска основного Compose сеть `officechat_public` уже существует.
+До установки создайте внутреннюю DNS A-запись
+`officechat.example.local`, указывающую на адрес сервера.
 
-После установки из release bundle:
+При standalone-установке с `--hostname` Caddy запускается автоматически. Он
+применяет `tls internal`, перенаправляет HTTP на HTTPS и использует Docker network
+`officechat_public`.
 
-```bash
-docker compose --env-file /opt/officechat/.env \
-  -f /opt/officechat/caddy/docker-compose.caddy.yml config
-docker compose --env-file /opt/officechat/.env \
-  -f /opt/officechat/caddy/docker-compose.caddy.yml up -d
+Публичный CA-сертификат сохраняется здесь:
+
+```text
+/opt/officechat/officechat-root.crt
 ```
 
-Только для source checkout:
+Установите только этот публичный сертификат в доверенные корневые центры
+сертификации клиентских компьютеров. Private key Caddy CA копировать нельзя.
+
+Если использовался `--no-start-caddy`, Caddy запускается вручную:
 
 ```bash
-docker compose --env-file .env.production \
-  -f deploy/caddy/docker-compose.caddy.yml config
-docker compose --env-file .env.production \
-  -f deploy/caddy/docker-compose.caddy.yml up -d
+docker compose \
+  --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml \
+  up -d
 ```
 
-Caddy использует `tls internal`, перенаправляет HTTP на HTTPS и обращается к `frontend:3000`/`backend:8000` через Docker network.
+Только для source checkout используется путь
+`deploy/caddy/docker-compose.caddy.yml` и `.env.production`.
 
-Не удаляйте `request>uri` filters из shipped Caddyfile: WebSocket JWT передаётся
-как `token` query parameter, а Caddy access и runtime/error logs не используют
-backend sanitizer. Для собственного reverse proxy настройте эквивалентную
-redaction query и path credentials во всех логгерах.
-
+Не удаляйте `request>uri` filters из shipped Caddyfile: они скрывают
+чувствительные query-параметры WebSocket.
 ## 4. Проверка
 
 Публичные health endpoints через Caddy:

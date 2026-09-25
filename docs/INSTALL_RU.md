@@ -50,65 +50,156 @@ packages. Token/PAT должен иметь только необходимый 
 
 ## 4. Требования
 
-- Linux `amd64`.
-- Docker Engine и Docker Compose v2.
-- `tar`, `sha256sum`, `openssl` желательно для генерации секретов.
-- Свободные порты для frontend/backend или reverse proxy.
+- Сервер `linux/amd64`.
+- Для автоматической установки Docker: Rocky Linux 10 или Debian 12.
+- Доступ `root` либо `sudo`.
+- Утилиты `curl`, `tar`, `sha256sum` и `mktemp`.
+- Внутреннее DNS-имя, указывающее на IP-адрес сервера.
+- Доступ клиентов к портам TCP 80 и 443.
+- GitHub account с правом чтения приватных OfficeChat packages в GHCR.
 
-Скрипты не устанавливают Docker молча. Флаг `--install-docker` зарезервирован и завершится с понятной ошибкой, если Docker отсутствует.
+Standalone installer автоматически устанавливает официальный Docker Engine и
+Compose v2 на Rocky Linux 10 и Debian 12. Если Docker уже установлен, он
+используется без переустановки. На другой Linux-платформе Docker Engine и Compose
+v2 необходимо установить вручную и запускать bootstrap с
+`--no-install-docker`.
+## 5. Простая установка на новый сервер
 
-## 5. Установка
+### 5.1. Подготовьте DNS
 
-Installer обычно запускается через `sudo`, поэтому Docker login должен быть
-выполнен в том же root-контексте. Token передаётся только через stdin:
+Создайте внутреннюю DNS A-запись, например:
+
+```text
+officechat.example.local -> 192.168.1.50
+```
+
+Замените имя и адрес на свои значения. Клиентские компьютеры должны разрешать это
+имя в IP-адрес нового сервера.
+
+### 5.2. Авторизуйте Docker в GHCR
+
+Release images являются приватными packages. Авторизацию нужно выполнить в том же
+root-контексте, в котором будет работать installer:
 
 ```bash
 sudo -v
 read -rp "GitHub user: " GHCR_USER
-read -rsp "GHCR token: " GHCR_TOKEN
+read -rsp "GHCR token (read:packages): " GHCR_TOKEN
 echo
 printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io \
-  --username "$GHCR_USER" --password-stdin
+  --username "$GHCR_USER" \
+  --password-stdin
 unset GHCR_TOKEN GHCR_USER
 ```
 
-Не указывайте token в аргументах команды, не сохраняйте его в OfficeChat `.env` и
-не вставляйте в конфигурацию OfficeChat. За хранение Docker credentials отвечает
-операционная система и настроенный Docker credential store. Если installer
-запускается без `sudo` пользователем из группы Docker, выполните `docker login` и
-installer без `sudo` от одного пользователя.
+Token/PAT должен иметь только необходимый scope `read:packages`. Не передавайте
+его аргументом команды и не сохраняйте в OfficeChat `.env`.
+
+Если сервер полностью чистый и Docker отсутствует, сначала скачайте standalone
+installer по следующему разделу и запустите обычную команду установки. Installer
+установит Docker, а затем остановится на проверке доступа к приватным образам
+GHCR. После этого выполните Docker login из блока выше и повторите ту же команду
+установки. До успешной проверки GHCR рабочая установка OfficeChat не создаётся.
+
+### 5.3. Скачайте и проверьте standalone installer
+
+На странице нужного GitHub Release возьмите точное значение `VERSION`:
+
+```bash
+VERSION=0.1.0-example
+TAG="v${VERSION}"
+BASE_URL="https://github.com/fedorovdo/officechat/releases/download/${TAG}"
+
+curl --fail --location --show-error \
+  --output officechat-install.sh \
+  "${BASE_URL}/officechat-install.sh"
+
+curl --fail --location --show-error \
+  --output officechat-install.sh.sha256 \
+  "${BASE_URL}/officechat-install.sh.sha256"
+
+sha256sum --check officechat-install.sh.sha256
+chmod 0755 officechat-install.sh
+```
+
+Проверка должна вывести `officechat-install.sh: OK`.
+
+### 5.4. Запустите установку
+
+```bash
+sudo ./officechat-install.sh \
+  --version "$VERSION" \
+  --hostname officechat.example.local \
+  --admin-username admin \
+  --admin-display-name "OfficeChat Admin"
+```
+
+Во время установки пароль первого администратора будет скрыто запрошен дважды.
+Standalone installer:
+
+1. скачивает versioned release bundle;
+2. проверяет внешний и внутренний SHA-256;
+3. проверяет безопасность файлов архива;
+4. устанавливает Docker Engine и Compose v2, если они отсутствуют;
+5. создаёт `/opt/officechat/.env` с правами `0600`;
+6. запускает основной application stack;
+7. выполняет миграции базы данных;
+8. создаёт первого superadmin;
+9. автоматически запускает Caddy;
+10. проверяет HTTPS `/ready`;
+11. сохраняет публичный CA в `/opt/officechat/officechat-root.crt`.
+
+Backup timer по умолчанию выключен. После проверки
+`/etc/officechat/backup.conf` его можно включить отдельно либо передать
+`--enable-backup-timer`.
+
+Дополнительные параметры:
+
+```text
+--no-install-docker    не устанавливать Docker автоматически
+--no-start-caddy       не запускать bundled Caddy
+--no-create-admin      не создавать первого администратора
+--enable-backup-timer  включить планировщик backup
+--dry-run              проверить план без изменения сервера
+```
+
+### 5.5. Установка из распакованного bundle
 
 ```bash
 VERSION=0.1.0-example
 tar -xzf "officechat-${VERSION}-linux-amd64.tar.gz"
 cd release
-sudo ./install-linux.sh --hostname chat.example.com
+
+sudo ./install-linux.sh \
+  --install-docker \
+  --hostname officechat.example.local \
+  --start-caddy \
+  --create-admin \
+  --admin-username admin \
+  --admin-display-name "OfficeChat Admin"
 ```
 
-Скрипт создаёт `/opt/officechat/.env` с правами `0600`, записывает public origin
-для hostname, генерирует секреты, если файла ещё нет, выполняет
-`alembic upgrade head`, запускает сервисы и проверяет `/ready`. Не создавайте
-`.env.production`: это имя используется только при установке из source checkout.
-До создания `/opt/officechat`, `/var/lib/officechat`, `/etc/officechat`, runtime
-configuration и systemd units installer проверяет доступ к точным backend и
-frontend images выбранной версии. При недоступном private image он завершается с
-подсказкой о GHCR login и ничего не устанавливает.
-
-При установке из source checkout `.env.production` и source Compose files остаются
-допустимыми. GHCR authentication нужна только если такой checkout использует
-приватные release images, а не локально собранные development images.
-
+Низкоуровневый installer требует явных флагов `--install-docker`,
+`--start-caddy` и `--create-admin`; standalone bootstrap включает безопасные
+значения по умолчанию.
 ## 6. Первый администратор
 
-Для безопасного создания администратора используйте CLI внутри backend container:
+Production backend больше не создаёт пользователя с известным стандартным
+паролем. Первый superadmin создаётся только установщиком либо явной CLI-командой.
 
-```bash
-printf '%s' 'strong-password-here' | docker compose --env-file /opt/officechat/.env -f /opt/officechat/docker-compose.yml run --rm backend \
-  python -m app.cli create-admin --username admin --display-name "OfficeChat Admin" --password-stdin
-```
+При обычном запуске `officechat-install.sh`:
 
-Команда идемпотентна: если пользователь уже существует, пароль не перезаписывается.
+- username по умолчанию: `admin`;
+- display name: `OfficeChat Admin`;
+- пароль дважды запрашивается через `/dev/tty` без отображения;
+- минимальная длина пароля — 8 символов;
+- пароль не передаётся через аргументы, environment или временный файл;
+- backend получает пароль только через stdin;
+- повторный запуск не меняет пароль существующего пользователя.
 
+Для автоматизированной установки создание администратора отключается параметром
+`--no-create-admin`. После этого администратора необходимо создать отдельной
+защищённой CLI-командой.
 ## 7. Проверка
 
 ```bash
@@ -176,29 +267,32 @@ Backups не удаляются автоматически.
 `officechatctl backup` создает PostgreSQL dump, архив uploads и metadata в `/var/backups/officechat`.
 PostgreSQL и uploads нужно хранить вместе, иначе вложения и сообщения могут разойтись.
 
-## 12. Reverse proxy
+## 12. Reverse proxy и внутренний HTTPS
 
-После release-установки Caddy files находятся здесь:
+Standalone installer автоматически запускает bundled Caddy, если передан
+`--hostname`. Он использует `tls internal`, перенаправляет HTTP на HTTPS и
+экспортирует публичный CA-сертификат:
 
-- `/opt/officechat/caddy/Caddyfile.example`
-- `/opt/officechat/caddy/docker-compose.caddy.yml`
-
-Запуск установленного Caddy stack:
-
-```bash
-docker compose --env-file /opt/officechat/.env \
-  -f /opt/officechat/caddy/docker-compose.caddy.yml config
-docker compose --env-file /opt/officechat/.env \
-  -f /opt/officechat/caddy/docker-compose.caddy.yml up -d
+```text
+/opt/officechat/officechat-root.crt
 ```
 
-Только в source checkout соответствующие примеры находятся в
-`deploy/nginx/officechat.conf`, `deploy/caddy/Caddyfile.example` и
-`deploy/caddy/docker-compose.caddy.yml`; для них используется
+Этот сертификат необходимо установить в доверенные корневые центры сертификации
+клиентских компьютеров. Для Windows используйте документ
+`deployment/windows-certificate-installation.md`.
+
+Если установка выполнялась с `--no-start-caddy`, Caddy запускается вручную:
+
+```bash
+docker compose \
+  --env-file /opt/officechat/.env \
+  -f /opt/officechat/caddy/docker-compose.caddy.yml \
+  up -d
+```
+
+Только в source checkout соответствующий путь:
+`deploy/caddy/docker-compose.caddy.yml`; для него используется
 `.env.production`.
-
-Для TLS используйте сертификаты своей организации, ACME или внутренний CA. Проверьте лимит тела запроса не ниже лимита вложений OfficeChat.
-
 ## 13. Firewall
 
 PostgreSQL и Valkey не публикуются наружу. Обычно наружу открыт только 80/443 reverse proxy. Без reverse proxy frontend слушает `${FRONTEND_HOST_PORT:-3100}`, backend по умолчанию привязан к `127.0.0.1:${BACKEND_HOST_PORT:-8100}`.

@@ -8,10 +8,17 @@ from app.services.security import hash_password
 from app.services.users import count_users, normalize_username
 
 
+def should_bootstrap_superadmin(environment: str) -> bool:
+    return environment.strip().lower() != "production"
+
+
 async def bootstrap_superadmin() -> None:
     async with AsyncSessionLocal() as session:
         await seed_permission_catalog(session)
         await session.commit()
+
+        if not should_bootstrap_superadmin(settings.environment):
+            return
 
         if await count_users(session) > 0:
             return

@@ -182,6 +182,7 @@ jobs:
             /mnt/scripts/release/create-release-bundle.sh \
             /mnt/scripts/release/export-images.sh \
             /mnt/scripts/release/import-images.sh \
+            /mnt/scripts/release/bootstrap-linux.sh \
             /mnt/scripts/release/install-linux.sh \
             /mnt/scripts/release/lib.sh \
             /mnt/scripts/release/rollback-linux.sh \

@@ -896,7 +896,7 @@ rocky_platform="$(
   env \
     DRY_RUN=1 \
     OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
-    bash -c '. "$1"; detect_supported_docker_platform; printf "%s" "$OFFICECHAT_DOCKER_PLATFORM"' \
+    bash -c ". \"\$1\"; detect_supported_docker_platform; printf '%s' \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
     _ "${SCRIPT_DIR}/lib.sh"
 )"
 
@@ -907,7 +907,7 @@ rocky_install_output="$(
   env \
     DRY_RUN=1 \
     OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
-    bash -c '. "$1"; install_docker_engine' \
+    bash -c ". \"\$1\"; install_docker_engine" \
     _ "${SCRIPT_DIR}/lib.sh"
 )"
 
@@ -924,7 +924,7 @@ debian_platform="$(
   env \
     DRY_RUN=1 \
     OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
-    bash -c '. "$1"; detect_supported_docker_platform; printf "%s" "$OFFICECHAT_DOCKER_PLATFORM"' \
+    bash -c ". \"\$1\"; detect_supported_docker_platform; printf '%s' \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
     _ "${SCRIPT_DIR}/lib.sh"
 )"
 
@@ -935,7 +935,7 @@ debian_install_output="$(
   env \
     DRY_RUN=1 \
     OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
-    bash -c '. "$1"; install_docker_engine' \
+    bash -c ". \"\$1\"; install_docker_engine" \
     _ "${SCRIPT_DIR}/lib.sh"
 )"
 
@@ -953,7 +953,7 @@ unsupported_output="$(
   env \
     DRY_RUN=1 \
     OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/unsupported-os-release" \
-    bash -c '. "$1"; detect_supported_docker_platform' \
+    bash -c ". \"\$1\"; detect_supported_docker_platform" \
     _ "${SCRIPT_DIR}/lib.sh" 2>&1
 )" || unsupported_status=$?
 

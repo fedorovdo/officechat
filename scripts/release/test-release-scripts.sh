@@ -966,11 +966,140 @@ unsupported_output="$(
 printf 'Docker installation platform contracts passed\n'
 
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
+bash "${SCRIPT_DIR}/bootstrap-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/rollback-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/uninstall-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/verify-install.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/officechatctl" --help >/dev/null
+bootstrap_contract_dir="${TMP_DIR}/bootstrap-contract"
+bootstrap_version="9.8.7-bootstrap-contract"
+bootstrap_bundle="officechat-${bootstrap_version}-linux-amd64.tar.gz"
+mkdir -p \
+  "${bootstrap_contract_dir}/assets" \
+  "${bootstrap_contract_dir}/bin" \
+  "${bootstrap_contract_dir}/payload/release"
+
+cat >"${bootstrap_contract_dir}/payload/release/install-linux.sh" <<'EOF_BOOTSTRAP_INSTALLER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+: "${OFFICECHAT_BOOTSTRAP_INSTALL_LOG:?}"
+for argument in "$@"; do
+  printf 'ARG=%s\n' "$argument"
+done >"$OFFICECHAT_BOOTSTRAP_INSTALL_LOG"
+EOF_BOOTSTRAP_INSTALLER
+chmod +x "${bootstrap_contract_dir}/payload/release/install-linux.sh"
+
+printf '%s\n' "$bootstrap_version" \
+  >"${bootstrap_contract_dir}/payload/release/VERSION"
+
+printf '{"version":"%s"}\n' "$bootstrap_version" \
+  >"${bootstrap_contract_dir}/payload/release/RELEASE.json"
+
+(
+  cd "${bootstrap_contract_dir}/payload/release"
+  sha256sum \
+    install-linux.sh \
+    VERSION \
+    RELEASE.json \
+    >CHECKSUMS.sha256
+)
+
+tar \
+  -C "${bootstrap_contract_dir}/payload" \
+  -czf "${bootstrap_contract_dir}/assets/${bootstrap_bundle}" \
+  release
+
+(
+  cd "${bootstrap_contract_dir}/assets"
+  sha256sum "$bootstrap_bundle" >"${bootstrap_bundle}.sha256"
+)
+
+cat >"${bootstrap_contract_dir}/bin/curl" <<'EOF_BOOTSTRAP_CURL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+output=""
+url=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      output="$2"
+      shift 2
+      ;;
+    --retry)
+      shift 2
+      ;;
+    --fail|--location|--silent|--show-error)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$output" && -n "$url" ]]
+cp -- \
+  "${OFFICECHAT_BOOTSTRAP_FIXTURE_DIR:?}/${url##*/}" \
+  "$output"
+EOF_BOOTSTRAP_CURL
+chmod +x "${bootstrap_contract_dir}/bin/curl"
+
+bootstrap_output="$(
+  env \
+    PATH="${bootstrap_contract_dir}/bin:${PATH}" \
+    OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+    OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${bootstrap_contract_dir}/assets" \
+    OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${bootstrap_contract_dir}/install.log" \
+    bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+      --version "$bootstrap_version" \
+      --hostname chat.example.test \
+      --enable-backup-timer \
+      --dry-run
+)"
+
+[[ "$bootstrap_output" == *"PASS: Bundle SHA-256 verified."* ]] ||
+  fail_test "Bootstrap did not verify the outer bundle checksum"
+[[ "$bootstrap_output" == *"PASS: Inner release checksums verified."* ]] ||
+  fail_test "Bootstrap did not verify the inner release checksums"
+
+for expected_argument in \
+  '--install-docker' \
+  '--hostname' \
+  'chat.example.test' \
+  '--enable-backup-timer' \
+  '--dry-run'; do
+  grep -Fxq "ARG=${expected_argument}" \
+    "${bootstrap_contract_dir}/install.log" ||
+    fail_test "Bootstrap omitted installer argument: ${expected_argument}"
+done
+
+printf '%064d  %s\n' 0 "$bootstrap_bundle" \
+  >"${bootstrap_contract_dir}/assets/${bootstrap_bundle}.sha256"
+rm -f -- "${bootstrap_contract_dir}/install.log"
+
+bootstrap_status=0
+bootstrap_failure_output="$(
+  env \
+    PATH="${bootstrap_contract_dir}/bin:${PATH}" \
+    OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+    OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${bootstrap_contract_dir}/assets" \
+    OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${bootstrap_contract_dir}/install.log" \
+    bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+      --version "$bootstrap_version" \
+      --dry-run 2>&1
+)" || bootstrap_status=$?
+
+[[ "$bootstrap_status" -ne 0 ]] ||
+  fail_test "Bootstrap accepted a bundle with an invalid checksum"
+[[ "$bootstrap_failure_output" == *"Bundle SHA-256 mismatch"* ]] ||
+  fail_test "Bootstrap checksum failure was unclear"
+[[ ! -e "${bootstrap_contract_dir}/install.log" ]] ||
+  fail_test "Bootstrap invoked the installer after checksum failure"
+
+printf 'Bootstrap download and checksum contracts passed\n'
 bundle_dry_run_output="$(OFFICECHAT_RELEASE_VERSION=0.1.0-test-release \
   OFFICECHAT_RELEASE_REVISION=2222222222222222222222222222222222222222 \
   OFFICECHAT_RELEASE_BUILD_DATE=2026-08-04T17:00:00Z \
@@ -981,6 +1110,14 @@ bundle_dry_run_output="$(OFFICECHAT_RELEASE_VERSION=0.1.0-test-release \
 }
 [[ "$bundle_dry_run_output" == *"officechat-0.1.0-test-release-linux-amd64.tar.gz"* ]] || {
   echo "Bundle dry-run did not use the supplied version in the archive name" >&2
+  exit 1
+}
+[[ "$bundle_dry_run_output" == *"${ROOT_DIR}/scripts/release/bootstrap-linux.sh ${ROOT_DIR}/dist/officechat-install.sh"* ]] || {
+  echo "Bundle dry-run did not package the standalone installer" >&2
+  exit 1
+}
+[[ "$bundle_dry_run_output" == *"${ROOT_DIR}/dist/officechat-install.sh.sha256"* ]] || {
+  echo "Bundle dry-run did not create the standalone installer checksum" >&2
   exit 1
 }
 for bundled_doc in \

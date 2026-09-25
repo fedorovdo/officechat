@@ -9,6 +9,7 @@ ARCH="${OFFICECHAT_RELEASE_ARCH:-linux-amd64}"
 RELEASE_DIR="${ROOT_DIR}/release"
 DIST_DIR="${ROOT_DIR}/dist"
 ARCHIVE_NAME="officechat-${VERSION}-${ARCH}.tar.gz"
+BOOTSTRAP_ASSET_NAME="officechat-install.sh"
 
 usage() {
   cat <<'EOF_HELP'
@@ -156,4 +157,18 @@ if [[ "$DRY_RUN" != "1" ]]; then
   )
 fi
 
+run cp "${ROOT_DIR}/scripts/release/bootstrap-linux.sh" \
+  "${DIST_DIR}/${BOOTSTRAP_ASSET_NAME}"
+run chmod 0755 "${DIST_DIR}/${BOOTSTRAP_ASSET_NAME}"
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "[dry-run] write ${DIST_DIR}/${BOOTSTRAP_ASSET_NAME}.sha256"
+else
+  (
+    cd "$DIST_DIR"
+    sha256sum "$BOOTSTRAP_ASSET_NAME" >"${BOOTSTRAP_ASSET_NAME}.sha256"
+  )
+fi
+
 echo "Release bundle ready: ${DIST_DIR}/${ARCHIVE_NAME}"
+echo "Standalone installer ready: ${DIST_DIR}/${BOOTSTRAP_ASSET_NAME}"

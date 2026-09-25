@@ -967,6 +967,16 @@ printf 'Docker installation platform contracts passed\n'
 
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/bootstrap-linux.sh" --help >/dev/null
+
+grep -Fq -- '--start-caddy' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not expose --start-caddy"
+grep -Fq 'officechat-root.crt' "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not export the Caddy public CA certificate"
+grep -Fq "https://\${OFFICECHAT_HOSTNAME}/ready" "${SCRIPT_DIR}/install-linux.sh" ||
+  fail_test "Release installer does not verify HTTPS readiness through Caddy"
+grep -Fq -- '--no-start-caddy' "${SCRIPT_DIR}/bootstrap-linux.sh" ||
+  fail_test "Bootstrap does not provide the Caddy opt-out"
+
 bash "${SCRIPT_DIR}/update-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/rollback-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/uninstall-linux.sh" --help >/dev/null
@@ -1069,12 +1079,36 @@ for expected_argument in \
   '--install-docker' \
   '--hostname' \
   'chat.example.test' \
+  '--start-caddy' \
   '--enable-backup-timer' \
   '--dry-run'; do
   grep -Fxq "ARG=${expected_argument}" \
     "${bootstrap_contract_dir}/install.log" ||
     fail_test "Bootstrap omitted installer argument: ${expected_argument}"
 done
+
+rm -f -- "${bootstrap_contract_dir}/install.log"
+
+bootstrap_no_caddy_output="$(
+  env \
+    PATH="${bootstrap_contract_dir}/bin:${PATH}" \
+    OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+    OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${bootstrap_contract_dir}/assets" \
+    OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${bootstrap_contract_dir}/install.log" \
+    bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+      --version "$bootstrap_version" \
+      --hostname chat.example.test \
+      --no-start-caddy \
+      --dry-run
+)"
+
+[[ "$bootstrap_no_caddy_output" == *"PASS: OfficeChat ${bootstrap_version} bootstrap completed."* ]] ||
+  fail_test "Bootstrap Caddy opt-out run did not complete"
+
+if grep -Fxq 'ARG=--start-caddy' \
+  "${bootstrap_contract_dir}/install.log"; then
+  fail_test "Bootstrap passed --start-caddy despite explicit opt-out"
+fi
 
 printf '%064d  %s\n' 0 "$bootstrap_bundle" \
   >"${bootstrap_contract_dir}/assets/${bootstrap_bundle}.sha256"

@@ -5,6 +5,7 @@ umask 077
 VERSION=""
 HOSTNAME_VALUE=""
 INSTALL_DOCKER=1
+START_CADDY="auto"
 ENABLE_BACKUP_TIMER=0
 DRY_RUN=0
 RELEASE_BASE_URL="${OFFICECHAT_RELEASE_BASE_URL:-https://github.com/fedorovdo/officechat/releases/download}"
@@ -28,6 +29,8 @@ Options:
   --hostname HOSTNAME     Public HTTPS hostname.
   --install-docker        Install Docker automatically when missing (default).
   --no-install-docker     Require an existing Docker Engine and Compose v2.
+  --start-caddy           Start bundled internal HTTPS; requires --hostname.
+  --no-start-caddy        Do not start Caddy.
   --enable-backup-timer   Enable the scheduled backup timer.
   --dry-run               Verify the bundle and run the installer preflight.
   --help                  Show this help.
@@ -62,6 +65,14 @@ while [[ $# -gt 0 ]]; do
       INSTALL_DOCKER=0
       shift
       ;;
+    --start-caddy)
+      START_CADDY=1
+      shift
+      ;;
+    --no-start-caddy)
+      START_CADDY=0
+      shift
+      ;;
     --enable-backup-timer)
       ENABLE_BACKUP_TIMER=1
       shift
@@ -87,6 +98,18 @@ done
 if [[ -n "$HOSTNAME_VALUE" &&
   ! "$HOSTNAME_VALUE" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   fail "Invalid OfficeChat hostname"
+fi
+
+if [[ "$START_CADDY" == "auto" ]]; then
+  if [[ -n "$HOSTNAME_VALUE" ]]; then
+    START_CADDY=1
+  else
+    START_CADDY=0
+  fi
+fi
+
+if [[ "$START_CADDY" == "1" && -z "$HOSTNAME_VALUE" ]]; then
+  fail "--start-caddy requires --hostname"
 fi
 
 [[ "$RELEASE_BASE_URL" == https://* ]] ||
@@ -251,6 +274,9 @@ if [[ "$INSTALL_DOCKER" == "1" ]]; then
 fi
 if [[ -n "$HOSTNAME_VALUE" ]]; then
   install_args+=(--hostname "$HOSTNAME_VALUE")
+fi
+if [[ "$START_CADDY" == "1" ]]; then
+  install_args+=(--start-caddy)
 fi
 if [[ "$ENABLE_BACKUP_TIMER" == "1" ]]; then
   install_args+=(--enable-backup-timer)

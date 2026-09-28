@@ -285,7 +285,7 @@ if [[ "$docker_compose_ready" != "1" ]]; then
   if [[ "$INSTALL_DOCKER" == "1" ]]; then
     install_docker_engine
   else
-    fail "Docker Engine and Compose v2 are required. Rerun with --install-docker on Rocky Linux 10 or Debian 12, or install them manually."
+    fail "Docker Engine and Compose v2 are required. Rerun with --install-docker on Rocky Linux 10, RED OS 8, Debian 12, or Debian 13, or install them manually."
   fi
 elif [[ "$INSTALL_DOCKER" == "1" ]]; then
   if is_dry_run; then

@@ -158,16 +158,30 @@ detect_supported_docker_platform() {
     rocky:10|rocky:10.*)
       OFFICECHAT_DOCKER_PLATFORM="rocky"
       ;;
+    redos:8|redos:8.*)
+      OFFICECHAT_DOCKER_PLATFORM="redos"
+      ;;
     debian:12|debian:12.*)
       OFFICECHAT_DOCKER_PLATFORM="debian"
       if [[ -z "$OFFICECHAT_OS_VERSION_CODENAME" ]]; then
         OFFICECHAT_OS_VERSION_CODENAME="bookworm"
       fi
       ;;
+    debian:13|debian:13.*)
+      OFFICECHAT_DOCKER_PLATFORM="debian"
+      if [[ -z "$OFFICECHAT_OS_VERSION_CODENAME" ]]; then
+        OFFICECHAT_OS_VERSION_CODENAME="trixie"
+      fi
+      ;;
     *)
-      fail "Automatic Docker installation supports only Rocky Linux 10 and Debian 12; detected ${OFFICECHAT_OS_ID} ${OFFICECHAT_OS_VERSION_ID}"
+      fail "Automatic Docker installation supports only Rocky Linux 10, RED OS 8, Debian 12, and Debian 13; detected ${OFFICECHAT_OS_ID} ${OFFICECHAT_OS_VERSION_ID}"
       ;;
   esac
+
+  if [[ "$OFFICECHAT_DOCKER_PLATFORM" == "debian" &&
+    ! "$OFFICECHAT_OS_VERSION_CODENAME" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+    fail "Invalid Debian version codename: ${OFFICECHAT_OS_VERSION_CODENAME}"
+  fi
 
   export OFFICECHAT_DOCKER_PLATFORM
   export OFFICECHAT_OS_ID
@@ -215,6 +229,21 @@ install_docker_engine() {
         containerd.io \
         docker-buildx-plugin \
         docker-compose-plugin
+      ;;
+
+    redos)
+      as_root dnf -y install \
+        ca-certificates \
+        curl \
+        tar \
+        gzip \
+        openssl \
+        python3
+
+      as_root dnf -y install \
+        docker-ce \
+        docker-ce-cli \
+        docker-compose
       ;;
 
     debian)

@@ -6,7 +6,18 @@
 
 Для production нужны Linux `amd64`, внутреннее DNS-имя и доступ клиентов к TCP
 80/443. Рекомендуемые платформы для полностью автоматической установки:
-Rocky Linux 10 и Debian 12.
+
+- Rocky Linux 10;
+- RED OS 8;
+- Debian 12 (`bookworm`);
+- Debian 13 (`trixie`).
+
+Rocky Linux использует официальный Docker repository. RED OS устанавливает
+`docker-ce`, `docker-ce-cli` и `docker-compose` только из штатных репозиториев ОС:
+CentOS/Fedora/Docker repository для неё не добавляется. SELinux на RED OS
+сохраняет текущий режим и policy; installer не отключает и не ослабляет его.
+Debian использует официальный Docker APT repository с проверкой fingerprint
+ключа.
 
 Во всех примерах используется hostname `officechat.example.local`.
 
@@ -31,6 +42,22 @@ unset GHCR_TOKEN GHCR_USER
 и остановится на проверке доступа к приватным образам GHCR до создания рабочей
 установки OfficeChat. Затем выполните Docker login из блока выше и повторите ту
 же команду установки.
+
+На минимальной Debian 13 утилита `curl` может отсутствовать. Если проверенный
+`officechat-install.sh` уже доставлен на сервер контролируемым способом, его
+обычный режим автоматической установки Docker сначала установит только `curl` и
+CA certificates через штатный `apt-get`, а затем скачает и проверит release
+bundle. Аналогичный prerequisite bootstrap использует штатный `dnf` на Rocky и
+RED OS. Режим `--no-install-docker` ничего не устанавливает и при отсутствии
+`curl` завершится с понятной инструкцией. `--dry-run` только показывает такой
+план, не запускает package manager и завершается до скачивания или проверки
+bundle. При уже доступных prerequisites `--dry-run` скачивает и проверяет bundle,
+после чего запускает preflight внутреннего installer без системных изменений.
+
+Если standalone installer нужно скачать непосредственно с минимального сервера,
+сначала установите средства HTTPS-загрузки штатным package manager либо передайте
+сам installer и его `.sha256` по доверенному каналу. Проверки HTTPS, SHA-256 и
+безопасности архива после этого остаются обязательными.
 
 Скачайте standalone installer и checksum с нужного GitHub Release:
 

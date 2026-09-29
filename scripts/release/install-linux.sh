@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# A root shell entered through su can inherit a PATH without system sbin directories.
+export PATH="/usr/local/sbin:/usr/sbin:/sbin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

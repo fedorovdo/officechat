@@ -336,6 +336,37 @@ Enforcing описана в `deployment/production-update_RU.md`.
 
 Диагностика собирает состояние Compose, версии, Alembic revision, sanitized logs, OS/Docker info и свободное место. Она не выгружает `.env`, сообщения, базу данных или вложения.
 
+### Debian 13 с ограниченным доступом к Docker CDN
+
+Если загрузка пакетов из `download.docker.com` на сервере истекает по timeout,
+сначала проверьте маршрут и сравните его с другой машиной в той же сети. Для
+тестовой VM допустима ручная доставка **официальных** Docker .deb с проверкой
+размеров и SHA-256 по подписанному Docker APT index. После такой установки
+запускайте standalone installer с `--no-install-docker`; это не отменяет проверки
+release bundle, GHCR images и Compose.
+
+Если `docker pull caddy:2.10-alpine` останавливается на Docker Hub, отдельно
+проверьте доступность манифестов `caddy:2.10-alpine`, `postgres:16-alpine` и
+`valkey/valkey:8-alpine` через официальное публичное зеркало
+`mirror.gcr.io`. Оно кэширует только часть Docker Hub; при отсутствии образа
+Docker daemon может снова обратиться к Docker Hub. На **новой тестовой VM** можно
+добавить `https://mirror.gcr.io` в `registry-mirrors` файла
+`/etc/docker/daemon.json`, сохранив существующие настройки, перезапустить Docker
+и проверить все три обычных имени через `docker pull`. На хосте с другими
+контейнерами запланируйте перезапуск Docker отдельно. GHCR-аутентификация для
+приватных OfficeChat images остаётся обязательной.
+
+Root-сеанс через `su` может унаследовать `PATH` без `/usr/sbin`: при этом
+установленный `groupadd` выглядит отсутствующим. Installer дополняет `PATH`
+системными sbin-каталогами. Для уже выпущенного RC13.23 при диагностике проверьте
+`/usr/sbin/groupadd` и `PATH`; если первый запуск остановился до создания
+`.env`, не удаляйте частично созданные каталоги и повторите тот же installer
+с `PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH"`.
+
+Фактический путь квалификации RED OS 8 и Debian 13, включая сетевые обходы,
+SHA-256, HTTPS и изолированную проверку копии, записан в
+[журнале RC13.23](https://github.com/fedorovdo/officechat/issues/6).
+
 ## 17. Git tag release
 
 После финальной проверки вручную:

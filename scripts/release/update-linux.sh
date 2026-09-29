@@ -150,10 +150,14 @@ fi
 
 if [[ "$NO_BACKUP" == "1" ]]; then
   warn "Proceeding without backup by user request."
-elif [[ -x "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" && -f "$OFFICECHAT_BACKUP_CONFIG_FILE" ]]; then
-  "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" --config "$OFFICECHAT_BACKUP_CONFIG_FILE" --pre-upgrade
 else
-  backup_now
+  [[ -f "$OFFICECHAT_BACKUP_CONFIG_FILE" ]] || fail "Backup configuration not found: ${OFFICECHAT_BACKUP_CONFIG_FILE}"
+  backup_source="${SCRIPT_DIR}/backup-production.sh"
+  if [[ ! -x "$backup_source" ]]; then
+    backup_source="${SCRIPT_DIR}/../backup-production.sh"
+  fi
+  [[ -x "$backup_source" ]] || fail "Bundled backup script not found"
+  "$backup_source" --config "$OFFICECHAT_BACKUP_CONFIG_FILE" --pre-upgrade
 fi
 
 snapshot_dir="${staging_dir}/previous"

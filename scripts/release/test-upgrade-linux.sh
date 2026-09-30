@@ -64,6 +64,7 @@ run_upgrade() {
     bash "$script_dir/upgrade-linux.sh" "$@"
 }
 
+bash "$script_dir/upgrade-linux.sh" --help >/dev/null
 run_upgrade "$version" --dry-run >/dev/null
 [[ "$(cat "$test_dir/updater-called")" == "$version --dry-run" ]]
 [[ ! -e "$test_dir/docker-called" ]]

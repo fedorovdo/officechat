@@ -17,9 +17,9 @@ version automatically and never downloads deployment files from main.
 EOF_HELP
 }
 
-[[ "$(id -u)" -eq 0 ]] || fail "Run as root"
 [[ $# -gt 0 ]] || { usage; exit 2; }
 case "$1" in --help|-h) usage; exit 0 ;; esac
+[[ "$(id -u)" -eq 0 ]] || fail "Run as root"
 version="$1"
 shift
 dry_run=0

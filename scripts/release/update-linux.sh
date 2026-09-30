@@ -193,6 +193,7 @@ snapshot_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/upgrade-linux.sh" upgrade-linux.sh
 snapshot_file "$caddy_target" Caddyfile.example
 
 rollback_update() {
@@ -212,6 +213,7 @@ rollback_update() {
   restore_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
+  restore_file "${OFFICECHAT_INSTALL_DIR}/upgrade-linux.sh" upgrade-linux.sh
   restore_file "$caddy_target" Caddyfile.example
   if [[ "$caddy_was_running" == "1" && -f "$caddy_compose_file" ]]; then
     docker compose --env-file "$OFFICECHAT_ENV_FILE" -f "$caddy_compose_file" \
@@ -337,7 +339,7 @@ for backup_doc in BACKUP_CENTER_RU.md BACKUP_CENTER.md BACKUP_RESTORE_RU.md BACK
     install -m 0644 "${SCRIPT_DIR}/deployment/${backup_doc}" "${OFFICECHAT_INSTALL_DIR}/docs/${backup_doc}"
   fi
 done
-for release_tool in lib.sh install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh; do
+for release_tool in lib.sh install-linux.sh update-linux.sh upgrade-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl collect-diagnostics.sh; do
   if [[ -f "${SCRIPT_DIR}/${release_tool}" && "${SCRIPT_DIR}/${release_tool}" != "${OFFICECHAT_INSTALL_DIR}/${release_tool}" ]]; then
     install -m 0755 "${SCRIPT_DIR}/${release_tool}" "${OFFICECHAT_INSTALL_DIR}/${release_tool}"
   fi

@@ -77,6 +77,7 @@ run sed -i \
   "${RELEASE_DIR}/.env.example"
 run cp "${ROOT_DIR}/scripts/release/install-linux.sh" "${RELEASE_DIR}/install-linux.sh"
 run cp "${ROOT_DIR}/scripts/release/update-linux.sh" "${RELEASE_DIR}/update-linux.sh"
+run cp "${ROOT_DIR}/scripts/release/upgrade-linux.sh" "${RELEASE_DIR}/upgrade-linux.sh"
 run cp "${ROOT_DIR}/scripts/release/rollback-linux.sh" "${RELEASE_DIR}/rollback-linux.sh"
 run cp "${ROOT_DIR}/scripts/release/uninstall-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh"
 run cp "${ROOT_DIR}/scripts/release/verify-install.sh" "${RELEASE_DIR}/verify-install.sh"
@@ -115,7 +116,7 @@ else
   printf '{\n  "version": "%s",\n  "revision": "%s",\n  "build_date": "%s",\n  "backend_image": "ghcr.io/fedorovdo/officechat-backend:%s",\n  "frontend_image": "ghcr.io/fedorovdo/officechat-frontend:%s"\n}\n' \
     "$VERSION" "$REVISION" "$BUILD_DATE" "$VERSION" "$VERSION" >"${RELEASE_DIR}/RELEASE.json"
 fi
-run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh" "${RELEASE_DIR}/backup-production.sh" "${RELEASE_DIR}/verify-backup.sh" "${RELEASE_DIR}/restore-production.sh" "${RELEASE_DIR}/backup-agent.py"
+run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/upgrade-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh" "${RELEASE_DIR}/backup-production.sh" "${RELEASE_DIR}/verify-backup.sh" "${RELEASE_DIR}/restore-production.sh" "${RELEASE_DIR}/backup-agent.py"
 run chmod 0644 \
   "${RELEASE_DIR}/backup/lib.sh" \
   "${RELEASE_DIR}/backup/officechat-backup.conf.example" \
@@ -129,7 +130,7 @@ run chmod 0644 \
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh upgrade-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
     archive_stage="$(mktemp -d)"
@@ -140,6 +141,7 @@ if [[ "$DRY_RUN" != "1" ]]; then
     chmod 0755 \
       "${archive_stage}/release/install-linux.sh" \
       "${archive_stage}/release/update-linux.sh" \
+      "${archive_stage}/release/upgrade-linux.sh" \
       "${archive_stage}/release/rollback-linux.sh" \
       "${archive_stage}/release/uninstall-linux.sh" \
       "${archive_stage}/release/verify-install.sh" \

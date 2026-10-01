@@ -20,6 +20,7 @@ Commands:
   verify-backup PATH    Verify an existing production backup
   restore-drill PATH    Restore into an isolated temporary environment
   update VERSION        Update using RELEASE.json beside this command
+  upgrade VERSION        Download verified VERSION and update from its bundle
   rollback VERSION      Roll back images to VERSION
   version               Show installed version
   integrity-check       Run compose config and alembic current
@@ -49,6 +50,7 @@ case "$command_name" in
   verify-backup) "${SCRIPT_DIR}/verify-backup.sh" --config /etc/officechat/backup.conf "$@" ;;
   restore-drill) "${SCRIPT_DIR}/restore-production.sh" --config /etc/officechat/backup.conf --verify-only "$@" ;;
   update) "${SCRIPT_DIR}/update-linux.sh" "$@" ;;
+  upgrade) "${SCRIPT_DIR}/upgrade-linux.sh" "$@" ;;
   rollback) "${SCRIPT_DIR}/rollback-linux.sh" "$@" ;;
   version) read_installed_version ;;
   integrity-check)

@@ -257,6 +257,10 @@ test_release_bundle_checksums() (
   standalone_installer="${bundle_root}/dist/officechat-install.sh"
   manifest="${release_dir}/CHECKSUMS.sha256"
   [[ -f "$standalone_installer" ]] || fail_test "Generated standalone installer is missing"
+  [[ -f "${release_dir}/upgrade-linux.sh" ]] ||
+    fail_test "Generated release bundle is missing one-command upgrade"
+  grep -Fq '  upgrade-linux.sh' "$manifest" ||
+    fail_test "Generated release bundle does not checksum one-command upgrade"
   grep -Fq 'Rocky Linux 10, RED OS 8, Debian 12, and Debian 13' "$standalone_installer" ||
     fail_test "Generated standalone installer omitted the supported platform matrix"
   grep -Fq 'ensure_bootstrap_download_prerequisites' "$standalone_installer" ||

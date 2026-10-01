@@ -156,6 +156,9 @@ jobs:
       - name: Release script tests
         run: bash scripts/release/test-release-scripts.sh
 
+      - name: One-command upgrade verification tests
+        run: bash scripts/release/test-upgrade-linux.sh
+
       - name: Backup script tests
         run: |
           bash scripts/test-backup-scripts.sh
@@ -189,8 +192,10 @@ jobs:
             /mnt/scripts/release/test-caddy-access-log.sh \
             /mnt/scripts/release/test-compose-stack.sh \
             /mnt/scripts/release/test-release-scripts.sh \
+            /mnt/scripts/release/test-upgrade-linux.sh \
             /mnt/scripts/release/uninstall-linux.sh \
             /mnt/scripts/release/update-linux.sh \
+            /mnt/scripts/release/upgrade-linux.sh \
             /mnt/scripts/release/verify-install.sh \
             /mnt/scripts/release/officechatctl
 

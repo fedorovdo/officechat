@@ -14,6 +14,10 @@ const apiMocks = vi.hoisted(() => ({
   getBackups: vi.fn(),
   getBackupStatus: vi.fn(),
   getCurrentUser: vi.fn(),
+  getLatestRestore: vi.fn(),
+  getRestoreStatus: vi.fn(),
+  prepareRestore: vi.fn(),
+  startRestore: vi.fn(),
   requireStoredAccessToken: vi.fn(() => "test-token"),
   verifyBackup: vi.fn()
 }));
@@ -101,6 +105,11 @@ describe("Backup Center", () => {
     vi.clearAllMocks();
     apiMocks.requireStoredAccessToken.mockReturnValue("test-token");
     apiMocks.getCurrentUser.mockResolvedValue(userFactory({ role: "superadmin" }));
+    apiMocks.getLatestRestore.mockResolvedValue({ request: null });
+    apiMocks.prepareRestore.mockResolvedValue({
+      challenge: "test-challenge-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", backup_id: backup.backup_id,
+      hostname: "chat.example.test", expires_in_seconds: 600
+    });
     apiMocks.getBackupStatus.mockResolvedValue(status);
     apiMocks.getActiveBackupJob.mockResolvedValue({ job: null });
     apiMocks.getBackups.mockResolvedValue({ items: [backup], page: 1, limit: 25, total: 1, has_next: false });
@@ -121,7 +130,7 @@ describe("Backup Center", () => {
     expect(screen.getByText(en.backups.scheduleFuture)).toBeInTheDocument();
     expect(screen.getByText(/--verify-only/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /restore/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.backups.restoreButton })).not.toBeInTheDocument();
     expect(container.querySelector(".backup-secondary-grid")).toBeInTheDocument();
   });
 
@@ -133,6 +142,28 @@ describe("Backup Center", () => {
     expect(within(dialog).getByText("database, uploads")).toBeInTheDocument();
     expect(container.textContent).not.toContain("/var/backups");
     expect(container.textContent).not.toContain("offsite/path");
+  });
+
+  it("requires reason, exact host, and backup ID before starting restore", async () => {
+    render(<AdminBackups dictionary={en} locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: en.backups.details }));
+    await screen.findByRole("dialog", { name: en.backups.detailTitle });
+    fireEvent.click(screen.getByRole("button", { name: en.backups.restoreButton }));
+    const dialog = await screen.findByRole("dialog", { name: en.backups.restoreConfirmTitle });
+    const start = within(dialog).getByRole("button", { name: en.backups.restoreConfirmButton });
+    expect(start).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: en.backups.restoreReason }), {
+      target: { value: "Recovering messages after an operator incident" }
+    });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: en.backups.restoreTypeHost }), {
+      target: { value: "chat.example.test" }
+    });
+    expect(start).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: en.backups.restoreTypeBackup }), {
+      target: { value: backup.backup_id }
+    });
+    expect(start).toBeEnabled();
+    expect(apiMocks.startRestore).not.toHaveBeenCalled();
   });
 
   it("shows agent unavailable and warnings without a toast loop", async () => {

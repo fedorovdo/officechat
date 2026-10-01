@@ -1,6 +1,6 @@
 # OfficeChat Backup Center
 
-Backup Center is the `superadmin` interface for production backup status, manual backup creation, and isolated verification. It is available at `/en/admin/backups`. It does not delete, download, restore, or reconfigure backups, retention, schedules, or external storage. Production restore remains an authorized CLI-only operation.
+Backup Center is available to `superadmin` and administrators granted the separate `can_restore_backup` permission at `/en/admin/backups`. It lists, creates, verifies and can restore a local backup of the **same OfficeChat version**. It cannot delete or download backups or change retention, schedules or off-site settings.
 
 For storage layout, scheduled backups, external storage, restore, and disaster recovery, use [Backup and Restore](BACKUP_RESTORE.md).
 
@@ -22,6 +22,7 @@ Only completed directories with a strict ID such as `officechat-backup-20260811-
 - **Create backup** starts the fixed full local backup command after confirmation. OfficeChat remains available while the live best-effort backup is created.
 - **Refresh** reloads agent, storage, timer, history, and job metadata.
 - **Verify backup** is available in a completed backup's details. It performs the existing isolated `--verify-only` restore drill and does not change production data.
+- **Restore this backup** requires `verification_status=passed`, a reason of at least 20 characters, and exact typing of the hostname and backup ID. The challenge expires after ten minutes. The host checks the installed version, runs an isolated restore drill and creates a **fresh, verified, protected backup** before changing any production data. Failure of that backup stops the restore. Users may need to sign in again.
 
 The HTTP request only creates an asynchronous host job. The page then polls that job. Actual states are:
 
@@ -56,7 +57,7 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 ```
 
-Only `officechat-backup-job.service` and `officechat-backup-verify@.service` use `NoNewPrivileges=false`. Their root-owned `ExecStart` commands are fixed by the release. This isolates the explicit Docker/SELinux privilege tradeoff in two narrow executors instead of the web application or socket-facing agent.
+The executor units have fixed, root-owned `ExecStart` commands in the release bundle. `officechat-restore@.service` accepts only an agent-generated UUID, reads its root-owned `0600` request record, and persists the reason outside the restored database. Neither the web app nor the socket-facing agent receives the Docker socket.
 
 Create can run only:
 
@@ -119,6 +120,10 @@ Do not disable SELinux, make the socket world-writable, grant the backend Docker
 
 ## Installation and updates
 
-The release installer installs the scripts, documentation, agent configuration, and five backup units. It creates `/etc/officechat/backup.conf` and `/etc/officechat/backup-agent.conf` only when absent and preserves existing configuration on update. The agent is enabled and started; `officechat-backup.timer` is enabled only with `--enable-backup-timer` or a later explicit operator command.
+The release installer installs the scripts, documentation, agent configuration, and a separate restore executor unit. It creates `/etc/officechat/backup.conf` and `/etc/officechat/backup-agent.conf` only when absent and preserves existing configuration on update. The agent is enabled and started; `officechat-backup.timer` is enabled only with `--enable-backup-timer` or a later explicit operator command.
 
 Updates preserve the agent's enabled/active state, replace fixed executor assets before `daemon-reload`, validate the new socket, and recreate only backend so its read-only bind points to the current socket inode. They do not change the timer state or schedule.
+
+## Moving a backup to another server
+
+The button only sees backups already in this server's local repository. Transfer and verify a backup from another server using the [operator restore guide](BACKUP_RESTORE.md), and install the matching OfficeChat version first. Browser upload/import is not yet supported. A custom agent `STATE_DIRECTORY` disables browser restore; CLI remains available.

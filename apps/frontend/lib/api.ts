@@ -14,7 +14,8 @@ export type PermissionKey =
   | "can_broadcast"
   | "can_pin_messages"
   | "can_manage_calendar"
-  | "can_manage_directory";
+  | "can_manage_directory"
+  | "can_restore_backup";
 export type BroadcastPriority = "normal" | "important" | "urgent";
 export type BroadcastAudienceType = "all_active_users" | "selected_groups" | "selected_users";
 export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partially_failed" | "retracted";
@@ -102,6 +103,55 @@ export type OfficeChatBackupJob = {
   safe_message: string;
   last_error: string | null;
 };
+
+export type OfficeChatReleaseUpdate = {
+  current_version: string;
+  latest_version: string | null;
+  release_url: string | null;
+  status: "update_available" | "current" | "unavailable" | "unsupported";
+};
+
+export type RestorePreparation = {
+  challenge: string;
+  backup_id: string;
+  hostname: string;
+  expires_in_seconds: number;
+};
+
+export type RestoreRequest = {
+  request_id: string;
+  backup_id: string;
+  hostname: string;
+  state: "queued" | "running" | "succeeded" | "failed";
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+};
+
+export function prepareRestore(token: string, backupId: string) {
+  return apiFetch<RestorePreparation>(`/api/admin/backups/${encodeURIComponent(backupId)}/restore/prepare`, token, { method: "POST" });
+}
+
+export function startRestore(token: string, payload: {
+  backup_id: string; challenge: string; confirm_hostname: string; confirm_backup: string; reason: string;
+}) {
+  return apiFetch<RestoreRequest>("/api/admin/backups/restores", token, {
+    method: "POST", body: JSON.stringify(payload)
+  });
+}
+
+export function getLatestRestore(token: string) {
+  return apiFetch<{ request: RestoreRequest | null }>("/api/admin/backups/restores/latest", token);
+}
+
+export function getRestoreStatus(token: string, requestId: string) {
+  return apiFetch<RestoreRequest>(`/api/admin/backups/restores/${encodeURIComponent(requestId)}`, token);
+}
+
+export function getReleaseUpdate(token: string) {
+  return apiFetch<OfficeChatReleaseUpdate>("/api/system/updates", token);
+}
 
 export type OfficeChatUser = {
   id: string;

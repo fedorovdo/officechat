@@ -1147,13 +1147,18 @@ grep -Fq 'ExecStart=/opt/officechat/restore-production.sh --config /etc/officech
   echo "Verification executor command is not fixed" >&2
   exit 1
 }
-for unit_name in officechat-backup.service officechat-backup.timer officechat-backup-agent.service officechat-backup-job.service 'officechat-backup-verify@.service'; do
+for unit_name in officechat-backup.service officechat-backup.timer officechat-backup-agent.service officechat-backup-job.service 'officechat-backup-verify@.service' 'officechat-restore@.service'; do
   grep -Fq "install -o root -g root -m 0644 \"\${systemd_source}/${unit_name}\"" \
     "${SCRIPT_DIR}/install-linux.sh" || {
     echo "Installer does not explicitly install ${unit_name} as root-owned" >&2
     exit 1
   }
 done
+grep -Fq 'ExecStart=/usr/bin/python3 /opt/officechat/restore-request.py %i' \
+  "${ROOT_DIR}/deploy/systemd/officechat-restore@.service" || {
+  echo "Restore executor must use a fixed request ID and executable" >&2
+  exit 1
+}
 grep -Fq "as_root chown root:root \"\${OFFICECHAT_INSTALL_DIR}/backup-production.sh\"" \
   "${SCRIPT_DIR}/install-linux.sh" || {
   echo "Installer does not enforce root ownership for privileged backup scripts" >&2
@@ -1788,6 +1793,7 @@ rollback_agent_config="${rollback_etc}/backup-agent.conf"
 rollback_agent_unit="${rollback_etc}/officechat-backup-agent.service"
 rollback_job_unit="${rollback_etc}/officechat-backup-job.service"
 rollback_verify_unit="${rollback_etc}/officechat-backup-verify@.service"
+rollback_restore_unit="${rollback_etc}/officechat-restore@.service"
 rollback_caddy_file="${rollback_install}/caddy/Caddyfile.example"
 rollback_caddy_compose="${rollback_install}/caddy/docker-compose.caddy.yml"
 mkdir -p "${rollback_install}/backup" "${rollback_install}/caddy" "$rollback_etc"
@@ -1797,11 +1803,13 @@ printf 'services:\n  backend:\n    image: ghcr.io/fedorovdo/officechat-backend:0
 printf 'OFFICECHAT_VERSION=0.1.0-rc2\nOFFICECHAT_BUILD_SHA=old-sha\nOFFICECHAT_BUILD_DATE=old-date\nAPP_SECRET_KEY=rollback-secret\n' >"$rollback_env"
 printf '0.1.0-rc2\n' >"${rollback_install}/VERSION"
 printf 'old-agent\n' >"${rollback_install}/backup-agent.py"
+printf 'old-restore-request\n' >"${rollback_install}/restore-request.py"
 printf '{"old":true}\n' >"${rollback_install}/RELEASE.json"
 printf 'old-agent-config\n' >"$rollback_agent_config"
 printf 'old-agent-unit\n' >"$rollback_agent_unit"
 printf 'old-job-unit\n' >"$rollback_job_unit"
 printf 'old-verify-unit\n' >"$rollback_verify_unit"
+printf 'old-restore-unit\n' >"$rollback_restore_unit"
 printf 'old-backup-script\n' >"${rollback_install}/backup-production.sh"
 printf 'old-verify-script\n' >"${rollback_install}/verify-backup.sh"
 printf 'old-restore-script\n' >"${rollback_install}/restore-production.sh"
@@ -1812,7 +1820,7 @@ printf 'services:\n  caddy: {}\n' >"$rollback_caddy_compose"
 declare -A rollback_hashes=()
 for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" "$rollback_env" \
   "$rollback_agent_config" "$rollback_agent_unit" "${rollback_install}/backup-agent.py" \
-  "$rollback_job_unit" "$rollback_verify_unit" "${rollback_install}/backup-production.sh" \
+  "${rollback_install}/restore-request.py" "$rollback_job_unit" "$rollback_verify_unit" "$rollback_restore_unit" "${rollback_install}/backup-production.sh" \
   "${rollback_install}/verify-backup.sh" \
   "${rollback_install}/restore-production.sh" "${rollback_install}/backup/lib.sh" \
   "${rollback_install}/RELEASE.json" "${rollback_install}/VERSION" \
@@ -1839,14 +1847,16 @@ if env \
   OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
   OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
   OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+  OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
   OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${rollback_root}/agent.sock" \
-  bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >/dev/null 2>&1; then
+  bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >"${rollback_root}/update.out" 2>&1; then
   echo "update unexpectedly succeeded with a simulated migration failure" >&2
   exit 1
 fi
 migrations_after="$(grep -Fc 'alembic upgrade head' "$FAKE_LOG" || true)"
 [[ "$migrations_after" -eq $((migrations_before + 1)) ]] || {
   echo "rollback test did not reach the simulated migration failure" >&2
+  tail -30 "${rollback_root}/update.out" >&2
   exit 1
 }
 
@@ -1894,6 +1904,7 @@ for enabled_status in 0 1; do
       OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
       OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
       OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+      OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
       OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="$lifecycle_socket" \
       bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >/dev/null 2>&1; then
       echo "agent lifecycle test unexpectedly succeeded past simulated migration failure" >&2

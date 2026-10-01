@@ -113,3 +113,35 @@ class BackupJobPublic(BaseModel):
 
 class ActiveBackupJobPublic(BaseModel):
     job: BackupJobPublic | None
+
+
+class RestoreConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backup_id: str = Field(pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
+    challenge: str = Field(min_length=32, max_length=64)
+    confirm_hostname: str = Field(min_length=1, max_length=255)
+    confirm_backup: str = Field(pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
+    reason: str = Field(min_length=20, max_length=1000)
+
+
+class RestorePreparationPublic(BaseModel):
+    challenge: str
+    backup_id: str
+    hostname: str
+    expires_in_seconds: int
+
+
+class RestoreRequestPublic(BaseModel):
+    request_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    backup_id: str
+    hostname: str
+    state: Literal["queued", "running", "succeeded", "failed"]
+    requested_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    last_error: str | None
+
+
+class LatestRestorePublic(BaseModel):
+    request: RestoreRequestPublic | None

@@ -26,6 +26,7 @@ OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="${OFFICECHAT_BACKUP_AGENT_CONFIG_FILE:-/etc
 OFFICECHAT_BACKUP_AGENT_UNIT_FILE="${OFFICECHAT_BACKUP_AGENT_UNIT_FILE:-/etc/systemd/system/officechat-backup-agent.service}"
 OFFICECHAT_BACKUP_JOB_UNIT_FILE="${OFFICECHAT_BACKUP_JOB_UNIT_FILE:-/etc/systemd/system/officechat-backup-job.service}"
 OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="${OFFICECHAT_BACKUP_VERIFY_UNIT_FILE:-/etc/systemd/system/officechat-backup-verify@.service}"
+OFFICECHAT_RESTORE_UNIT_FILE="${OFFICECHAT_RESTORE_UNIT_FILE:-/etc/systemd/system/officechat-restore@.service}"
 OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${OFFICECHAT_BACKUP_AGENT_SOCKET_FILE:-/run/officechat-backup-agent/agent.sock}"
 DRY_RUN="${DRY_RUN:-0}"
 

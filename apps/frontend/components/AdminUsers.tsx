@@ -37,7 +37,8 @@ const specialPermissionKeys: PermissionKey[] = [
   "can_broadcast",
   "can_pin_messages",
   "can_manage_calendar",
-  "can_manage_directory"
+  "can_manage_directory",
+  "can_restore_backup"
 ];
 type UserStatusFilter = "all" | "active" | "disabled" | "bots";
 

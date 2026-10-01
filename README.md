@@ -13,6 +13,22 @@ OfficeChat release packaging supports Linux `amd64` self-hosted installs:
 - install guide: [docs/INSTALL_RU.md](docs/INSTALL_RU.md)
 - metadata: `deploy/release-metadata.json`
 
+Automatic Docker installation supports Rocky Linux 10, RED OS 8, Debian 12,
+and Debian 13 on `linux/amd64`. Rocky Linux uses Docker's official repository,
+RED OS uses only its native `dnf` repositories, and Debian uses Docker's
+official APT repository with signing-key fingerprint verification. RED OS keeps
+the existing SELinux mode and policy unchanged.
+
+When automatic Docker installation is selected, the standalone bootstrap can
+install missing `curl` and trusted CA certificates through the supported OS
+package manager before downloading the release bundle. With
+`--no-install-docker`, missing download prerequisites are reported without
+changing the system. Private image access still requires the documented
+`docker login ghcr.io --password-stdin` flow with package read access.
+With `--dry-run`, missing prerequisites produce a package-installation plan and
+stop before bundle download or verification; when prerequisites are already
+available, the bundle verification and inner installer preflight still run.
+
 Release images use the exact version supplied by the annotated tag or
 `OFFICECHAT_RELEASE_VERSION`, plus an immutable `sha-<short_git_sha>` tag. Release
 Compose requires an explicit `OFFICECHAT_VERSION` and never falls back to an old

@@ -51,18 +51,26 @@ packages. Token/PAT должен иметь только необходимый 
 ## 4. Требования
 
 - Сервер `linux/amd64`.
-- Для автоматической установки Docker: Rocky Linux 10 или Debian 12.
+- Для автоматической установки Docker: Rocky Linux 10, RED OS 8, Debian 12 или
+  Debian 13.
 - Доступ `root` либо `sudo`.
-- Утилиты `curl`, `tar`, `sha256sum` и `mktemp`.
+- Утилиты `tar`, `sha256sum` и `mktemp`. Standalone bootstrap может установить
+  отсутствующие `curl` и CA certificates при выбранной автоматической установке
+  Docker на поддерживаемой ОС.
 - Внутреннее DNS-имя, указывающее на IP-адрес сервера.
 - Доступ клиентов к портам TCP 80 и 443.
 - GitHub account с правом чтения приватных OfficeChat packages в GHCR.
 
-Standalone installer автоматически устанавливает официальный Docker Engine и
-Compose v2 на Rocky Linux 10 и Debian 12. Если Docker уже установлен, он
-используется без переустановки. На другой Linux-платформе Docker Engine и Compose
-v2 необходимо установить вручную и запускать bootstrap с
-`--no-install-docker`.
+Standalone installer автоматически устанавливает Docker Engine и Compose v2 на
+Rocky Linux 10, RED OS 8, Debian 12 и Debian 13. Rocky Linux использует
+официальный Docker repository. RED OS использует только штатные репозитории ОС и
+пакеты `docker-ce`, `docker-ce-cli`, `docker-compose`; сторонние CentOS/Fedora или
+Docker repositories не добавляются. SELinux остаётся включённым, отключать или
+ослаблять его не требуется; installer не меняет текущий режим или policy.
+Debian использует официальный Docker APT repository с проверкой fingerprint
+ключа. Если Docker уже установлен, он используется без
+переустановки. На другой Linux-платформе Docker Engine и Compose v2 необходимо
+установить вручную и запускать bootstrap с `--no-install-docker`.
 ## 5. Простая установка на новый сервер
 
 ### 5.1. Подготовьте DNS
@@ -123,6 +131,18 @@ chmod 0755 officechat-install.sh
 ```
 
 Проверка должна вывести `officechat-install.sh: OK`.
+
+На минимальной Debian 13 `curl` может отсутствовать. Для первоначального
+скачивания установите `curl` и `ca-certificates` штатным `apt-get` либо передайте
+`officechat-install.sh` и его checksum на сервер по доверенному каналу. Если
+проверенный standalone installer уже находится на сервере, обычный запуск с
+автоматической установкой Docker сам установит недостающие download prerequisites
+через `apt-get`; на Rocky и RED OS для этого используется штатный `dnf`.
+`--no-install-docker` не меняет систему и при отсутствии `curl` выдаёт инструкцию.
+При недоступных prerequisites `--dry-run` только показывает команды их установки
+и завершается до скачивания и проверки bundle. Если prerequisites уже доступны,
+он сохраняет обычный dry-run flow: скачивает и проверяет bundle, затем запускает
+preflight внутреннего installer без системных изменений.
 
 ### 5.4. Запустите установку
 
@@ -315,6 +335,37 @@ Enforcing описана в `deployment/production-update_RU.md`.
 ```
 
 Диагностика собирает состояние Compose, версии, Alembic revision, sanitized logs, OS/Docker info и свободное место. Она не выгружает `.env`, сообщения, базу данных или вложения.
+
+### Debian 13 с ограниченным доступом к Docker CDN
+
+Если загрузка пакетов из `download.docker.com` на сервере истекает по timeout,
+сначала проверьте маршрут и сравните его с другой машиной в той же сети. Для
+тестовой VM допустима ручная доставка **официальных** Docker .deb с проверкой
+размеров и SHA-256 по подписанному Docker APT index. После такой установки
+запускайте standalone installer с `--no-install-docker`; это не отменяет проверки
+release bundle, GHCR images и Compose.
+
+Если `docker pull caddy:2.10-alpine` останавливается на Docker Hub, отдельно
+проверьте доступность манифестов `caddy:2.10-alpine`, `postgres:16-alpine` и
+`valkey/valkey:8-alpine` через официальное публичное зеркало
+`mirror.gcr.io`. Оно кэширует только часть Docker Hub; при отсутствии образа
+Docker daemon может снова обратиться к Docker Hub. На **новой тестовой VM** можно
+добавить `https://mirror.gcr.io` в `registry-mirrors` файла
+`/etc/docker/daemon.json`, сохранив существующие настройки, перезапустить Docker
+и проверить все три обычных имени через `docker pull`. На хосте с другими
+контейнерами запланируйте перезапуск Docker отдельно. GHCR-аутентификация для
+приватных OfficeChat images остаётся обязательной.
+
+Root-сеанс через `su` может унаследовать `PATH` без `/usr/sbin`: при этом
+установленный `groupadd` выглядит отсутствующим. Installer дополняет `PATH`
+системными sbin-каталогами. Для уже выпущенного RC13.23 при диагностике проверьте
+`/usr/sbin/groupadd` и `PATH`; если первый запуск остановился до создания
+`.env`, не удаляйте частично созданные каталоги и повторите тот же installer
+с `PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH"`.
+
+Фактический путь квалификации RED OS 8 и Debian 13, включая сетевые обходы,
+SHA-256, HTTPS и изолированную проверку копии, записан в
+[журнале RC13.23](https://github.com/fedorovdo/officechat/issues/6).
 
 ## 17. Git tag release
 

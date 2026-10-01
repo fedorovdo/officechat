@@ -82,7 +82,8 @@ if [[ "${1:-}" == "compose" && "$*" == *"POSTGRES_DB"* ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "compose" && "$*" == *" images -q "* ]]; then
-  printf 'sha256:fake-image\n'
+  # Compose v5 may return a bare 64-character ID rather than sha256:<ID>.
+  printf '%064d\n' 0
   exit 0
 fi
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
@@ -103,11 +104,17 @@ if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
     exit 66
   }
   service="${format%%$'\t'*}"
-  printf '%s\tofficechat/%s:test,officechat/%s:latest\tsha256:fake-image\tofficechat/%s@sha256:fake-digest\tamd64\n' \
-    "$service" "$service" "$service" "$service"
+  printf -v image_id '%064d' 0
+  printf '%s\tofficechat/%s:test,officechat/%s:latest\tsha256:%s\tofficechat/%s@sha256:fake-digest\tamd64\n' \
+    "$service" "$service" "$service" "$image_id" "$service"
   exit 0
 fi
 if [[ "${1:-}" == "save" && "${2:-}" == "-o" ]]; then
+  printf -v image_id '%064d' 0
+  [[ "${4:-}" == "sha256:${image_id}" ]] || {
+    printf 'docker save received an unqualified image ID\n' >&2
+    exit 67
+  }
   printf 'FAKE-IMAGE\n' >"$3"
   exit 0
 fi

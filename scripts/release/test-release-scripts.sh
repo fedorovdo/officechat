@@ -237,7 +237,7 @@ EOF_PREFLIGHT_SUDO
 }
 
 test_release_bundle_checksums() (
-  local bundle_root contract_dir manifest release_dir
+  local bundle_root contract_dir manifest release_dir standalone_installer
   contract_dir="$(mktemp -d)"
   trap 'rm -rf -- "$contract_dir"' EXIT
   bundle_root="${contract_dir}/source"
@@ -254,7 +254,17 @@ test_release_bundle_checksums() (
     bash "${bundle_root}/scripts/release/create-release-bundle.sh" >/dev/null
 
   release_dir="${bundle_root}/release"
+  standalone_installer="${bundle_root}/dist/officechat-install.sh"
   manifest="${release_dir}/CHECKSUMS.sha256"
+  [[ -f "$standalone_installer" ]] || fail_test "Generated standalone installer is missing"
+  grep -Fq 'Rocky Linux 10, RED OS 8, Debian 12, and Debian 13' "$standalone_installer" ||
+    fail_test "Generated standalone installer omitted the supported platform matrix"
+  grep -Fq 'ensure_bootstrap_download_prerequisites' "$standalone_installer" ||
+    fail_test "Generated standalone installer omitted download prerequisite bootstrap"
+  grep -Fq 'RED OS 8' "${release_dir}/README_INSTALL_RU.md" ||
+    fail_test "Generated Russian install guide omitted RED OS 8"
+  grep -Fq 'Debian 13' "${release_dir}/deployment/production-installation.md" ||
+    fail_test "Generated production install guide omitted Debian 13"
   [[ -f "$manifest" ]] || fail_test "Generated release bundle is missing CHECKSUMS.sha256"
   (
     cd "$release_dir"
@@ -316,6 +326,366 @@ PY_CHECKSUM_COVERAGE
   printf 'release bundle checksum coverage tests passed\n'
 )
 
+test_docker_platform_contracts() (
+  local contract_dir output platform status
+  contract_dir="$(mktemp -d)"
+  trap 'rm -rf -- "$contract_dir"' EXIT
+
+  cat >"${contract_dir}/rocky-10" <<'EOF_ROCKY_OS'
+ID="rocky"
+VERSION_ID="10.0"
+EOF_ROCKY_OS
+  cat >"${contract_dir}/redos-8" <<'EOF_REDOS_OS'
+ID=redos
+VERSION_ID=8.0.3
+ID_LIKE="rhel centos fedora"
+EOF_REDOS_OS
+  cat >"${contract_dir}/redos-9" <<'EOF_REDOS_9_OS'
+ID=redos
+VERSION_ID=9.0
+ID_LIKE="rhel centos fedora"
+EOF_REDOS_9_OS
+  cat >"${contract_dir}/debian-12" <<'EOF_DEBIAN_12_OS'
+ID=debian
+VERSION_ID="12"
+VERSION_CODENAME=bookworm
+EOF_DEBIAN_12_OS
+  cat >"${contract_dir}/debian-12-fallback" <<'EOF_DEBIAN_12_FALLBACK_OS'
+ID=debian
+VERSION_ID="12"
+EOF_DEBIAN_12_FALLBACK_OS
+  cat >"${contract_dir}/debian-13" <<'EOF_DEBIAN_13_OS'
+ID=debian
+VERSION_ID="13"
+VERSION_CODENAME=trixie
+EOF_DEBIAN_13_OS
+  cat >"${contract_dir}/debian-13-fallback" <<'EOF_DEBIAN_13_FALLBACK_OS'
+ID=debian
+VERSION_ID="13"
+EOF_DEBIAN_13_FALLBACK_OS
+  cat >"${contract_dir}/debian-14" <<'EOF_DEBIAN_14_OS'
+ID=debian
+VERSION_ID="14"
+VERSION_CODENAME=forky
+EOF_DEBIAN_14_OS
+  cat >"${contract_dir}/unsupported" <<'EOF_UNSUPPORTED_OS'
+ID=ubuntu
+VERSION_ID="24.04"
+VERSION_CODENAME=noble
+EOF_UNSUPPORTED_OS
+
+  platform="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/rocky-10" \
+    bash -c ". \"\$1\"; detect_supported_docker_platform; printf \"%s\" \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
+    _ "${SCRIPT_DIR}/lib.sh")"
+  [[ "$platform" == "rocky" ]] || fail_test "Rocky Linux 10 platform detection failed"
+
+  output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/rocky-10" \
+    bash -c ". \"\$1\"; install_docker_engine" _ "${SCRIPT_DIR}/lib.sh")"
+  [[ "$output" == *"https://download.docker.com/linux/centos/docker-ce.repo"* ]] ||
+    fail_test "Rocky Docker plan omitted the official Docker repository"
+  [[ "$output" == *"docker-compose-plugin"* ]] ||
+    fail_test "Rocky Docker plan omitted the Compose v2 plugin"
+  [[ "$output" == *"systemctl enable --now docker"* ]] ||
+    fail_test "Rocky Docker plan omitted Docker service enablement"
+
+  platform="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/redos-8" \
+    bash -c ". \"\$1\"; detect_supported_docker_platform; printf \"%s\" \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
+    _ "${SCRIPT_DIR}/lib.sh")"
+  [[ "$platform" == "redos" ]] || fail_test "RED OS 8 platform detection failed"
+
+  output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/redos-8" \
+    bash -c ". \"\$1\"; install_docker_engine" _ "${SCRIPT_DIR}/lib.sh")"
+  [[ "$output" == *"docker-ce docker-ce-cli docker-compose"* ]] ||
+    fail_test "RED OS Docker plan omitted native Docker packages"
+  [[ "$output" != *"download.docker.com"* ]] ||
+    fail_test "RED OS Docker plan added an external Docker repository"
+  for forbidden_package in containerd.io docker-buildx-plugin docker-compose-plugin; do
+    [[ "$output" != *"$forbidden_package"* ]] ||
+      fail_test "RED OS Docker plan requested unavailable package ${forbidden_package}"
+  done
+  [[ "$output" == *"systemctl enable --now docker"* ]] ||
+    fail_test "RED OS Docker plan omitted Docker service enablement"
+
+  for fixture in debian-12 debian-12-fallback debian-13 debian-13-fallback; do
+    platform="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/${fixture}" \
+      bash -c ". \"\$1\"; detect_supported_docker_platform; printf \"%s|%s\" \"\$OFFICECHAT_DOCKER_PLATFORM\" \"\$OFFICECHAT_OS_VERSION_CODENAME\"" \
+      _ "${SCRIPT_DIR}/lib.sh")"
+    case "$fixture" in
+      debian-12|debian-12-fallback)
+        [[ "$platform" == "debian|bookworm" ]] || fail_test "Debian 12 Bookworm detection or fallback failed"
+        ;;
+      debian-13|debian-13-fallback)
+        [[ "$platform" == "debian|trixie" ]] || fail_test "Debian 13 Trixie platform detection or fallback failed"
+        ;;
+    esac
+  done
+
+  output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/debian-12" \
+    bash -c ". \"\$1\"; install_docker_engine" _ "${SCRIPT_DIR}/lib.sh")"
+  [[ "$output" == *"https://download.docker.com/linux/debian bookworm stable"* ]] ||
+    fail_test "Debian 12 Docker plan omitted the Bookworm Docker repository"
+
+  output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/debian-13" \
+    bash -c ". \"\$1\"; install_docker_engine" _ "${SCRIPT_DIR}/lib.sh")"
+  [[ "$output" == *"https://download.docker.com/linux/debian trixie stable"* ]] ||
+    fail_test "Debian 13 Docker plan omitted the Trixie Docker repository"
+  for required_package in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
+    [[ "$output" == *"$required_package"* ]] ||
+      fail_test "Debian Docker plan omitted ${required_package}"
+  done
+
+  for fixture in redos-9 debian-14 unsupported; do
+    status=0
+    output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/${fixture}" \
+      bash -c ". \"\$1\"; install_docker_engine" _ "${SCRIPT_DIR}/lib.sh" 2>&1)" || status=$?
+    [[ "$status" -ne 0 ]] || fail_test "Unsupported platform ${fixture} was accepted"
+    [[ "$output" == *"supports only Rocky Linux 10, RED OS 8, Debian 12, and Debian 13"* ]] ||
+      fail_test "Unsupported platform ${fixture} failure is unclear"
+    [[ "$output" != *"DRY-RUN:"* ]] ||
+      fail_test "Unsupported platform ${fixture} reached a package-manager mutation"
+  done
+
+  output="$(bash "${SCRIPT_DIR}/bootstrap-linux.sh" --help)"
+  for platform_name in 'Rocky Linux 10' 'RED OS 8' 'Debian 12' 'Debian 13' 'linux/amd64'; do
+    [[ "$output" == *"$platform_name"* ]] ||
+      fail_test "Bootstrap help omitted supported platform ${platform_name}"
+  done
+
+  grep -Fq "RED OS uses only its native \`dnf\` repositories" "${ROOT_DIR}/README.md" ||
+    fail_test "English release documentation omitted native RED OS repositories"
+  grep -Fq 'SELinux mode and policy unchanged' "${ROOT_DIR}/README.md" ||
+    fail_test "English release documentation omitted the RED OS SELinux invariant"
+  for install_doc in \
+    "${ROOT_DIR}/docs/INSTALL_RU.md" \
+    "${ROOT_DIR}/docs/deployment/production-installation.md"; do
+    grep -Fq 'RED OS 8' "$install_doc" || fail_test "RED OS 8 is missing from ${install_doc}"
+    grep -Fq 'Debian 13' "$install_doc" || fail_test "Debian 13 is missing from ${install_doc}"
+    grep -Fq 'штатн' "$install_doc" || fail_test "Native RED OS repositories are unclear in ${install_doc}"
+    grep -Fq 'SELinux' "$install_doc" || fail_test "SELinux guidance is missing from ${install_doc}"
+    grep -Fq 'официальн' "$install_doc" || fail_test "Official Debian Docker repository is unclear in ${install_doc}"
+  done
+
+  printf 'Docker installation platform contracts passed\n'
+)
+
+test_bootstrap_prerequisite_contracts() (
+  local bootstrap_test_ca_file bundle contract_dir fixture output status version
+  contract_dir="$(mktemp -d)"
+  trap 'rm -rf -- "$contract_dir"' EXIT
+  version="9.8.7-bootstrap-prerequisites"
+  bundle="officechat-${version}-linux-amd64.tar.gz"
+  mkdir -p "${contract_dir}/assets" "${contract_dir}/bin" "${contract_dir}/payload/release"
+  printf 'test-ca\n' >"${contract_dir}/ca-certificates.crt"
+  bootstrap_test_ca_file="${contract_dir}/ca-certificates.crt"
+
+  cat >"${contract_dir}/payload/release/install-linux.sh" <<'EOF_PREREQ_INSTALLER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+{
+  printf 'CALLED\n'
+  printf 'ARG=%s\n' "$@"
+} >"${OFFICECHAT_BOOTSTRAP_INSTALL_LOG:?}"
+EOF_PREREQ_INSTALLER
+  chmod +x "${contract_dir}/payload/release/install-linux.sh"
+  printf '%s\n' "$version" >"${contract_dir}/payload/release/VERSION"
+  printf '{"version":"%s"}\n' "$version" >"${contract_dir}/payload/release/RELEASE.json"
+  (
+    cd "${contract_dir}/payload/release"
+    sha256sum install-linux.sh VERSION RELEASE.json >CHECKSUMS.sha256
+  )
+  tar -C "${contract_dir}/payload" -czf "${contract_dir}/assets/${bundle}" release
+  (
+    cd "${contract_dir}/assets"
+    sha256sum "$bundle" >"${bundle}.sha256"
+  )
+
+  cat >"${contract_dir}/curl-template" <<'EOF_PREREQ_CURL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'curl test fixture\n'
+  exit 0
+fi
+output=""
+url=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    --retry) shift 2 ;;
+    --fail|--location|--silent|--show-error) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+[[ -n "$output" && -n "$url" ]]
+cp -- "${OFFICECHAT_BOOTSTRAP_FIXTURE_DIR:?}/${url##*/}" "$output"
+EOF_PREREQ_CURL
+  chmod +x "${contract_dir}/curl-template"
+
+  cat >"${contract_dir}/broken-curl" <<'EOF_BROKEN_CURL'
+#!/usr/bin/env bash
+exit 127
+EOF_BROKEN_CURL
+  chmod +x "${contract_dir}/broken-curl"
+
+  cat >"${contract_dir}/bin/id" <<'EOF_PREREQ_ID'
+#!/usr/bin/env bash
+[[ "${1:-}" == "-u" ]] && { printf '0\n'; exit 0; }
+exec /usr/bin/id "$@"
+EOF_PREREQ_ID
+  chmod +x "${contract_dir}/bin/id"
+
+  cat >"${contract_dir}/bin/apt-get" <<'EOF_PREREQ_APT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'apt-get %s\n' "$*" >>"${OFFICECHAT_BOOTSTRAP_PACKAGE_LOG:?}"
+if [[ " $* " == *" install "* ]]; then
+  cp -- "${OFFICECHAT_BOOTSTRAP_CURL_TEMPLATE:?}" "${OFFICECHAT_BOOTSTRAP_FAKE_BIN:?}/curl"
+  chmod +x "${OFFICECHAT_BOOTSTRAP_FAKE_BIN}/curl"
+  printf 'test-ca\n' >"${OFFICECHAT_BOOTSTRAP_CA_INSTALL_TARGET:?}"
+fi
+EOF_PREREQ_APT
+  chmod +x "${contract_dir}/bin/apt-get"
+
+  cat >"${contract_dir}/bin/dnf" <<'EOF_PREREQ_DNF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'dnf %s\n' "$*" >>"${OFFICECHAT_BOOTSTRAP_PACKAGE_LOG:?}"
+cp -- "${OFFICECHAT_BOOTSTRAP_CURL_TEMPLATE:?}" "${OFFICECHAT_BOOTSTRAP_FAKE_BIN:?}/curl"
+chmod +x "${OFFICECHAT_BOOTSTRAP_FAKE_BIN}/curl"
+printf 'test-ca\n' >"${OFFICECHAT_BOOTSTRAP_CA_INSTALL_TARGET:?}"
+EOF_PREREQ_DNF
+  chmod +x "${contract_dir}/bin/dnf"
+
+  cat >"${contract_dir}/rocky-10" <<'EOF_PREREQ_ROCKY'
+ID=rocky
+VERSION_ID=10.0
+EOF_PREREQ_ROCKY
+  cat >"${contract_dir}/debian-13" <<'EOF_PREREQ_DEBIAN'
+ID=debian
+VERSION_ID=13
+VERSION_CODENAME=trixie
+EOF_PREREQ_DEBIAN
+  cat >"${contract_dir}/redos-8" <<'EOF_PREREQ_REDOS'
+ID=redos
+VERSION_ID=8.0.3
+ID_LIKE="rhel centos fedora"
+EOF_PREREQ_REDOS
+  cat >"${contract_dir}/unsupported" <<'EOF_PREREQ_UNSUPPORTED'
+ID=ubuntu
+VERSION_ID=24.04
+EOF_PREREQ_UNSUPPORTED
+
+  run_bootstrap_prerequisite_fixture() {
+    local os_release_file="$1"
+    shift
+    env \
+      PATH="${contract_dir}/bin:${PATH}" \
+      OFFICECHAT_OS_RELEASE_FILE="$os_release_file" \
+      OFFICECHAT_RELEASE_BASE_URL="https://downloads.example.invalid/releases" \
+      OFFICECHAT_BOOTSTRAP_FIXTURE_DIR="${contract_dir}/assets" \
+      OFFICECHAT_BOOTSTRAP_INSTALL_LOG="${contract_dir}/install.log" \
+      OFFICECHAT_BOOTSTRAP_PACKAGE_LOG="${contract_dir}/package.log" \
+      OFFICECHAT_BOOTSTRAP_CURL_TEMPLATE="${contract_dir}/curl-template" \
+      OFFICECHAT_BOOTSTRAP_FAKE_BIN="${contract_dir}/bin" \
+      OFFICECHAT_BOOTSTRAP_CA_INSTALL_TARGET="$bootstrap_test_ca_file" \
+      SSL_CERT_FILE="$bootstrap_test_ca_file" \
+      bash "${SCRIPT_DIR}/bootstrap-linux.sh" \
+        --version "$version" --no-start-caddy --no-create-admin "$@"
+  }
+
+  cp -- "${contract_dir}/broken-curl" "${contract_dir}/bin/curl"
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/debian-13")"
+  grep -Fq 'apt-get update' "${contract_dir}/package.log" ||
+    fail_test "Debian 13 bootstrap did not refresh APT metadata"
+  grep -Fq 'apt-get install -y ca-certificates curl' "${contract_dir}/package.log" ||
+    fail_test "Debian 13 bootstrap did not install minimal download prerequisites"
+  [[ -s "${contract_dir}/install.log" ]] ||
+    fail_test "Debian 13 bootstrap did not continue after installing curl"
+  [[ "$output" == *"Preparing curl and trusted CA certificates on debian 13."* ]] ||
+    fail_test "Debian 13 bootstrap prerequisite action was not reported"
+
+  cp -- "${contract_dir}/broken-curl" "${contract_dir}/bin/curl"
+  rm -f -- "${contract_dir}/package.log" "${contract_dir}/install.log"
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/rocky-10")"
+  grep -Fq 'dnf -y install ca-certificates curl' "${contract_dir}/package.log" ||
+    fail_test "Rocky Linux 10 bootstrap did not use DNF download prerequisites"
+  [[ -s "${contract_dir}/install.log" ]] ||
+    fail_test "Rocky Linux 10 bootstrap did not continue after installing curl"
+
+  cp -- "${contract_dir}/broken-curl" "${contract_dir}/bin/curl"
+  rm -f -- "${contract_dir}/package.log" "${contract_dir}/install.log"
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/redos-8")"
+  grep -Fq 'dnf -y install ca-certificates curl' "${contract_dir}/package.log" ||
+    fail_test "RED OS 8 bootstrap did not use native DNF prerequisites"
+  [[ -s "${contract_dir}/install.log" ]] ||
+    fail_test "RED OS 8 bootstrap did not continue after installing curl"
+  [[ "$output" == *"Preparing curl and trusted CA certificates on redos 8.0.3."* ]] ||
+    fail_test "RED OS 8 bootstrap prerequisite action was not reported"
+
+  bootstrap_test_ca_file="${contract_dir}/missing-ca-certificates.crt"
+  cp -- "${contract_dir}/curl-template" "${contract_dir}/bin/curl"
+  rm -f -- "$bootstrap_test_ca_file" "${contract_dir}/package.log" "${contract_dir}/install.log"
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/debian-13")"
+  grep -Fq 'apt-get install -y ca-certificates curl' "${contract_dir}/package.log" ||
+    fail_test "Missing trusted CA did not trigger Debian prerequisite installation"
+  [[ -s "$bootstrap_test_ca_file" && -s "${contract_dir}/install.log" ]] ||
+    fail_test "Bootstrap did not continue after installing a missing trusted CA bundle"
+
+  rm -f -- "$bootstrap_test_ca_file" "${contract_dir}/package.log" "${contract_dir}/install.log"
+  status=0
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/debian-13" --no-install-docker 2>&1)" || status=$?
+  [[ "$status" -ne 0 ]] || fail_test "Bootstrap without Docker installation accepted a missing trusted CA bundle"
+  [[ "$output" == *"curl and trusted CA certificates are required"* ]] ||
+    fail_test "Missing trusted CA failure did not explain the download prerequisites"
+  [[ ! -e "${contract_dir}/package.log" ]] ||
+    fail_test "Missing trusted CA with --no-install-docker reached the package manager"
+
+  bootstrap_test_ca_file="${contract_dir}/ca-certificates.crt"
+
+  cp -- "${contract_dir}/broken-curl" "${contract_dir}/bin/curl"
+  rm -f -- "${contract_dir}/package.log" "${contract_dir}/install.log"
+  status=0
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/unsupported" 2>&1)" || status=$?
+  [[ "$status" -ne 0 ]] || fail_test "Unsupported bootstrap platform was accepted"
+  [[ "$output" == *"supports only Rocky Linux 10, RED OS 8, Debian 12, and Debian 13"* ]] ||
+    fail_test "Unsupported bootstrap platform failure is unclear"
+  [[ ! -e "${contract_dir}/package.log" ]] ||
+    fail_test "Unsupported bootstrap platform reached the package manager"
+
+  cp -- "${contract_dir}/broken-curl" "${contract_dir}/bin/curl"
+  rm -f -- "${contract_dir}/package.log" "${contract_dir}/install.log"
+  status=0
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/debian-13" --no-install-docker 2>&1)" || status=$?
+  [[ "$status" -ne 0 ]] || fail_test "Bootstrap without Docker installation accepted unavailable curl"
+  [[ "$output" == *"curl and trusted CA certificates are required"* ]] ||
+    fail_test "Bootstrap without Docker installation did not explain the curl prerequisite"
+  [[ ! -e "${contract_dir}/package.log" ]] ||
+    fail_test "Bootstrap --no-install-docker reached the package manager"
+
+  cp -- "${contract_dir}/curl-template" "${contract_dir}/bin/curl"
+  rm -f -- "${contract_dir}/package.log" "${contract_dir}/install.log"
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/debian-13" --dry-run)"
+  [[ "$output" == *"PASS: Bundle SHA-256 verified."* ]] ||
+    fail_test "Bootstrap dry-run with ready prerequisites did not verify the bundle"
+  grep -Fxq 'ARG=--dry-run' "${contract_dir}/install.log" ||
+    fail_test "Bootstrap dry-run with ready prerequisites did not run the inner preflight"
+  [[ ! -e "${contract_dir}/package.log" ]] ||
+    fail_test "Bootstrap dry-run with ready prerequisites reached the package manager"
+
+  cp -- "${contract_dir}/broken-curl" "${contract_dir}/bin/curl"
+  rm -f -- "${contract_dir}/package.log" "${contract_dir}/install.log"
+  output="$(run_bootstrap_prerequisite_fixture "${contract_dir}/debian-13" --dry-run)"
+  [[ "$output" == *"DRY-RUN: apt-get update"* &&
+    "$output" == *"DRY-RUN: apt-get install -y ca-certificates curl"* ]] ||
+    fail_test "Bootstrap dry-run did not report the Debian prerequisite plan"
+  [[ "$output" != *"PASS: Bundle SHA-256 verified."* ]] ||
+    fail_test "Bootstrap dry-run claimed bundle verification without download prerequisites"
+  [[ ! -e "${contract_dir}/package.log" && ! -e "${contract_dir}/install.log" ]] ||
+    fail_test "Bootstrap dry-run performed a package or installer mutation"
+
+  printf 'Bootstrap download prerequisite contracts passed\n'
+)
+
 mode="${1:-auto}"
 case "$mode" in
   --non-root-rejection)
@@ -333,6 +703,16 @@ case "$mode" in
     test_release_bundle_checksums
     exit 0
     ;;
+  --docker-platforms)
+    [[ $# -eq 1 ]] || fail_test "Unexpected arguments for Docker platform test"
+    test_docker_platform_contracts
+    exit 0
+    ;;
+  --bootstrap-prerequisites)
+    [[ $# -eq 1 ]] || fail_test "Unexpected arguments for bootstrap prerequisite test"
+    test_bootstrap_prerequisite_contracts
+    exit 0
+    ;;
   --root-lifecycle)
     [[ $# -eq 1 ]] || fail_test "Unexpected arguments for root lifecycle test"
     [[ "$(id -u)" -eq 0 ]] || fail_test "Root lifecycle test requires actual EUID 0"
@@ -340,9 +720,11 @@ case "$mode" in
     printf 'root lifecycle user: %s\n' "$(whoami)"
     ;;
   auto)
-    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--release-bundle|--root-lifecycle]"
+    [[ $# -eq 0 ]] || fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--release-bundle|--docker-platforms|--bootstrap-prerequisites|--root-lifecycle]"
     test_install_image_preflight
     test_release_bundle_checksums
+    test_docker_platform_contracts
+    test_bootstrap_prerequisite_contracts
     if [[ "$(id -u)" -ne 0 ]]; then
       test_non_root_rejection
       [[ -x /usr/bin/sudo ]] ||
@@ -354,7 +736,7 @@ case "$mode" in
     printf 'root lifecycle user: %s\n' "$(whoami)"
     ;;
   *)
-    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--release-bundle|--root-lifecycle]"
+    fail_test "Usage: test-release-scripts.sh [--non-root-rejection|--install-image-preflight|--release-bundle|--docker-platforms|--bootstrap-prerequisites|--root-lifecycle]"
     ;;
 esac
 
@@ -872,99 +1254,6 @@ if grep -Fq 'systemctl enable --now officechat-backup-agent.service' "${SCRIPT_D
   exit 1
 fi
 
-platform_contract_dir="${TMP_DIR}/docker-platform-contract"
-mkdir -p "$platform_contract_dir"
-
-cat >"${platform_contract_dir}/rocky-os-release" <<'EOF_ROCKY_OS'
-ID="rocky"
-VERSION_ID="10.0"
-EOF_ROCKY_OS
-
-cat >"${platform_contract_dir}/debian-os-release" <<'EOF_DEBIAN_OS'
-ID=debian
-VERSION_ID="12"
-VERSION_CODENAME=bookworm
-EOF_DEBIAN_OS
-
-cat >"${platform_contract_dir}/unsupported-os-release" <<'EOF_UNSUPPORTED_OS'
-ID=ubuntu
-VERSION_ID="24.04"
-VERSION_CODENAME=noble
-EOF_UNSUPPORTED_OS
-
-rocky_platform="$(
-  env \
-    DRY_RUN=1 \
-    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
-    bash -c ". \"\$1\"; detect_supported_docker_platform; printf '%s' \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
-    _ "${SCRIPT_DIR}/lib.sh"
-)"
-
-[[ "$rocky_platform" == "rocky" ]] ||
-  fail_test "Rocky Linux 10 platform detection failed"
-
-rocky_install_output="$(
-  env \
-    DRY_RUN=1 \
-    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/rocky-os-release" \
-    bash -c ". \"\$1\"; install_docker_engine" \
-    _ "${SCRIPT_DIR}/lib.sh"
-)"
-
-[[ "$rocky_install_output" == *"https://download.docker.com/linux/centos/docker-ce.repo"* ]] ||
-  fail_test "Rocky Docker plan omitted the official Docker repository"
-
-[[ "$rocky_install_output" == *"docker-compose-plugin"* ]] ||
-  fail_test "Rocky Docker plan omitted the Compose v2 plugin"
-
-[[ "$rocky_install_output" == *"systemctl enable --now docker"* ]] ||
-  fail_test "Rocky Docker plan omitted Docker service enablement"
-
-debian_platform="$(
-  env \
-    DRY_RUN=1 \
-    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
-    bash -c ". \"\$1\"; detect_supported_docker_platform; printf '%s' \"\$OFFICECHAT_DOCKER_PLATFORM\"" \
-    _ "${SCRIPT_DIR}/lib.sh"
-)"
-
-[[ "$debian_platform" == "debian" ]] ||
-  fail_test "Debian 12 platform detection failed"
-
-debian_install_output="$(
-  env \
-    DRY_RUN=1 \
-    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/debian-os-release" \
-    bash -c ". \"\$1\"; install_docker_engine" \
-    _ "${SCRIPT_DIR}/lib.sh"
-)"
-
-[[ "$debian_install_output" == *"https://download.docker.com/linux/debian"* ]] ||
-  fail_test "Debian Docker plan omitted the official Docker repository"
-
-[[ "$debian_install_output" == *"bookworm stable"* ]] ||
-  fail_test "Debian Docker plan omitted the Bookworm repository"
-
-[[ "$debian_install_output" == *"docker-compose-plugin"* ]] ||
-  fail_test "Debian Docker plan omitted the Compose v2 plugin"
-
-unsupported_status=0
-unsupported_output="$(
-  env \
-    DRY_RUN=1 \
-    OFFICECHAT_OS_RELEASE_FILE="${platform_contract_dir}/unsupported-os-release" \
-    bash -c ". \"\$1\"; detect_supported_docker_platform" \
-    _ "${SCRIPT_DIR}/lib.sh" 2>&1
-)" || unsupported_status=$?
-
-[[ "$unsupported_status" -ne 0 ]] ||
-  fail_test "Unsupported operating system was accepted"
-
-[[ "$unsupported_output" == *"supports only Rocky Linux 10 and Debian 12"* ]] ||
-  fail_test "Unsupported operating system failure is unclear"
-
-printf 'Docker installation platform contracts passed\n'
-
 bash "${SCRIPT_DIR}/install-linux.sh" --help >/dev/null
 bash "${SCRIPT_DIR}/bootstrap-linux.sh" --help >/dev/null
 
@@ -1040,6 +1329,10 @@ tar \
 cat >"${bootstrap_contract_dir}/bin/curl" <<'EOF_BOOTSTRAP_CURL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'curl test fixture\n'
+  exit 0
+fi
 output=""
 url=""
 

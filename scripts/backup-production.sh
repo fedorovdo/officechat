@@ -451,7 +451,13 @@ for service in "${image_services[@]}"; do
     "${service}"$'\t''{{range $i, $v := .RepoTags}}{{if $i}},{{end}}{{$v}}{{end}}'$'\t''{{.Id}}'$'\t''{{range $i, $v := .RepoDigests}}{{if $i}},{{end}}{{$v}}{{end}}'$'\t''{{.Architecture}}' \
     "$image_id" >>"${PARTIAL_DIR}/metadata/image-digests.txt"
   if [[ "$INCLUDE_IMAGES" == "1" ]]; then
-    docker save -o "${PARTIAL_DIR}/images/${service}.tar" "$image_id"
+    # Compose v5 can emit a bare 64-character image ID. Docker save treats that
+    # as a repository name; the canonical sha256: form identifies the same image.
+    image_ref="$image_id"
+    if [[ "$image_ref" =~ ^[[:xdigit:]]{64}$ ]]; then
+      image_ref="sha256:${image_ref}"
+    fi
+    docker save -o "${PARTIAL_DIR}/images/${service}.tar" "$image_ref"
   fi
 done
 if [[ "$INCLUDE_IMAGES" == "1" ]]; then

@@ -132,11 +132,12 @@
     "restoreUnavailable": "No verified backup is currently reported.",
     "restoreServerOnly": "Select a verified backup. Restoring replaces current messages and files; the server first creates a fresh protected backup.",
     "restoreButton": "Restore this backup",
+    "typeUnrecorded": "Type not recorded",
     "restoreOperation": "OfficeChat restore",
     "restoreStates": {
       "queued": "The server has queued the restore.",
       "running": "The server is verifying the backup and restoring. You may need to sign in again.",
-      "succeeded": "Restore completed. Check messages and files.",
+      "succeeded": "Restore completed. Refresh the page or sign in again, then check messages and files.",
       "failed": "Restore failed. Check the host journal before retrying."
     },
     "restoreFailed": "If the app stopped during failure, services may remain stopped. Contact the server administrator.",

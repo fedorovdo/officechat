@@ -54,6 +54,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const [error, setError] = useState("");
   const statusRequestActive = useRef(false);
   const jobRequestActive = useRef(false);
+  const restoreStateRef = useRef<RestoreRequest["state"] | null>(null);
   const text = dictionary.backups;
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }),
@@ -65,7 +66,12 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   ), [dateFormatter, text.noData]);
   const formatBytes = (value: number | null | undefined) => value === null || value === undefined ? text.noData : formatFileSize(value);
   const statusLabel = (value: string) => text.values[value as keyof typeof text.values] ?? text.values.unknown;
+  const backupTypeLabel = (value: string) => value === "unknown" ? text.typeUnrecorded : statusLabel(value);
   const warningLabel = (value: string) => text.warnings[value as keyof typeof text.warnings] ?? text.warnings.UNKNOWN;
+
+  useEffect(() => {
+    restoreStateRef.current = restoreRequest?.state ?? null;
+  }, [restoreRequest]);
 
   const loadStatus = useCallback(async (token: string) => {
     if (statusRequestActive.current) return;
@@ -73,7 +79,9 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
     try {
       setStatus(await getBackupStatus(token));
     } catch (caughtError) {
-      setError(getLocalizedApiError(caughtError, dictionary.session));
+      if (!["queued", "running", "succeeded"].includes(restoreStateRef.current ?? "")) {
+        setError(getLocalizedApiError(caughtError, dictionary.session));
+      }
     } finally {
       statusRequestActive.current = false;
     }
@@ -102,6 +110,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
       getActiveBackupJob(token).catch(() => ({ job: null })),
       getLatestRestore(token).catch(() => ({ request: null }))
     ]);
+    restoreStateRef.current = latestRestore.request?.state ?? null;
     setRestoreRequest(latestRestore.request);
     setActiveJob((current) => current && ["queued", "running", "verifying"].includes(current.state) ? current : active.job);
     await Promise.all([loadStatus(token), loadList(token, selectedPage)]);
@@ -131,11 +140,12 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   }, [dictionary.session, loadAll, locale, router]);
 
   useEffect(() => {
+    if (restoreRequest && ["queued", "running", "succeeded"].includes(restoreRequest.state)) return;
     const token = requireStoredAccessToken(locale);
     if (!token) return;
     const interval = window.setInterval(() => void loadStatus(token), 60_000);
     return () => window.clearInterval(interval);
-  }, [loadStatus, locale]);
+  }, [loadStatus, locale, restoreRequest]);
 
   useEffect(() => {
     if (!activeJob || !["queued", "running", "verifying"].includes(activeJob.state)) return;
@@ -162,7 +172,11 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
     if (!restoreRequest || !["queued", "running"].includes(restoreRequest.state)) return;
     const interval = window.setInterval(() => {
       const token = requireStoredAccessToken(locale);
-      if (token) void getRestoreStatus(token, restoreRequest.request_id).then(setRestoreRequest).catch(() => undefined);
+      if (token) void getRestoreStatus(token, restoreRequest.request_id).then((request) => {
+        restoreStateRef.current = request.state;
+        setRestoreRequest(request);
+        if (request.state === "succeeded") setError("");
+      }).catch(() => undefined);
     }, 5_000);
     return () => window.clearInterval(interval);
   }, [locale, restoreRequest]);
@@ -239,6 +253,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         confirm_backup: confirmBackup.trim(),
         reason: restoreReason.trim().replace(/\s+/g, " ")
       });
+      restoreStateRef.current = request.state;
       setRestoreRequest(request);
       setRestorePreparation(null);
     } catch (caughtError) {
@@ -267,7 +282,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   return (
     <AdminPageShell ariaLabel={text.title} className="admin-backups-page" wide>
       <AdminPageHeader
-        actions={<><button className="admin-button" disabled={jobBusy || refreshing} onClick={() => setConfirmation("create")} type="button">{text.createBackup}</button><button className="admin-button admin-button-secondary" disabled={refreshing} onClick={() => void loadAll(page)} type="button">{refreshing ? text.refreshing : text.refresh}</button></>}
+        actions={<><button className="admin-button" disabled={jobBusy || refreshing} onClick={() => setConfirmation("create")} type="button">{text.createBackup}</button><button className="admin-button admin-button-secondary" disabled={refreshing || jobBusy} onClick={() => void loadAll(page)} type="button">{refreshing ? text.refreshing : text.refresh}</button></>}
         backHref={`/${locale}/dashboard`}
         backLabel={dictionary.adminUi.backToDashboard}
         description={text.description}
@@ -300,7 +315,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
           <table className="admin-table backup-table">
             <thead><tr><th>{text.date}</th><th>{text.id}</th><th>{text.type}</th><th>{text.size}</th><th>{text.version}</th><th>{text.migration}</th><th>{text.verification}</th><th>{text.offsite}</th><th>{text.actions}</th></tr></thead>
             <tbody>{backups.map((backup) => <tr key={backup.backup_id}>
-              <td>{formatDate(backup.created_at)}</td><td><code title={backup.backup_id}>{backup.backup_id}</code></td><td>{statusLabel(backup.backup_type)}</td><td>{formatBytes(backup.size_bytes)}</td><td>{backup.officechat_version ?? text.noData}</td><td>{backup.alembic_revision ?? text.noData}</td><td><span className={`admin-badge backup-badge-${backup.verification_status}`}>{statusLabel(backup.verification_status)}</span></td><td>{statusLabel(backup.offsite_status)}</td><td><button className="table-action" onClick={() => void openDetails(backup.backup_id)} type="button">{text.details}</button></td>
+              <td>{formatDate(backup.created_at)}</td><td><code title={backup.backup_id}>{backup.backup_id}</code></td><td>{backupTypeLabel(backup.backup_type)}</td><td>{formatBytes(backup.size_bytes)}</td><td>{backup.officechat_version ?? text.noData}</td><td>{backup.alembic_revision ?? text.noData}</td><td><span className={`admin-badge backup-badge-${backup.verification_status}`}>{statusLabel(backup.verification_status)}</span></td><td>{statusLabel(backup.offsite_status)}</td><td><button className="table-action" onClick={() => void openDetails(backup.backup_id)} type="button">{text.details}</button></td>
             </tr>)}</tbody>
           </table>
           {!loading && backups.length === 0 ? <p className="sidebar-empty-state">{status?.agent_status === "unavailable" ? text.agentUnavailable : text.empty}</p> : null}
@@ -322,7 +337,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         </AdminCard>
       </section>
 
-      {selected ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="backup-details-title" aria-modal="true" className="settings-panel backup-details-panel" role="dialog"><div className="dashboard-header"><h2 id="backup-details-title">{text.detailTitle}</h2><button className="secondary-link" onClick={() => setSelected(null)} type="button">{text.close}</button></div><dl className="backup-detail-list"><dt>{text.id}</dt><dd><code>{selected.backup_id}</code></dd><dt>{text.date}</dt><dd>{formatDate(selected.created_at)}</dd><dt>{text.type}</dt><dd>{statusLabel(selected.backup_type)}</dd><dt>{text.size}</dt><dd>{formatBytes(selected.size_bytes)}</dd><dt>{text.version}</dt><dd>{selected.officechat_version ?? text.noData}</dd><dt>{text.buildSha}</dt><dd>{selected.build_sha ?? text.noData}</dd><dt>{text.migration}</dt><dd>{selected.alembic_revision ?? text.noData}</dd><dt>{text.postgresql}</dt><dd>{selected.postgresql_version ?? text.noData}</dd><dt>{text.verification}</dt><dd>{statusLabel(selected.verification_status)}</dd><dt>{text.offsite}</dt><dd>{statusLabel(selected.offsite_status)}</dd><dt>{text.components}</dt><dd>{selected.components.length ? selected.components.join(", ") : text.noData}</dd><dt>{text.protected}</dt><dd>{selected.protected ? text.yes : text.no}</dd></dl>{selected.warnings.length ? <div className="backup-detail-warnings"><strong>{text.systemWarnings}</strong><ul>{selected.warnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}</ul></div> : null}<div className="form-actions"><button className="admin-button" disabled={jobBusy} onClick={() => { setVerificationTarget(selected.backup_id); setSelected(null); setConfirmation("verify"); }} type="button">{text.verifyBackup}</button><button className="admin-button admin-button-secondary" disabled={jobBusy || submitting || selected.verification_status !== "passed"} onClick={() => void openRestore(selected.backup_id)} type="button">{text.restoreButton}</button></div></section></div> : null}
+      {selected ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="backup-details-title" aria-modal="true" className="settings-panel backup-details-panel" role="dialog"><div className="dashboard-header"><h2 id="backup-details-title">{text.detailTitle}</h2><button className="secondary-link" onClick={() => setSelected(null)} type="button">{text.close}</button></div><dl className="backup-detail-list"><dt>{text.id}</dt><dd><code>{selected.backup_id}</code></dd><dt>{text.date}</dt><dd>{formatDate(selected.created_at)}</dd><dt>{text.type}</dt><dd>{backupTypeLabel(selected.backup_type)}</dd><dt>{text.size}</dt><dd>{formatBytes(selected.size_bytes)}</dd><dt>{text.version}</dt><dd>{selected.officechat_version ?? text.noData}</dd><dt>{text.buildSha}</dt><dd>{selected.build_sha ?? text.noData}</dd><dt>{text.migration}</dt><dd>{selected.alembic_revision ?? text.noData}</dd><dt>{text.postgresql}</dt><dd>{selected.postgresql_version ?? text.noData}</dd><dt>{text.verification}</dt><dd>{statusLabel(selected.verification_status)}</dd><dt>{text.offsite}</dt><dd>{statusLabel(selected.offsite_status)}</dd><dt>{text.components}</dt><dd>{selected.components.length ? selected.components.join(", ") : text.noData}</dd><dt>{text.protected}</dt><dd>{selected.protected ? text.yes : text.no}</dd></dl>{selected.warnings.length ? <div className="backup-detail-warnings"><strong>{text.systemWarnings}</strong><ul>{selected.warnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}</ul></div> : null}<div className="form-actions"><button className="admin-button" disabled={jobBusy} onClick={() => { setVerificationTarget(selected.backup_id); setSelected(null); setConfirmation("verify"); }} type="button">{text.verifyBackup}</button><button className="admin-button admin-button-secondary" disabled={jobBusy || submitting || selected.verification_status !== "passed"} onClick={() => void openRestore(selected.backup_id)} type="button">{text.restoreButton}</button></div></section></div> : null}
       {restorePreparation ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="restore-confirm-title" aria-modal="true" className="settings-panel backup-confirm-panel" role="dialog"><h2 id="restore-confirm-title">{text.restoreConfirmTitle}</h2><p>{text.restoreConfirmWarning}</p><p>{text.restoreFreshBackup}</p><label>{text.restoreReason}<textarea value={restoreReason} maxLength={1000} onChange={(event) => setRestoreReason(event.target.value)} /></label><p>{text.restoreTypeHost}: <code>{restorePreparation.hostname}</code></p><input aria-label={text.restoreTypeHost} value={confirmHostname} onChange={(event) => setConfirmHostname(event.target.value)} autoComplete="off" /><p>{text.restoreTypeBackup}: <code>{restorePreparation.backup_id}</code></p><input aria-label={text.restoreTypeBackup} value={confirmBackup} onChange={(event) => setConfirmBackup(event.target.value)} autoComplete="off" /><div className="form-actions"><button className="admin-button admin-button-secondary" disabled={submitting} onClick={() => setRestorePreparation(null)} type="button">{text.cancel}</button><button className="admin-button" disabled={submitting || confirmHostname !== restorePreparation.hostname || confirmBackup !== restorePreparation.backup_id || restoreReason.trim().length < 20} onClick={() => void confirmRestore()} type="button">{text.restoreConfirmButton}</button></div></section></div> : null}
       {confirmation ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="backup-confirm-title" aria-modal="true" className="settings-panel backup-confirm-panel" role="dialog"><h2 id="backup-confirm-title">{confirmation === "create" ? text.createConfirmTitle : text.verifyConfirmTitle}</h2><p>{confirmation === "create" ? text.createConfirmDescription : text.verifyConfirmDescription}</p>{confirmation === "create" ? <ul><li>{text.createConfirmDuration}</li><li>{text.createConfirmParallel}</li><li>{text.createConfirmAvailable}</li><li>{text.createConfirmOffsite}</li></ul> : <p className="note">{text.verifyProductionSafe}</p>}<div className="form-actions"><button className="admin-button admin-button-secondary" disabled={submitting} onClick={() => { setConfirmation(null); setVerificationTarget(null); }} type="button">{text.cancel}</button><button className="admin-button" disabled={submitting} onClick={() => void startConfirmedJob()} type="button">{submitting ? text.starting : (confirmation === "create" ? text.confirmCreate : text.confirmVerify)}</button></div></section></div> : null}
     </AdminPageShell>

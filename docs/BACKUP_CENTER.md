@@ -16,6 +16,7 @@ For storage layout, scheduled backups, external storage, restore, and disaster r
 - the current or most recently observed browser job.
 
 Only completed directories with a strict ID such as `officechat-backup-20260811-111632Z` are listed. Missing or corrupt metadata produces a sanitized warning rather than exposing paths, private configuration, or tracebacks.
+New backups record their type (`manual`, `scheduled`, or `pre_upgrade`) in the manifest. Older backups without a recorded type display "Type not recorded".
 
 ## Buttons and job states
 
@@ -23,6 +24,8 @@ Only completed directories with a strict ID such as `officechat-backup-20260811-
 - **Refresh** reloads agent, storage, timer, history, and job metadata.
 - **Verify backup** is available in a completed backup's details. It performs the existing isolated `--verify-only` restore drill and does not change production data.
 - **Restore this backup** requires `verification_status=passed`, a reason of at least 20 characters, and exact typing of the hostname and backup ID. The challenge expires after ten minutes. The host checks the installed version, runs an isolated restore drill and creates a **fresh, verified, protected backup** before changing any production data. Failure of that backup stops the restore. Users may need to sign in again.
+
+The backend briefly restarts during restore. The page pauses background status requests so a temporary connection failure does not look like a restore failure. After `succeeded`, refresh the page or sign in again and check messages and files.
 
 The HTTP request only creates an asynchronous host job. The page then polls that job. Actual states are:
 

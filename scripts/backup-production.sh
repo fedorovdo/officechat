@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${OFFICECHAT_BACKUP_CONFIG:-/etc/officechat/backup.conf}"
 INCLUDE_IMAGES=0
 PRE_UPGRADE=0
+BACKUP_TYPE="manual"
 PARTIAL_DIR=""
 OFFSITE_PARTIAL_DIR=""
 STAGING_DIR=""
@@ -20,7 +21,7 @@ POST_HOOK_COMPLETED=0
 
 usage() {
   cat <<'EOF'
-Usage: backup-production.sh [--config FILE] [--dry-run] [--include-images] [--pre-upgrade]
+Usage: backup-production.sh [--config FILE] [--dry-run] [--include-images] [--scheduled] [--pre-upgrade]
 
 Creates an atomic OfficeChat production backup. --pre-upgrade implies
 --include-images and protects the resulting backup from automatic rotation.
@@ -42,6 +43,10 @@ while (($# > 0)); do
       INCLUDE_IMAGES=1
       shift
       ;;
+    --scheduled)
+      BACKUP_TYPE="scheduled"
+      shift
+      ;;
     --pre-upgrade)
       PRE_UPGRADE=1
       INCLUDE_IMAGES=1
@@ -56,6 +61,7 @@ while (($# > 0)); do
       ;;
   esac
 done
+[[ "$PRE_UPGRADE" == "0" ]] || BACKUP_TYPE="pre_upgrade"
 
 write_status() {
   local success="$1"
@@ -484,7 +490,7 @@ python3 - "${PARTIAL_DIR}/metadata/manifest.json" "$BACKUP_FORMAT_VERSION" "$off
   "$build_sha" "$alembic_revision" "$COMPOSE_PROJECT_NAME" "$components_csv" "$required_csv" \
   "$optional_csv" "$skipped_csv" "$postgres_version" "$offsite_configured" "$PRE_UPGRADE" \
   "$BACKUP_SCRIPT_VERSION" "$warnings_text" "$PARTIAL_DIR" "$verification_status" \
-  "$BACKUP_PRIVATE_CONFIG" "$AGE_RECIPIENT" "$ALLOW_PLAINTEXT_PRIVATE_OFFSITE" <<'PY'
+  "$BACKUP_PRIVATE_CONFIG" "$AGE_RECIPIENT" "$ALLOW_PLAINTEXT_PRIVATE_OFFSITE" "$BACKUP_TYPE" <<'PY'
 import json
 import os
 import socket
@@ -495,7 +501,7 @@ from datetime import datetime, timezone
     path, format_version, app_version, build_sha, alembic_revision, project_name,
     detected, required, optional, skipped, postgres_version, offsite_configured,
     pre_upgrade, script_version, warnings, backup_root, verification_status,
-    private_config, age_recipient, allow_plaintext_private_offsite,
+    private_config, age_recipient, allow_plaintext_private_offsite, backup_type,
 ) = sys.argv[1:]
 
 def csv(value):
@@ -539,6 +545,7 @@ payload = {
     },
     "verification_status": verification_status,
     "pre_upgrade": pre_upgrade == "1",
+    "backup_type": backup_type,
     "images": [],
 }
 image_metadata = os.path.join(backup_root, "metadata", "image-digests.txt")

@@ -443,7 +443,7 @@ Before production restore, inspect `metadata/manifest.json`, confirm `officechat
 
 ## Production restore
 
-Restore is CLI-only. For a local repository backup:
+An authorized administrator can restore a verified local backup of the installed OfficeChat version from Backup Center after recording a reason and confirming the hostname and backup ID. The host runs an isolated drill and creates a fresh protected backup before changing production data. CLI remains available for operator recovery and migrations. For a local repository backup:
 
 ```bash
 BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ

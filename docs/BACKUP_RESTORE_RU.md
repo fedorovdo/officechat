@@ -443,7 +443,7 @@ sudo find /var/backups/officechat/production -mindepth 1 -maxdepth 1 -type d \
 
 ## Production-восстановление
 
-Restore доступен только через CLI. Для копии в локальном repository:
+Уполномоченный администратор может восстановить проверенную локальную копию той же версии OfficeChat через Backup Center после записи причины и подтверждения имени сервера и ID копии. Хост выполняет изолированную проверку и создаёт новую защищённую копию до изменения данных. CLI остаётся для операторского восстановления и миграций. Для копии в локальном repository:
 
 ```bash
 BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ

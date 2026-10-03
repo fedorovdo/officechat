@@ -6,7 +6,7 @@ import Link from "next/link";
 import { BrandLogo } from "./Brand";
 import { AdminCard, AdminIcon, AdminPageShell } from "./AdminUI";
 import { getLocalizedBrand } from "../lib/brand";
-import { getCurrentUser, getLocalizedApiError, isAdminRole, requireStoredAccessToken } from "../lib/api";
+import { getCurrentUser, getLocalizedApiError, isAdminRole, requireStoredAccessToken, type OfficeChatUser } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { logoutSession } from "../lib/session";
 
@@ -15,15 +15,9 @@ type DashboardProps = {
   locale: Locale;
 };
 
-type CurrentUser = {
-  username: string;
-  display_name: string;
-  role: string;
-};
-
 export function Dashboard({ dictionary, locale }: DashboardProps) {
   const localizedBrand = getLocalizedBrand(locale);
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [user, setUser] = useState<OfficeChatUser | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -33,7 +27,7 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
 
     async function loadUser() {
       try {
-        setUser((await getCurrentUser(accessToken)) as CurrentUser);
+        setUser(await getCurrentUser(accessToken));
       } catch (caughtError) {
         setError(getLocalizedApiError(caughtError, dictionary.session));
       }
@@ -79,7 +73,7 @@ export function Dashboard({ dictionary, locale }: DashboardProps) {
             <Link className="admin-action-card" href={`/${locale}/admin/users`}><span className="admin-action-icon"><AdminIcon name="users" /></span><span><strong>{dictionary.dashboard.adminUsers}</strong><small>{dictionary.adminUi.sectionDescriptions.users}</small></span><span className="admin-action-open">{dictionary.adminUi.open}</span></Link>
             <Link className="admin-action-card" href={`/${locale}/admin/bots`}><span className="admin-action-icon"><AdminIcon name="bots" /></span><span><strong>{dictionary.dashboard.adminBots}</strong><small>{dictionary.adminUi.sectionDescriptions.bots}</small></span><span className="admin-action-open">{dictionary.adminUi.open}</span></Link>
             <Link className="admin-action-card" href={`/${locale}/admin/storage`}><span className="admin-action-icon"><AdminIcon name="storage" /></span><span><strong>{dictionary.retention.title}</strong><small>{dictionary.adminUi.sectionDescriptions.storage}</small></span><span className="admin-action-open">{dictionary.adminUi.open}</span></Link>
-            {user.role === "superadmin" ? <Link className="admin-action-card" href={`/${locale}/admin/backups`}><span className="admin-action-icon"><AdminIcon name="backup" /></span><span><strong>{dictionary.backups.title}</strong><small>{dictionary.adminUi.sectionDescriptions.backups}</small></span><span className="admin-action-open">{dictionary.adminUi.open}</span></Link> : null}
+            {(user.role === "superadmin" || (user.role === "admin" && user.permissions.includes("can_restore_backup"))) ? <Link className="admin-action-card" href={`/${locale}/admin/backups`}><span className="admin-action-icon"><AdminIcon name="backup" /></span><span><strong>{dictionary.backups.title}</strong><small>{dictionary.adminUi.sectionDescriptions.backups}</small></span><span className="admin-action-open">{dictionary.adminUi.open}</span></Link> : null}
             <Link className="admin-action-card" href={`/${locale}/admin/audit`}><span className="admin-action-icon"><AdminIcon name="audit" /></span><span><strong>{dictionary.audit.title}</strong><small>{dictionary.adminUi.sectionDescriptions.audit}</small></span><span className="admin-action-open">{dictionary.adminUi.open}</span></Link>
           </> : null}
         </div>

@@ -371,6 +371,11 @@ if [[ -f "${SCRIPT_DIR}/../../scripts/backup_agent.py" ]]; then
 elif [[ -f "${SCRIPT_DIR}/backup-agent.py" ]]; then
   as_root cp "${SCRIPT_DIR}/backup-agent.py" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
 fi
+if [[ -f "${SCRIPT_DIR}/../../scripts/restore_request.py" ]]; then
+  as_root cp "${SCRIPT_DIR}/../../scripts/restore_request.py" "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
+elif [[ -f "${SCRIPT_DIR}/restore-request.py" ]]; then
+  as_root cp "${SCRIPT_DIR}/restore-request.py" "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
+fi
 if [[ -f "${SCRIPT_DIR}/../../scripts/backup/lib.sh" ]]; then
   as_root cp "${SCRIPT_DIR}/../../scripts/backup/lib.sh" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
 elif [[ -f "${SCRIPT_DIR}/backup/lib.sh" ]]; then
@@ -435,6 +440,7 @@ if [[ -n "$systemd_source" ]]; then
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-agent.service" /etc/systemd/system/officechat-backup-agent.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" /etc/systemd/system/officechat-backup-job.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" /etc/systemd/system/officechat-backup-verify@.service
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-restore@.service" /etc/systemd/system/officechat-restore@.service
 fi
 if [[ -n "$caddy_source_dir" ]]; then
   as_root mkdir -p "${OFFICECHAT_INSTALL_DIR}/caddy"
@@ -446,7 +452,9 @@ if [[ -n "$caddy_source_dir" ]]; then
     "${OFFICECHAT_INSTALL_DIR}/caddy/docker-compose.caddy.yml"
 fi
 as_root chown root:root "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
+as_root chown root:root "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
 as_root chmod 0755 "${OFFICECHAT_INSTALL_DIR}/install-linux.sh" "${OFFICECHAT_INSTALL_DIR}/update-linux.sh" "${OFFICECHAT_INSTALL_DIR}/upgrade-linux.sh" "${OFFICECHAT_INSTALL_DIR}/rollback-linux.sh" "${OFFICECHAT_INSTALL_DIR}/uninstall-linux.sh" "${OFFICECHAT_INSTALL_DIR}/verify-install.sh" "${OFFICECHAT_INSTALL_DIR}/officechatctl" "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+as_root chmod 0755 "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
 as_root chmod 644 "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh"
 as_root chmod 755 "$OFFICECHAT_INSTALL_DIR"
 ensure_backup_agent_group

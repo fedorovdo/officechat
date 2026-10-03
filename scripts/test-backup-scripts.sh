@@ -290,6 +290,7 @@ serialized = json.dumps(manifest)
 assert "CANARY_SECRET_DO_NOT_LEAK" not in serialized
 assert "SECRET_TOKEN" not in serialized
 assert manifest["verification_status"] == "passed"
+assert manifest["backup_type"] == "manual"
 assert manifest["consistency"]["database_and_uploads_atomic_together"] is False
 PY
 python3 - "$backup_path/metadata/offsite-receipt.json" <<'PY'
@@ -378,6 +379,25 @@ pre_upgrade_path="$(find "$pre_upgrade_root" -mindepth 1 -maxdepth 1 -type d -na
   echo "pre-upgrade backup is not protected or does not contain configured images" >&2
   exit 1
 }
+python3 - "$pre_upgrade_path/metadata/manifest.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    manifest = json.load(stream)
+assert manifest["backup_type"] == "pre_upgrade"
+PY
+
+scheduled_root="${TMP_DIR}/scheduled-backups"
+write_config "$scheduled_root"
+bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --scheduled >/dev/null
+scheduled_path="$(find "$scheduled_root" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-*' -print -quit)"
+python3 - "$scheduled_path/metadata/manifest.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    manifest = json.load(stream)
+assert manifest["backup_type"] == "scheduled"
+PY
 
 hook_root="${TMP_DIR}/hook-backups"
 hook_marker="${TMP_DIR}/hook-ran"

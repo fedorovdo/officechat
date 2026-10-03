@@ -130,7 +130,24 @@
     "restoreDescription": "Recovery remains a protected server-side operation.",
     "restoreReady": "A verified backup is available for a restore drill.",
     "restoreUnavailable": "No verified backup is currently reported.",
-    "restoreServerOnly": "Restore is performed on the server by an authorized operator. Backup Center does not start restore operations.",
+    "restoreServerOnly": "Select a verified backup. Restoring replaces current messages and files; the server first creates a fresh protected backup.",
+    "restoreButton": "Restore this backup",
+    "typeUnrecorded": "Type not recorded",
+    "restoreOperation": "OfficeChat restore",
+    "restoreStates": {
+      "queued": "The server has queued the restore.",
+      "running": "The server is verifying the backup and restoring. You may need to sign in again.",
+      "succeeded": "Restore completed. Refresh the page or sign in again, then check messages and files.",
+      "failed": "Restore failed. Check the host journal before retrying."
+    },
+    "restoreFailed": "If the app stopped during failure, services may remain stopped. Contact the server administrator.",
+    "restoreConfirmTitle": "Confirm production restore",
+    "restoreConfirmWarning": "The selected backup will replace the current database and attachments. Your session may end.",
+    "restoreFreshBackup": "The server must create and verify a fresh protected backup of its current state before changing data.",
+    "restoreReason": "Reason for restore (at least 20 characters)",
+    "restoreTypeHost": "Type this server's hostname",
+    "restoreTypeBackup": "Type the backup ID",
+    "restoreConfirmButton": "Start restore",
     "documentation": "Open backup documentation",
     "createBackup": "Create backup",
     "verifyBackup": "Verify backup",
@@ -481,6 +498,7 @@
     "loadError": "Could not load OfficeChat app.",
     "admin": "Admin",
     "adminMenu": "Administrative actions",
+    "updateAvailable": "New version available",
     "settings": "Settings",
     "about": "About",
     "settingsTitle": "User settings",
@@ -1344,6 +1362,10 @@
         "can_manage_directory": {
           "label": "Manage directory",
           "description": "Can create, edit, archive and restore corporate directory entries."
+        },
+        "can_restore_backup": {
+          "label": "Restore OfficeChat",
+          "description": "Allows an administrator to restore OfficeChat from a verified backup."
         }
       }
     }
@@ -1478,6 +1500,9 @@
   },
   "about": {
     "title": "About",
+    "updateAvailable": "A new OfficeChat version is available",
+    "viewRelease": "View release",
+    "checkUpdatesUnavailable": "Could not check for new releases. Try again later.",
     "officeChat": "OfficeChat",
     "version": "Version",
     "applicationVersion": "Application version",

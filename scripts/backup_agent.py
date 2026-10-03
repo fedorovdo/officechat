@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import signal
 import socket
 import socketserver
@@ -25,6 +26,7 @@ from typing import Any
 
 PROTOCOL_VERSION = 1
 BACKUP_ID_PATTERN = re.compile(r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
+JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 SAFE_METADATA_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()\-]{0,159}$")
 SAFE_COMPONENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 BACKUP_TYPES = {"manual", "scheduled", "pre_upgrade", "unknown"}
@@ -48,6 +50,7 @@ SYSTEMCTL_CLIENT_TERMINATION_TIMEOUT_SECONDS = 2
 JOB_WORKER_SHUTDOWN_TIMEOUT_SECONDS = (SYSTEMCTL_CLIENT_TERMINATION_TIMEOUT_SECONDS * 2) + 1
 SYSTEMCTL_OUTPUT_MAX_BYTES = 16_384
 EXECUTOR_BUSY_EXIT_CODE = 75
+RESTORE_UNIT_PREFIX = "officechat-restore@"
 SAFE_JOB_ENVIRONMENT = {
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "LANG": "C",
@@ -1353,10 +1356,161 @@ class BackupJobManager:
             time.sleep(0.05)
 
 
-class AgentProtocol:
-    def __init__(self, inspector: BackupInspector, jobs: BackupJobManager | None = None) -> None:
+class RestoreController:
+    """Accept one confirmed restore request and hand it to an isolated systemd unit."""
+
+    def __init__(self, config: AgentConfig, inspector: BackupInspector, jobs: BackupJobManager) -> None:
         self.inspector = inspector
         self.jobs = jobs
+        self.directory = config.state_directory / "restores"
+        self.installed_version_path = Path("/opt/officechat/VERSION")
+        self.directory.mkdir(mode=0o700, exist_ok=True)
+        info = self.directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError("Restore request directory is unsafe")
+        os.chmod(self.directory, 0o700)
+        self._lock = threading.RLock()
+        self._challenge: tuple[str, str, str, float] | None = None
+
+    def _request(self, request_id: str) -> dict[str, Any]:
+        path = self.directory / f"{validate_job_id(request_id)}.json"
+        payload = _read_bounded_json(path, 8192, missing_code="JOB_NOT_FOUND", corrupt_code="JOB_RESULT_UNAVAILABLE")
+        info = path.lstat()
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600 or not stat.S_ISREG(info.st_mode):
+            raise AgentError("JOB_RESULT_UNAVAILABLE", "Restore request metadata is unsafe")
+        return payload
+
+    def _write_request(self, request_id: str, payload: dict[str, Any]) -> None:
+        temporary = self.directory / f".{request_id}-{uuid.uuid4().hex}.tmp"
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.directory / f"{request_id}.json")
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+    def _refresh_failed_unit(self, request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("state") not in {"queued", "running"}:
+            return payload
+        unit = f"{RESTORE_UNIT_PREFIX}{request_id}.service"
+        try:
+            completed = subprocess.run(
+                [SYSTEMCTL_PATH, "show", unit, "--no-pager", "--property=ActiveState"],
+                shell=False, env=dict(SAFE_JOB_ENVIRONMENT), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                timeout=SYSTEMCTL_COMMAND_TIMEOUT_SECONDS, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return payload
+        if completed.returncode == 0 and completed.stdout.strip() == "ActiveState=failed":
+            payload.update(state="failed", finished_at=_utc_now(), last_error="EXECUTOR_UNAVAILABLE")
+            self._write_request(request_id, payload)
+        return payload
+
+    @staticmethod
+    def _public(payload: dict[str, Any]) -> dict[str, Any]:
+        return {key: payload.get(key) for key in (
+            "request_id", "backup_id", "hostname", "state", "requested_at", "started_at", "finished_at", "last_error",
+        )}
+
+    def latest(self) -> dict[str, Any]:
+        with self._lock:
+            requests = sorted(self.directory.glob("*.json"), reverse=True)
+            # UUID names are unordered; compare timestamps from bounded, root-owned files.
+            values = [self._refresh_failed_unit(path.stem, self._request(path.stem)) for path in requests if JOB_ID_PATTERN.fullmatch(path.stem)]
+            return {"request": self._public(max(values, key=lambda item: item.get("requested_at", ""))) if values else None}
+
+    def prepare(self, backup_id: object, actor_id: object) -> dict[str, Any]:
+        target = validate_backup_id(backup_id)
+        actor = validate_actor_user_id(actor_id)
+        self.inspector.completed_backup(target)
+        item = self.inspector.backup_item(target)
+        if item["verification_status"] != "passed":
+            raise AgentError("VERIFY_FAILED", "Backup must be verified before restore")
+        if not self.installed_version_path.is_file() or item.get("officechat_version") != self.installed_version_path.read_text(encoding="utf-8").strip():
+            raise AgentError("VERSION_MISMATCH", "Install the backup's OfficeChat version before browser restore")
+        with self._lock:
+            if self.jobs.active_job() or self._has_active_restore():
+                raise AgentError("JOB_CONFLICT", "A backup or restore operation is active")
+            token = secrets.token_urlsafe(32)
+            self._challenge = (token, target, actor, time.monotonic() + 600)
+            return {"challenge": token, "backup_id": target, "hostname": socket.gethostname(), "expires_in_seconds": 600}
+
+    def _has_active_restore(self) -> bool:
+        for path in self.directory.glob("*.json"):
+            if JOB_ID_PATTERN.fullmatch(path.stem) and self._refresh_failed_unit(path.stem, self._request(path.stem)).get("state") in {"queued", "running"}:
+                return True
+        return False
+
+    def start(self, params: dict[str, Any]) -> dict[str, Any]:
+        target = validate_backup_id(params.get("backup_id"))
+        actor = validate_actor_user_id(params.get("requested_by_user_id"))
+        login = validate_actor_login(params.get("requested_by_login"))
+        reason = params.get("reason")
+        if not isinstance(reason, str) or not 20 <= len(reason.strip()) <= 1000 or _contains_control(reason):
+            raise AgentError("INVALID_PARAMS", "Restore reason must contain 20 to 1000 printable characters")
+        with self._lock:
+            challenge = self._challenge
+            self._challenge = None
+            if not challenge or params.get("challenge") != challenge[0] or target != challenge[1] or actor != challenge[2] or time.monotonic() > challenge[3]:
+                raise AgentError("INVALID_PARAMS", "Restore confirmation has expired or does not match")
+            hostname = socket.gethostname()
+            if params.get("confirm_hostname") != hostname or params.get("confirm_backup") != target:
+                raise AgentError("INVALID_PARAMS", "Host and backup confirmation must match exactly")
+            if self.jobs.active_job() or self._has_active_restore():
+                raise AgentError("JOB_CONFLICT", "A backup or restore operation is active")
+            self.inspector.completed_backup(target)
+            item = self.inspector.backup_item(target)
+            if item["verification_status"] != "passed":
+                raise AgentError("VERIFY_FAILED", "Backup must be verified before restore")
+            if not self.installed_version_path.is_file() or item.get("officechat_version") != self.installed_version_path.read_text(encoding="utf-8").strip():
+                raise AgentError("VERSION_MISMATCH", "Install the backup's OfficeChat version before browser restore")
+            request_id = str(uuid.uuid4())
+            payload = {
+                "request_id": request_id, "backup_id": target, "hostname": hostname,
+                "requested_by_user_id": actor, "requested_by_login": login, "reason": reason.strip(),
+                "backup_root": str(self.inspector.config.backup_root),
+                "requested_at": _utc_now(), "started_at": None, "finished_at": None,
+                "state": "queued", "last_error": None,
+            }
+            path = self.directory / f"{request_id}.json"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            unit = f"{RESTORE_UNIT_PREFIX}{request_id}.service"
+            try:
+                completed = subprocess.run(
+                    [SYSTEMCTL_PATH, "start", "--no-block", unit], shell=False,
+                    env=dict(SAFE_JOB_ENVIRONMENT), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=SYSTEMCTL_COMMAND_TIMEOUT_SECONDS, check=False,
+                )
+                if completed.returncode != 0:
+                    raise OSError("Restore executor could not be started")
+            except (OSError, subprocess.SubprocessError):
+                payload["state"] = "failed"
+                payload["last_error"] = "EXECUTOR_UNAVAILABLE"
+                self._write_request(request_id, payload)
+                raise AgentError("EXECUTOR_UNAVAILABLE", "Restore executor is unavailable")
+            logger.warning("restore_request=%s target=%s actor=%s accepted", request_id, target, login)
+            return self._public(payload)
+
+    def status(self, request_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._public(self._refresh_failed_unit(request_id, self._request(request_id)))
+
+
+class AgentProtocol:
+    def __init__(self, inspector: BackupInspector, jobs: BackupJobManager | None = None, restores: RestoreController | None = None) -> None:
+        self.inspector = inspector
+        self.jobs = jobs
+        self.restores = restores
 
     def handle(self, payload: object) -> dict[str, Any]:
         if not isinstance(payload, dict):
@@ -1424,6 +1578,30 @@ class AgentProtocol:
             if self.jobs is None:
                 raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
             data = {"job": self.jobs.active_job()}
+        elif operation == "prepare_restore":
+            if set(params) != {"backup_id", "requested_by_user_id"}:
+                raise AgentError("INVALID_PARAMS", "Restore preparation parameters are invalid")
+            if self.restores is None:
+                raise AgentError("INTERNAL_ERROR", "Restore controller is unavailable")
+            data = self.restores.prepare(params["backup_id"], params["requested_by_user_id"])
+        elif operation == "start_restore":
+            if set(params) != {"backup_id", "requested_by_user_id", "requested_by_login", "reason", "challenge", "confirm_hostname", "confirm_backup"}:
+                raise AgentError("INVALID_PARAMS", "Restore request parameters are invalid")
+            if self.restores is None:
+                raise AgentError("INTERNAL_ERROR", "Restore controller is unavailable")
+            data = self.restores.start(params)
+        elif operation == "restore_status":
+            if set(params) != {"request_id"}:
+                raise AgentError("INVALID_PARAMS", "Restore status parameters are invalid")
+            if self.restores is None:
+                raise AgentError("INTERNAL_ERROR", "Restore controller is unavailable")
+            data = self.restores.status(validate_job_id(params["request_id"]))
+        elif operation == "latest_restore":
+            if params:
+                raise AgentError("INVALID_PARAMS", "Latest restore does not accept parameters")
+            if self.restores is None:
+                raise AgentError("INTERNAL_ERROR", "Restore controller is unavailable")
+            data = self.restores.latest()
         elif operation == "claim_job_audit":
             if params:
                 raise AgentError("INVALID_PARAMS", "Backup audit claim does not accept parameters")
@@ -1498,9 +1676,10 @@ class BackupAgentServer(socketserver.ThreadingUnixStreamServer):
         config: AgentConfig,
         inspector: BackupInspector,
         jobs: BackupJobManager | None = None,
+        restores: RestoreController | None = None,
     ) -> None:
         self.config = config
-        self.protocol = AgentProtocol(inspector, jobs)
+        self.protocol = AgentProtocol(inspector, jobs, restores)
         super().__init__(str(config.socket_path), BackupAgentRequestHandler)
 
 
@@ -1524,7 +1703,10 @@ def serve(config: AgentConfig) -> None:
     socket_gid = _prepare_socket_path(config)
     inspector = BackupInspector(config)
     jobs = BackupJobManager(config, inspector)
-    server = BackupAgentServer(config, inspector, jobs)
+    restores = RestoreController(config, inspector, jobs) if config.state_directory == Path("/var/lib/officechat-backup-agent") else None
+    if restores is None:
+        logger.warning("Browser restore is unavailable with a custom agent state directory")
+    server = BackupAgentServer(config, inspector, jobs, restores)
     os.chown(config.socket_path, -1, socket_gid)
     os.chmod(config.socket_path, 0o660)
     stop_event = threading.Event()

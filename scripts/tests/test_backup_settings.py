@@ -75,11 +75,21 @@ class SettingsTests(unittest.TestCase):
 
     def test_smb_credentials_not_in_mount_unit(self):
         candidate = {"kind": "smb", "host": "fileserver", "share": "chat", "domain": "AD",
-                     "username": "backup", "password": "secret123", "require_offsite": True}
+                     "directory": "OfficeChat", "username": "backup", "password": "secret123", "require_offsite": True}
+        settings.validated({**request(), "destination": candidate})
         unit, credentials = settings.mount_file(candidate)
         self.assertNotIn(b"secret123", unit)
         self.assertIn(b"credentials=", unit)
+        self.assertIn(b"What=//fileserver/chat/OfficeChat\n", unit)
         self.assertIn(b"password=secret123", credentials)
+
+    def test_smb_subdirectory_rejects_traversal_and_mount_option_injection(self):
+        base = {"kind": "smb", "host": "fileserver", "share": "chat", "domain": "",
+                "username": "backup", "password": "secret", "require_offsite": False}
+        for directory in ("../other", "a/../other", "/OfficeChat", "OfficeChat/", "a,b", "a\\b", "a\nOptions=exec"):
+            with self.subTest(directory=directory), self.assertRaises(ValueError):
+                settings.validated({**request(), "destination": {**base, "directory": directory}})
+        settings.validated({**request(), "destination": base})  # Old clients still select the share root.
 
     def test_schedule_requires_verified_offsite_backup(self):
         candidate = request("nfs", enabled=True)

@@ -25,6 +25,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
   const [exportPath, setExportPath] = useState("");
   const [nfsVersion, setNfsVersion] = useState<"3" | "4.1" | "4.2">("4.1");
   const [share, setShare] = useState("");
+  const [directory, setDirectory] = useState("");
   const [domain, setDomain] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -76,7 +77,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
     setError("");
     let destination: BackupSettingsUpdate["destination"];
     if (kind === "nfs") destination = { kind, host: host.trim(), export: exportPath.trim(), version: nfsVersion, require_offsite: requireOffsite };
-    else if (kind === "smb") destination = { kind, host: host.trim(), share: share.trim(), domain: domain.trim(), username: username.trim(), password, require_offsite: requireOffsite };
+    else if (kind === "smb") destination = { kind, host: host.trim(), share: share.trim(), directory: directory.trim(), domain: domain.trim(), username: username.trim(), password, require_offsite: requireOffsite };
     else destination = { kind };
     try {
       setJob(await updateBackupSettings(token, { destination, schedule }));
@@ -95,7 +96,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
     {job ? <p className={job.state === "failed" ? "form-error" : "note"}>{text.job}: {job.error_code === "MOUNT_HELPER_MISSING" ? text.mountHelperMissing : text.states[job.state]}</p> : null}
     <p>{text.current}: <strong>{current ? text.destinations[current.destination.kind] : text.loading}</strong></p>
     {current?.destination.kind === "nfs" ? <p><code>{current.destination.host}:{current.destination.export}</code></p> : null}
-    {current?.destination.kind === "smb" ? <p><code>//{current.destination.host}/{current.destination.share}</code></p> : null}
+    {current?.destination.kind === "smb" ? <p><code>//{current.destination.host}/{current.destination.share}{current.destination.directory ? `/${current.destination.directory}` : ""}</code></p> : null}
     {configured ? <p className="note">{text.migration}</p> : null}
     <form onSubmit={(event) => void save(event)}>
       {canManage ? <>
@@ -106,7 +107,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
         </select></label>
         {kind === "nfs" || kind === "smb" ? <label>{text.host}<input className="field-input" required maxLength={253} value={host} onChange={(event) => setHost(event.target.value)} /></label> : null}
         {kind === "nfs" ? <><label>{text.export}<input className="field-input" required value={exportPath} onChange={(event) => setExportPath(event.target.value)} placeholder="/export/officechat" /></label><label>{text.nfsVersion}<select className="field-input" value={nfsVersion} onChange={(event) => setNfsVersion(event.target.value as typeof nfsVersion)}><option>4.1</option><option>4.2</option><option>3</option></select></label></> : null}
-        {kind === "smb" ? <><label>{text.share}<input className="field-input" required value={share} onChange={(event) => setShare(event.target.value)} /></label><label>{text.domain}<input className="field-input" value={domain} onChange={(event) => setDomain(event.target.value)} /></label><label>{text.username}<input className="field-input" required value={username} onChange={(event) => setUsername(event.target.value)} /></label><label>{text.password}<input className="field-input" type="password" required autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label></> : null}
+        {kind === "smb" ? <><label>{text.share}<input className="field-input" required value={share} onChange={(event) => setShare(event.target.value)} /></label><label>{text.directory}<input className="field-input" placeholder="OfficeChat" maxLength={255} value={directory} onChange={(event) => setDirectory(event.target.value)} /></label><label>{text.domain}<input className="field-input" value={domain} onChange={(event) => setDomain(event.target.value)} /></label><label>{text.username}<input className="field-input" required value={username} onChange={(event) => setUsername(event.target.value)} /></label><label>{text.password}<input className="field-input" type="password" required autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label></> : null}
         {kind === "nfs" || kind === "smb" ? <label className="checkbox-row"><input checked={requireOffsite} type="checkbox" onChange={(event) => setRequireOffsite(event.target.checked)} />{text.requireOffsite}</label> : null}
         <p className="note">{text.localFirst}</p>
         <label className="checkbox-row"><input checked={schedule.enabled} type="checkbox" onChange={(event) => setSchedule({ ...schedule, enabled: event.target.checked })} />{text.enable}</label>

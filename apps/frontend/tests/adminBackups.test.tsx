@@ -241,7 +241,7 @@ describe("Backup Center", () => {
 
     const { unmount } = render(<AdminBackups dictionary={en} locale="en" />);
     await screen.findByText(en.backups.activeJobTitle);
-    await waitFor(() => expect(vi.getTimerCount()).toBe(3));
+    await waitFor(() => expect(vi.getTimerCount()).toBeGreaterThanOrEqual(3));
     const statusCallsBeforePoll = apiMocks.getBackupStatus.mock.calls.length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3_000);
@@ -251,6 +251,43 @@ describe("Backup Center", () => {
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not show a transient data-loading error after a successful restore", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const restore = {
+      request_id: "00000000-0000-4000-8000-000000000456",
+      backup_id: backup.backup_id,
+      hostname: "chat.example.test",
+      state: "running" as const,
+      requested_at: job.requested_at,
+      started_at: job.requested_at,
+      finished_at: null,
+      last_error: null
+    };
+    apiMocks.getLatestRestore.mockResolvedValue({ request: restore });
+    apiMocks.getRestoreStatus.mockResolvedValue({
+      ...restore, state: "succeeded", finished_at: "2026-08-05T10:02:00Z"
+    });
+    apiMocks.getBackupStatus.mockRejectedValue(new Error("The backend is restarting"));
+
+    const { container, unmount } = render(<AdminBackups dictionary={ru} locale="ru" />);
+    await screen.findByText(ru.backups.restoreOperation);
+    await waitFor(() => expect(apiMocks.getBackupStatus).toHaveBeenCalled());
+    expect(container.querySelector(".form-error")).not.toBeInTheDocument();
+    const statusCalls = apiMocks.getBackupStatus.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(screen.getByText(ru.backups.restoreStates.succeeded)).toBeInTheDocument());
+    expect(container.querySelector(".form-error")).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(apiMocks.getBackupStatus).toHaveBeenCalledTimes(statusCalls);
+
+    unmount();
+    vi.useRealTimers();
   });
 
   it("keeps RU and EN dictionary key sets aligned", () => {

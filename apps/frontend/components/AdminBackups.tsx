@@ -28,6 +28,7 @@ import { officeChatBrand } from "../lib/brand";
 import { formatFileSize } from "../lib/files";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { AdminCard, AdminPageHeader, AdminPageShell, AdminStatCard, AdminTableContainer } from "./AdminUI";
+import { AdminBackupSettings } from "./AdminBackupSettings";
 
 type AdminBackupsProps = { dictionary: Dictionary; locale: Locale };
 
@@ -43,6 +44,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const [confirmBackup, setConfirmBackup] = useState("");
   const [restoreReason, setRestoreReason] = useState("");
   const [activeJob, setActiveJob] = useState<OfficeChatBackupJob | null>(null);
+  const [canManageSettings, setCanManageSettings] = useState(false);
   const [confirmation, setConfirmation] = useState<"create" | "verify" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -132,6 +134,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         router.replace(`/${locale}/dashboard`);
         return;
       }
+      setCanManageSettings(user.role === "superadmin");
       void loadAll(1);
     }).catch((caughtError) => {
       setError(getLocalizedApiError(caughtError, dictionary.session));
@@ -310,6 +313,8 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         <AdminStatCard label={text.offsite} value={statusLabel(status?.offsite.status ?? "unknown")} />
       </section>
 
+      <AdminBackupSettings canManage={canManageSettings} dictionary={dictionary} locale={locale} onSaved={refreshBackupData} status={status} />
+
       <AdminCard className="backup-list-card" description={text.listDescription} title={text.listTitle}>
         <AdminTableContainer className="backup-table-wrap">
           <table className="admin-table backup-table">
@@ -327,7 +332,6 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
       <section className="backup-secondary-grid">
         <AdminCard title={text.scheduleTitle} description={text.scheduleDescription}>
           <dl className="backup-detail-list"><dt>{text.timerInstalled}</dt><dd>{status ? (status.timer.installed ? text.yes : text.no) : text.noData}</dd><dt>{text.timerEnabled}</dt><dd>{status ? (status.timer.enabled ? text.yes : text.no) : text.noData}</dd><dt>{text.timerActive}</dt><dd>{status ? (status.timer.active ? text.yes : text.no) : text.noData}</dd><dt>{text.nextRun}</dt><dd>{formatDate(status?.timer.next_run_at)}</dd><dt>{text.daily}</dt><dd>{status?.retention.daily ?? text.noData}</dd><dt>{text.weekly}</dt><dd>{status?.retention.weekly ?? text.noData}</dd><dt>{text.monthly}</dt><dd>{status?.retention.monthly ?? text.noData}</dd></dl>
-          <p className="note">{text.scheduleFuture}</p>
         </AdminCard>
         <AdminCard title={text.restoreTitle} description={text.restoreDescription}>
           <p className={restoreReady ? "form-success" : "note"}>{restoreReady ? text.restoreReady : text.restoreUnavailable}</p>

@@ -89,6 +89,21 @@ export type OfficeChatBackupStatus = {
   error_code?: string | null;
 };
 
+export type BackupScheduleSettings = { enabled: boolean; days: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[]; time: string };
+export type BackupDestinationSettings =
+  | { kind: "local" | "unchanged" | "unmanaged" }
+  | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
+  | { kind: "smb"; host: string; share: string; domain: string; username: string; require_offsite: boolean };
+export type BackupSettings = { destination: BackupDestinationSettings; schedule: BackupScheduleSettings; next_run_at: string | null };
+export type BackupSettingsJob = { request_id: string; state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null; error_code?: "MOUNT_HELPER_MISSING" | "MAINTENANCE_BUSY" | "DESTINATION_READ_FAILED" | "SETTINGS_APPLY_FAILED" | null };
+export type BackupSettingsUpdate = {
+  destination:
+    | { kind: "local" | "unchanged" }
+    | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
+    | { kind: "smb"; host: string; share: string; domain: string; username: string; password: string; require_offsite: boolean };
+  schedule: BackupScheduleSettings;
+};
+
 export type OfficeChatBackupJob = {
   job_id: string;
   operation: "create_backup" | "verify_backup";
@@ -1296,6 +1311,8 @@ export type RetentionRunResult = {
 
 export type StorageStats = {
   uploads_total_bytes: number;
+  disk_total_bytes: number | null;
+  disk_free_bytes: number | null;
   avatar_bytes: number;
   group_attachment_bytes: number;
   direct_attachment_bytes: number;
@@ -1628,6 +1645,22 @@ export function getStorageStats(token: string) {
 
 export function getBackupStatus(token: string) {
   return apiFetch<OfficeChatBackupStatus>("/api/admin/backups/status", token);
+}
+
+export function getBackupSettings(token: string) {
+  return apiFetch<BackupSettings>("/api/admin/backups/settings", token);
+}
+
+export function updateBackupSettings(token: string, payload: BackupSettingsUpdate) {
+  return apiFetch<BackupSettingsJob>("/api/admin/backups/settings", token, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function getLatestBackupSettingsJob(token: string) {
+  return apiFetch<{ request: BackupSettingsJob | null }>("/api/admin/backups/settings/jobs/latest", token);
+}
+
+export function getBackupSettingsJob(token: string, requestId: string) {
+  return apiFetch<BackupSettingsJob>(`/api/admin/backups/settings/jobs/${encodeURIComponent(requestId)}`, token);
 }
 
 export function getBackups(token: string, page = 1, limit = 25) {

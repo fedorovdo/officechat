@@ -13,6 +13,10 @@ const apiMocks = vi.hoisted(() => ({
   getBackupJob: vi.fn(),
   getBackups: vi.fn(),
   getBackupStatus: vi.fn(),
+  getBackupSettings: vi.fn(),
+  getLatestBackupSettingsJob: vi.fn(),
+  getBackupSettingsJob: vi.fn(),
+  updateBackupSettings: vi.fn(),
   getCurrentUser: vi.fn(),
   getLatestRestore: vi.fn(),
   getRestoreStatus: vi.fn(),
@@ -111,6 +115,8 @@ describe("Backup Center", () => {
       hostname: "chat.example.test", expires_in_seconds: 600
     });
     apiMocks.getBackupStatus.mockResolvedValue(status);
+    apiMocks.getBackupSettings.mockResolvedValue({ destination: { kind: "local" }, schedule: { enabled: false, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], time: "02:30" }, next_run_at: null });
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: null });
     apiMocks.getActiveBackupJob.mockResolvedValue({ job: null });
     apiMocks.getBackups.mockResolvedValue({ items: [backup], page: 1, limit: 25, total: 1, has_next: false });
     apiMocks.getBackup.mockResolvedValue(backup);
@@ -127,7 +133,7 @@ describe("Backup Center", () => {
     expect(screen.getByRole("link", { name: en.adminUi.backToDashboard })).toHaveAttribute("href", "/en/dashboard");
     expect(within(screen.getByLabelText(en.backups.statusTitle)).getAllByRole("article")).toHaveLength(7);
     expect(container.querySelector(".backup-table-wrap")).toHaveClass("admin-table-container");
-    expect(screen.getByText(en.backups.scheduleFuture)).toBeInTheDocument();
+    expect(screen.getByText(en.backups.settings.title)).toBeInTheDocument();
     expect(screen.getByText(/--verify-only/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: en.backups.restoreButton })).not.toBeInTheDocument();
@@ -142,6 +148,32 @@ describe("Backup Center", () => {
     expect(within(dialog).getByText("database, uploads")).toBeInTheDocument();
     expect(container.textContent).not.toContain("/var/backups");
     expect(container.textContent).not.toContain("offsite/path");
+  });
+
+  it("keeps an untested network destination's schedule disabled and passes SMB credentials only in the request", async () => {
+    apiMocks.updateBackupSettings.mockResolvedValue({
+      request_id: "00000000-0000-4000-8000-000000000124", state: "queued",
+      requested_at: "2026-10-03T10:00:00Z", finished_at: null
+    });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    const destination = await screen.findByLabelText(en.backups.settings.destination);
+    fireEvent.change(destination, { target: { value: "smb" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.host), { target: { value: "fileserver" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.share), { target: { value: "chat" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.username), { target: { value: "backup" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.password), { target: { value: "example-secret" } });
+    fireEvent.click(screen.getByLabelText(en.backups.settings.enable));
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.save }));
+    expect(apiMocks.updateBackupSettings).not.toHaveBeenCalled();
+    expect(screen.getByText(en.backups.settings.verifyFirst)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(en.backups.settings.enable));
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.save }));
+    await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
+      destination: { kind: "smb", host: "fileserver", share: "chat", domain: "", username: "backup",
+        password: "example-secret", require_offsite: false },
+      schedule: { enabled: false, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], time: "02:30" }
+    }));
+    expect(screen.queryByText("example-secret")).not.toBeInTheDocument();
   });
 
   it("requires reason, exact host, and backup ID before starting restore", async () => {

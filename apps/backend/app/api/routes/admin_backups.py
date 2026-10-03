@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.api.deps import require_backup_operator
+from app.api.deps import require_backup_operator, require_superadmin_user
 from app.models.user import User
 from app.schemas.backup import (
     BackupCapacityPublic,
@@ -18,6 +18,9 @@ from app.schemas.backup import (
     BackupRetentionPublic,
     BackupStatusPublic,
     BackupTimerPublic,
+    BackupSettingsPublic,
+    BackupSettingsUpdate,
+    BackupSettingsJobPublic,
     LatestRestorePublic,
     RestoreConfirm,
     RestorePreparationPublic,
@@ -129,6 +132,65 @@ async def get_backup_status(
         return BackupStatusPublic.model_validate(await client.request("status"))
     except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError):
         return unavailable_status()
+
+
+@router.get("/settings", response_model=BackupSettingsPublic)
+async def get_backup_settings(
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> BackupSettingsPublic | JSONResponse:
+    try:
+        return BackupSettingsPublic.model_validate(await client.request("get_backup_settings"))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.post("/settings", response_model=BackupSettingsJobPublic, status_code=status.HTTP_202_ACCEPTED)
+async def update_backup_settings(
+    payload: BackupSettingsUpdate,
+    request: Request,
+    actor: Annotated[User, Depends(require_superadmin_user)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> BackupSettingsJobPublic | JSONResponse:
+    await record_audit_event_best_effort(
+        event_type="backup.settings.requested", category="backup", action="update_settings",
+        status="requested", actor=actor, target_type="backup_settings",
+        details={"destination_kind": payload.destination.kind, "schedule_enabled": payload.schedule.enabled},
+        request=request,
+    )
+    try:
+        data = await client.request("apply_backup_settings", {
+            **payload.model_dump(), "requested_by_user_id": str(actor.id), "requested_by_login": actor.username,
+        })
+        return BackupSettingsJobPublic.model_validate(data)
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.get("/settings/jobs/latest", response_model=dict)
+async def latest_backup_settings_job(
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> dict | JSONResponse:
+    try:
+        data = await client.request("latest_backup_settings")
+        return {"request": BackupSettingsJobPublic.model_validate(data["request"]).model_dump(mode="json") if data["request"] else None}
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.get("/settings/jobs/{request_id}", response_model=BackupSettingsJobPublic)
+async def backup_settings_job_status(
+    request_id: str,
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> BackupSettingsJobPublic | JSONResponse:
+    if len(request_id) > 64 or not JOB_ID_PATTERN.fullmatch(request_id):
+        return api_error(400, "INVALID_JOB_ID", "Backup settings request identifier is invalid")
+    try:
+        return BackupSettingsJobPublic.model_validate(await client.request("backup_settings_status", {"request_id": request_id}))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
 
 
 def parse_pagination(page: str, limit: str) -> tuple[int, int] | JSONResponse:

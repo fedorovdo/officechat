@@ -159,6 +159,8 @@ export function AdminStorage({ dictionary, locale }: AdminStorageProps) {
             <h2>{dictionary.retention.overview}</h2>
             <div className="storage-stat-grid">
               {[
+                [dictionary.retention.diskTotal, stats.disk_total_bytes === null ? dictionary.retention.unknown : formatFileSize(stats.disk_total_bytes)],
+                [dictionary.retention.diskFree, stats.disk_free_bytes === null ? dictionary.retention.unknown : formatFileSize(stats.disk_free_bytes)],
                 [dictionary.retention.totalStorage, formatFileSize(stats.uploads_total_bytes)],
                 [dictionary.retention.avatars, formatFileSize(stats.avatar_bytes)],
                 [dictionary.retention.groupFiles, formatFileSize(stats.group_attachment_bytes)],

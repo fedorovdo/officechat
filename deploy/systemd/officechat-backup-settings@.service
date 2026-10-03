@@ -1,0 +1,19 @@
+[Unit]
+Description=OfficeChat backup settings request %i
+Documentation=file:/opt/officechat/docs/BACKUP_RESTORE_RU.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/officechat/backup-settings.py %i
+TimeoutStartSec=3min
+PrivateTmp=false
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/officechat /etc/systemd/system /var/lib/officechat-backup-agent/settings
+StandardOutput=journal
+StandardError=journal

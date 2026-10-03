@@ -164,6 +164,9 @@ jobs:
           bash scripts/test-backup-scripts.sh
           bash scripts/test-backup-restore-drill.sh
 
+      - name: Backup destination and schedule tests
+        run: sudo -n python3 -m unittest scripts.tests.test_backup_settings -q
+
       - name: Caddy access/runtime log redaction
         run: bash scripts/release/test-caddy-access-log.sh
 

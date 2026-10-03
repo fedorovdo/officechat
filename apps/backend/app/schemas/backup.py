@@ -30,6 +30,7 @@ class SmbBackupDestination(BaseModel):
     kind: Literal["smb"]
     host: str = Field(min_length=1, max_length=253, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
     share: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.$-]*$")
+    directory: str = Field(default="", max_length=255, pattern=r"^(?:|[a-zA-Z0-9_][a-zA-Z0-9_.-]*(?:/[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*)$")
     domain: str = Field(max_length=128)
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=512)

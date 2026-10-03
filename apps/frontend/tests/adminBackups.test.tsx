@@ -160,6 +160,7 @@ describe("Backup Center", () => {
     fireEvent.change(destination, { target: { value: "smb" } });
     fireEvent.change(screen.getByLabelText(en.backups.settings.host), { target: { value: "fileserver" } });
     fireEvent.change(screen.getByLabelText(en.backups.settings.share), { target: { value: "chat" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.directory), { target: { value: "OfficeChat" } });
     fireEvent.change(screen.getByLabelText(en.backups.settings.username), { target: { value: "backup" } });
     fireEvent.change(screen.getByLabelText(en.backups.settings.password), { target: { value: "example-secret" } });
     fireEvent.click(screen.getByLabelText(en.backups.settings.enable));
@@ -169,7 +170,7 @@ describe("Backup Center", () => {
     fireEvent.click(screen.getByLabelText(en.backups.settings.enable));
     fireEvent.click(screen.getByRole("button", { name: en.backups.settings.save }));
     await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
-      destination: { kind: "smb", host: "fileserver", share: "chat", domain: "", username: "backup",
+      destination: { kind: "smb", host: "fileserver", share: "chat", directory: "OfficeChat", domain: "", username: "backup",
         password: "example-secret", require_offsite: false },
       schedule: { enabled: false, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], time: "02:30" }
     }));

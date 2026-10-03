@@ -91,6 +91,7 @@
       "export": "NFS export path",
       "nfsVersion": "NFS version",
       "share": "SMB share name",
+      "directory": "Folder inside SMB share (optional)",
       "domain": "AD domain (if applicable)",
       "username": "Dedicated account",
       "password": "Password",

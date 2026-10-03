@@ -35,6 +35,7 @@ REQUEST_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-
 HOST = re.compile(r"^[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$")
 EXPORT = re.compile(r"^/(?:[a-zA-Z0-9_.-]+/?)+$")
 SHARE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.$-]{0,79}$")
+SMB_DIRECTORY = re.compile(r"^(?:|[a-zA-Z0-9_][a-zA-Z0-9_.-]*(?:/[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*)$")
 IDENTITY = re.compile(r"^[a-zA-Z0-9_.@-]{1,128}$")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -114,10 +115,13 @@ def validated(request: dict) -> dict:
                 or not isinstance(destination["require_offsite"], bool)):
             raise ValueError("Invalid NFS destination")
     elif kind == "smb":
-        if set(destination) != {"kind", "host", "share", "domain", "username", "password", "require_offsite"}:
+        required = {"kind", "host", "share", "domain", "username", "password", "require_offsite"}
+        if set(destination) not in (required, required | {"directory"}):
             raise ValueError("Invalid SMB destination")
+        directory = destination.get("directory", "")
         if (not isinstance(destination["host"], str) or not HOST.fullmatch(destination["host"])
                 or not isinstance(destination["share"], str) or not SHARE.fullmatch(destination["share"])
+                or not isinstance(directory, str) or len(directory) > 255 or not SMB_DIRECTORY.fullmatch(directory)
                 or not isinstance(destination["domain"], str) or (destination["domain"] and not IDENTITY.fullmatch(destination["domain"]))
                 or not isinstance(destination["username"], str) or not IDENTITY.fullmatch(destination["username"])
                 or not isinstance(destination["password"], str) or not 1 <= len(destination["password"]) <= 512
@@ -154,6 +158,8 @@ def mount_file(destination: dict) -> tuple[bytes, bytes | None]:
         secret = None
     else:
         source = f"//{destination['host']}/{destination['share']}"
+        if destination.get("directory"):
+            source += f"/{destination['directory']}"
         options = f"rw,_netdev,credentials={CREDENTIALS},vers=3.1.1,dir_mode=0700,file_mode=0600"
         filesystem = "cifs"
         secret = (f"username={destination['username']}\npassword={destination['password']}\n"

@@ -93,14 +93,14 @@ export type BackupScheduleSettings = { enabled: boolean; days: ("Mon" | "Tue" | 
 export type BackupDestinationSettings =
   | { kind: "local" | "unchanged" | "unmanaged" }
   | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
-  | { kind: "smb"; host: string; share: string; domain: string; username: string; require_offsite: boolean };
+  | { kind: "smb"; host: string; share: string; directory?: string; domain: string; username: string; require_offsite: boolean };
 export type BackupSettings = { destination: BackupDestinationSettings; schedule: BackupScheduleSettings; next_run_at: string | null };
 export type BackupSettingsJob = { request_id: string; state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null; error_code?: "MOUNT_HELPER_MISSING" | "MAINTENANCE_BUSY" | "DESTINATION_READ_FAILED" | "SETTINGS_APPLY_FAILED" | null };
 export type BackupSettingsUpdate = {
   destination:
     | { kind: "local" | "unchanged" }
     | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
-    | { kind: "smb"; host: string; share: string; domain: string; username: string; password: string; require_offsite: boolean };
+    | { kind: "smb"; host: string; share: string; directory: string; domain: string; username: string; password: string; require_offsite: boolean };
   schedule: BackupScheduleSettings;
 };
 

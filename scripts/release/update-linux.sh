@@ -198,6 +198,7 @@ snapshot_file "$OFFICECHAT_COMPOSE_FILE" docker-compose.yml
 snapshot_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
 snapshot_file "$OFFICECHAT_ENV_FILE" officechat.env
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+snapshot_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
 snapshot_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
 snapshot_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
 snapshot_file "$OFFICECHAT_RESTORE_UNIT_FILE" 'officechat-restore@.service'
@@ -222,6 +223,7 @@ rollback_update() {
   restore_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
   restore_file "$OFFICECHAT_ENV_FILE" officechat.env
   restore_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+  restore_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
   restore_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
   restore_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
   restore_file "$OFFICECHAT_RESTORE_UNIT_FILE" 'officechat-restore@.service'
@@ -313,6 +315,10 @@ chown root:root "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
 chmod 600 "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-agent.service" \
   "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE"
+# Refresh the scheduled executor without replacing the timer or its schedule
+# drop-ins, and without starting a backup or changing the timer's state.
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup.service" \
+  "$OFFICECHAT_BACKUP_UNIT_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" \
   /etc/systemd/system/officechat-backup-settings@.service
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" \

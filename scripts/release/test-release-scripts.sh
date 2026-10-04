@@ -845,12 +845,12 @@ if [[ "${1:-}" == "restart" && "${2:-}" == "officechat-backup-agent.service" && 
   rm -f -- "$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE"
   python3 - "$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE" <<'PY_SOCKET'
 import os
-import socket
+import stat
 import sys
 
-listener = socket.socket(socket.AF_UNIX)
-listener.bind(sys.argv[1])
-listener.close()
+# The fake agent only needs a socket inode for the updater's file checks;
+# it does not accept connections or require IPC access in the test runner.
+os.mknod(sys.argv[1], stat.S_IFSOCK | 0o660)
 os.chmod(sys.argv[1], 0o660)
 PY_SOCKET
 fi
@@ -1791,6 +1791,7 @@ rollback_https="${rollback_install}/docker-compose.https-override.yml"
 rollback_override="${rollback_install}/docker-compose.version-override.yml"
 rollback_agent_config="${rollback_etc}/backup-agent.conf"
 rollback_agent_unit="${rollback_etc}/officechat-backup-agent.service"
+rollback_backup_unit="${rollback_etc}/officechat-backup.service"
 rollback_job_unit="${rollback_etc}/officechat-backup-job.service"
 rollback_verify_unit="${rollback_etc}/officechat-backup-verify@.service"
 rollback_restore_unit="${rollback_etc}/officechat-restore@.service"
@@ -1807,6 +1808,7 @@ printf 'old-restore-request\n' >"${rollback_install}/restore-request.py"
 printf '{"old":true}\n' >"${rollback_install}/RELEASE.json"
 printf 'old-agent-config\n' >"$rollback_agent_config"
 printf 'old-agent-unit\n' >"$rollback_agent_unit"
+printf 'old-scheduled-backup-unit\n' >"$rollback_backup_unit"
 printf 'old-job-unit\n' >"$rollback_job_unit"
 printf 'old-verify-unit\n' >"$rollback_verify_unit"
 printf 'old-restore-unit\n' >"$rollback_restore_unit"
@@ -1819,7 +1821,7 @@ printf 'services:\n  caddy: {}\n' >"$rollback_caddy_compose"
 
 declare -A rollback_hashes=()
 for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" "$rollback_env" \
-  "$rollback_agent_config" "$rollback_agent_unit" "${rollback_install}/backup-agent.py" \
+  "$rollback_agent_config" "$rollback_agent_unit" "$rollback_backup_unit" "${rollback_install}/backup-agent.py" \
   "${rollback_install}/restore-request.py" "$rollback_job_unit" "$rollback_verify_unit" "$rollback_restore_unit" "${rollback_install}/backup-production.sh" \
   "${rollback_install}/verify-backup.sh" \
   "${rollback_install}/restore-production.sh" "${rollback_install}/backup/lib.sh" \
@@ -1845,6 +1847,7 @@ if env \
   OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
   OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
   OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+  OFFICECHAT_BACKUP_UNIT_FILE="$rollback_backup_unit" \
   OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
   OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
   OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
@@ -1902,6 +1905,7 @@ for enabled_status in 0 1; do
       OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
       OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
       OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+      OFFICECHAT_BACKUP_UNIT_FILE="$rollback_backup_unit" \
       OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
       OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
       OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
@@ -1944,6 +1948,51 @@ for enabled_status in 0 1; do
     fi
   done
 done
+
+scheduled_update_log="${TMP_DIR}/scheduled-executor-update.log"
+scheduled_timer="${rollback_etc}/officechat-backup.timer"
+scheduled_timer_dropin="${scheduled_timer}.d/10-officechat-settings.conf"
+mkdir -p "${scheduled_timer}.d"
+printf '[Timer]\nOnCalendar=*-*-* 02:30:00\n' >"$scheduled_timer"
+printf '[Timer]\nOnCalendar=\nOnCalendar=Mon..Fri *-*-* 03:45:00\n' >"$scheduled_timer_dropin"
+timer_hash_before="$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")"
+: >"$scheduled_update_log"
+env \
+  OFFICECHAT_FAKE_DOCKER_LOG="$scheduled_update_log" \
+  OFFICECHAT_INSTALL_DIR="$rollback_install" \
+  OFFICECHAT_DATA_DIR="${rollback_root}/data" \
+  OFFICECHAT_BACKUP_DIR="${rollback_root}/backups" \
+  OFFICECHAT_ENV_FILE="$rollback_env" \
+  OFFICECHAT_COMPOSE_FILE="$rollback_compose" \
+  OFFICECHAT_HTTPS_OVERRIDE_FILE="$rollback_https" \
+  OFFICECHAT_VERSION_OVERRIDE_FILE="$rollback_override" \
+  OFFICECHAT_RELEASE_METADATA_FILE="$RELEASE_METADATA_FILE" \
+  OFFICECHAT_LOCK_FILE="${rollback_root}/scheduled-executor.lock" \
+  OFFICECHAT_BACKUP_GROUP=root \
+  OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
+  OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
+  OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+  OFFICECHAT_BACKUP_UNIT_FILE="$rollback_backup_unit" \
+  OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
+  OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+  OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
+  OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${rollback_root}/scheduled-executor.sock" \
+  bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >"${rollback_root}/scheduled-update.out" 2>&1 || {
+    tail -30 "${rollback_root}/scheduled-update.out" >&2
+    fail_test "scheduled executor update failed"
+  }
+cmp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "$rollback_backup_unit" ||
+  fail_test "updater did not replace the legacy scheduled backup executor"
+grep -Fq -- '--scheduled' "$rollback_backup_unit" ||
+  fail_test "updated backup executor does not record scheduled backups"
+[[ "$timer_hash_before" == "$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")" ]] ||
+  fail_test "updater replaced the existing backup schedule"
+if grep -Fq 'officechat-backup.timer' "$scheduled_update_log" ||
+  grep -Eq 'systemctl (start|restart|stop|enable|disable).*officechat-backup\.service' "$scheduled_update_log"; then
+  fail_test "updater changed timer state or launched a backup"
+fi
+grep -Fq 'systemctl daemon-reload' "$scheduled_update_log" ||
+  fail_test "updated scheduled executor was not reloaded"
 
 verify_output="$(bash "${SCRIPT_DIR}/verify-install.sh" --dry-run 2>&1)"
 [[ "$verify_output" == *"Uploads writable mutation probe skipped"* ]] || {

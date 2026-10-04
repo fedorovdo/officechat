@@ -1809,6 +1809,12 @@ printf '{"old":true}\n' >"${rollback_install}/RELEASE.json"
 printf 'old-agent-config\n' >"$rollback_agent_config"
 printf 'old-agent-unit\n' >"$rollback_agent_unit"
 printf 'old-scheduled-backup-unit\n' >"$rollback_backup_unit"
+rollback_network_unit="${rollback_etc}/officechat-offsite-network.service"
+rollback_mount_dropin="${rollback_etc}/mnt-officechat\\x2doffsite.mount.d/20-officechat-network.conf"
+mkdir -p "$(dirname "$rollback_mount_dropin")"
+printf 'old-network-unit\n' >"$rollback_network_unit"
+printf 'old-mount-dropin\n' >"$rollback_mount_dropin"
+
 printf 'old-job-unit\n' >"$rollback_job_unit"
 printf 'old-verify-unit\n' >"$rollback_verify_unit"
 printf 'old-restore-unit\n' >"$rollback_restore_unit"
@@ -1821,7 +1827,7 @@ printf 'services:\n  caddy: {}\n' >"$rollback_caddy_compose"
 
 declare -A rollback_hashes=()
 for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" "$rollback_env" \
-  "$rollback_agent_config" "$rollback_agent_unit" "$rollback_backup_unit" "${rollback_install}/backup-agent.py" \
+  "$rollback_agent_config" "$rollback_agent_unit" "$rollback_backup_unit" "$rollback_network_unit" "$rollback_mount_dropin" "${rollback_install}/backup-agent.py" \
   "${rollback_install}/restore-request.py" "$rollback_job_unit" "$rollback_verify_unit" "$rollback_restore_unit" "${rollback_install}/backup-production.sh" \
   "${rollback_install}/verify-backup.sh" \
   "${rollback_install}/restore-production.sh" "${rollback_install}/backup/lib.sh" \
@@ -1956,6 +1962,9 @@ mkdir -p "${scheduled_timer}.d"
 printf '[Timer]\nOnCalendar=*-*-* 02:30:00\n' >"$scheduled_timer"
 printf '[Timer]\nOnCalendar=\nOnCalendar=Mon..Fri *-*-* 03:45:00\n' >"$scheduled_timer_dropin"
 timer_hash_before="$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")"
+scheduled_network_unit="${rollback_etc}/officechat-offsite-network.service"
+scheduled_mount_dropin="${rollback_etc}/mnt-officechat\\x2doffsite.mount.d/20-officechat-network.conf"
+
 : >"$scheduled_update_log"
 env \
   OFFICECHAT_FAKE_DOCKER_LOG="$scheduled_update_log" \
@@ -1983,6 +1992,10 @@ env \
   }
 cmp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "$rollback_backup_unit" ||
   fail_test "updater did not replace the legacy scheduled backup executor"
+cmp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.service" "$scheduled_network_unit" ||
+  fail_test "network readiness executor was not installed during update"
+cmp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "$scheduled_mount_dropin" ||
+  fail_test "managed mount readiness dependency was not installed during update"
 grep -Fq -- '--scheduled' "$rollback_backup_unit" ||
   fail_test "updated backup executor does not record scheduled backups"
 [[ "$timer_hash_before" == "$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")" ]] ||

@@ -199,6 +199,8 @@ snapshot_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-overrid
 snapshot_file "$OFFICECHAT_ENV_FILE" officechat.env
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
 snapshot_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
+snapshot_file "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE" officechat-offsite-network.service
+snapshot_file "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" officechat-offsite-network.conf
 snapshot_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
 snapshot_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
 snapshot_file "$OFFICECHAT_RESTORE_UNIT_FILE" 'officechat-restore@.service'
@@ -224,6 +226,8 @@ rollback_update() {
   restore_file "$OFFICECHAT_ENV_FILE" officechat.env
   restore_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
   restore_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
+  restore_file "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE" officechat-offsite-network.service
+  restore_file "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" officechat-offsite-network.conf
   restore_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
   restore_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
   restore_file "$OFFICECHAT_RESTORE_UNIT_FILE" 'officechat-restore@.service'
@@ -319,6 +323,11 @@ install -o root -g root -m 0644 "${systemd_source}/officechat-backup-agent.servi
 # drop-ins, and without starting a backup or changing the timer's state.
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup.service" \
   "$OFFICECHAT_BACKUP_UNIT_FILE"
+install -d -o root -g root -m 0755 "$(dirname "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE")"
+install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.service" \
+  "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.conf" \
+  "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" \
   /etc/systemd/system/officechat-backup-settings@.service
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" \

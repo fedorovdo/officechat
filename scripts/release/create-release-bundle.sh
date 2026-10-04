@@ -95,6 +95,8 @@ run cp "${ROOT_DIR}/deploy/backup/officechat-backup.conf.example" "${RELEASE_DIR
 run cp "${ROOT_DIR}/deploy/backup/officechat-backup-agent.conf.example" "${RELEASE_DIR}/backup/officechat-backup-agent.conf.example"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "${RELEASE_DIR}/systemd/officechat-backup.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.timer" "${RELEASE_DIR}/systemd/officechat-backup.timer"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.service" "${RELEASE_DIR}/systemd/officechat-offsite-network.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "${RELEASE_DIR}/systemd/officechat-offsite-network.conf"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" "${RELEASE_DIR}/systemd/officechat-backup-agent.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings@.service" "${RELEASE_DIR}/systemd/officechat-backup-settings@.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-job.service" "${RELEASE_DIR}/systemd/officechat-backup-job.service"
@@ -127,6 +129,8 @@ run chmod 0644 \
   "${RELEASE_DIR}/backup/officechat-backup-agent.conf.example" \
   "${RELEASE_DIR}/systemd/officechat-backup.service" \
   "${RELEASE_DIR}/systemd/officechat-backup.timer" \
+  "${RELEASE_DIR}/systemd/officechat-offsite-network.service" \
+  "${RELEASE_DIR}/systemd/officechat-offsite-network.conf" \
   "${RELEASE_DIR}/systemd/officechat-backup-agent.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-settings@.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-job.service" \

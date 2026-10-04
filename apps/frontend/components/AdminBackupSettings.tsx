@@ -55,6 +55,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
         if (updated.state === "succeeded") {
           const settings = await getBackupSettings(token);
           setCurrent(settings);
+          setSchedule(settings.schedule);
           setKind(settings.destination.kind === "local" ? "local" : "unchanged");
           onSaved();
         }
@@ -89,6 +90,22 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
     }
   }
 
+  async function reconnect() {
+    const token = requireStoredAccessToken(locale);
+    if (!token || !canManage || busy || !current) return;
+    setBusy(true);
+    setError("");
+    try {
+      setJob(await updateBackupSettings(token, {
+        destination: { kind: "reconnect" }, schedule: current.schedule
+      }));
+    } catch (caught) {
+      setError(getLocalizedApiError(caught, dictionary.session));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const active = Boolean(job && ["queued", "running"].includes(job.state));
   const configured = Boolean(current && current.destination.kind !== "local" && current.destination.kind !== "unmanaged");
   return <AdminCard title={text.title} description={text.description}>
@@ -97,7 +114,14 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
     <p>{text.current}: <strong>{current ? text.destinations[current.destination.kind] : text.loading}</strong></p>
     {current?.destination.kind === "nfs" ? <p><code>{current.destination.host}:{current.destination.export}</code></p> : null}
     {current?.destination.kind === "smb" ? <p><code>//{current.destination.host}/{current.destination.share}{current.destination.directory ? `/${current.destination.directory}` : ""}</code></p> : null}
-    {configured ? <p className="note">{text.migration}</p> : null}
+    {configured ? <>
+      <p className={status?.offsite.mounted === false ? "form-error" : "note"}>
+        {text.connection}: {status?.offsite.mounted === true ? text.mounted : status?.offsite.mounted === false ? text.unmounted : text.mountUnknown}
+      </p>
+      {canManage ? <button className="admin-button admin-button-secondary" disabled={busy || active} onClick={() => void reconnect()} type="button">{text.reconnect}</button> : null}
+      <p className="note">{text.reconnectNote}</p>
+      <p className="note">{text.migration}</p>
+    </> : null}
     <form onSubmit={(event) => void save(event)}>
       {canManage ? <>
         <label>{text.destination}<select className="field-input" disabled={active || configured || current?.destination.kind === "unmanaged"} onChange={(event) => setKind(event.target.value as typeof kind)} value={kind}>

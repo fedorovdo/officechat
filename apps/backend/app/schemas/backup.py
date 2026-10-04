@@ -13,7 +13,7 @@ BackupJobState = Literal["queued", "running", "verifying", "succeeded", "failed"
 
 class LocalBackupDestination(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["local", "unchanged"]
+    kind: Literal["local", "unchanged", "reconnect"]
 
 
 class NfsBackupDestination(BaseModel):
@@ -127,6 +127,7 @@ class BackupOffsitePublic(BaseModel):
     configured: bool
     required: bool
     status: OffsiteStatus
+    mounted: bool | None = None
 
 
 class BackupStatusPublic(BaseModel):

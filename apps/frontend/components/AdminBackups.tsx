@@ -282,6 +282,10 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const restoreBackupId = selected?.backup_id ?? status?.last_success?.backup_id ?? "<BACKUP_ID>";
   const restoreCommand = `/opt/officechat/restore-production.sh \\\n  --config /etc/officechat/backup.conf \\\n  --backup-id ${restoreBackupId} \\\n  --verify-only`;
 
+  const localOnlyJob = Boolean(activeJob?.state === "succeeded" && activeJob.operation === "create_backup" &&
+    status?.offsite.configured && status.last_run?.backup_id === activeJob.backup_id &&
+    status.last_run?.offsite_status !== "copied");
+
   return (
     <AdminPageShell ariaLabel={text.title} className="admin-backups-page" wide>
       <AdminPageHeader
@@ -298,8 +302,8 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         {restoreRequest.state === "failed" ? <p className="form-error">{text.restoreFailed}</p> : null}
       </AdminCard> : null}
       {warnings.length > 0 ? <section aria-label={text.systemWarnings} className="backup-warning-banner"><strong>{text.systemWarnings}</strong><ul>{warnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}</ul></section> : null}
-      {activeJob ? <AdminCard className={`backup-job-panel backup-job-${activeJob.state}`} title={text.activeJobTitle} description={text.jobMessages[activeJob.state as keyof typeof text.jobMessages] ?? text.jobMessages.unknown}>
-        <dl className="backup-job-grid"><div><dt>{text.jobOperation}</dt><dd>{statusLabel(activeJob.operation)}</dd></div><div><dt>{text.jobState}</dt><dd>{statusLabel(activeJob.state)}</dd></div><div><dt>{text.id}</dt><dd>{activeJob.backup_id ?? text.noData}</dd></div><div><dt>{text.jobStarted}</dt><dd>{formatDate(activeJob.started_at ?? activeJob.requested_at)}</dd></div><div><dt>{text.jobDuration}</dt><dd>{jobDuration} {text.seconds}</dd></div><div><dt>{text.jobResult}</dt><dd>{activeJob.success === null ? text.noData : (activeJob.success ? text.values.success : text.values.failure)}</dd></div></dl>
+      {activeJob ? <AdminCard className={`backup-job-panel backup-job-${activeJob.state}`} title={text.activeJobTitle} description={localOnlyJob ? text.localOnlyDescription : (text.jobMessages[activeJob.state as keyof typeof text.jobMessages] ?? text.jobMessages.unknown)}>
+        <dl className="backup-job-grid"><div><dt>{text.jobOperation}</dt><dd>{statusLabel(activeJob.operation)}</dd></div><div><dt>{text.jobState}</dt><dd>{statusLabel(activeJob.state)}</dd></div><div><dt>{text.id}</dt><dd>{activeJob.backup_id ?? text.noData}</dd></div><div><dt>{text.jobStarted}</dt><dd>{formatDate(activeJob.started_at ?? activeJob.requested_at)}</dd></div><div><dt>{text.jobDuration}</dt><dd>{jobDuration} {text.seconds}</dd></div><div><dt>{text.jobResult}</dt><dd>{activeJob.success === null ? text.noData : (localOnlyJob ? text.localOnly : activeJob.success ? text.values.success : text.values.failure)}</dd></div></dl>
         {activeJob.last_error ? <p className="form-error">{text.jobErrors[activeJob.last_error as keyof typeof text.jobErrors] ?? text.jobErrors.UNKNOWN}</p> : null}
       </AdminCard> : null}
 
@@ -310,7 +314,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         <AdminStatCard label={text.lastSize} value={formatBytes(status?.last_success?.backup_size_bytes)} />
         <AdminStatCard label={text.freeSpace} value={formatBytes(status?.backup_root_capacity.free_bytes)} />
         <AdminStatCard label={text.nextRun} value={status?.timer.enabled ? formatDate(status.timer.next_run_at) : text.timerDisabled} />
-        <AdminStatCard label={text.offsite} value={statusLabel(status?.offsite.status ?? "unknown")} />
+        <AdminStatCard label={text.lastOffsite} value={statusLabel(status?.offsite.status ?? "unknown")} />
       </section>
 
       <AdminBackupSettings canManage={canManageSettings} dictionary={dictionary} locale={locale} onSaved={refreshBackupData} status={status} />

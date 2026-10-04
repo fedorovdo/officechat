@@ -84,7 +84,7 @@ export type OfficeChatBackupStatus = {
     unit_name: "officechat-backup.timer";
   };
   retention: { daily: number | null; weekly: number | null; monthly: number | null };
-  offsite: { configured: boolean; required: boolean; status: BackupOffsiteStatus };
+  offsite: { configured: boolean; required: boolean; status: BackupOffsiteStatus; mounted?: boolean | null };
   warnings: string[];
   error_code?: string | null;
 };
@@ -98,7 +98,7 @@ export type BackupSettings = { destination: BackupDestinationSettings; schedule:
 export type BackupSettingsJob = { request_id: string; state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null; error_code?: "MOUNT_HELPER_MISSING" | "MAINTENANCE_BUSY" | "DESTINATION_READ_FAILED" | "SETTINGS_APPLY_FAILED" | null };
 export type BackupSettingsUpdate = {
   destination:
-    | { kind: "local" | "unchanged" }
+    | { kind: "local" | "unchanged" | "reconnect" }
     | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
     | { kind: "smb"; host: string; share: string; directory: string; domain: string; username: string; password: string; require_offsite: boolean };
   schedule: BackupScheduleSettings;

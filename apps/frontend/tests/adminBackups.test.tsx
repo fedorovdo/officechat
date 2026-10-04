@@ -323,6 +323,27 @@ describe("Backup Center", () => {
     vi.useRealTimers();
   });
 
+  it("shows disconnected storage separately from a previously copied backup and reconnects without editing the schedule", async () => {
+    const schedule = { enabled: true, days: ["Mon"], time: "02:30" };
+    apiMocks.getBackupSettings.mockResolvedValue({ destination: { kind: "smb", host: "nas", share: "backups", directory: "Chat" }, schedule });
+    apiMocks.getBackupStatus.mockResolvedValue({ ...status, offsite: { ...status.offsite, mounted: false } });
+    apiMocks.updateBackupSettings.mockResolvedValue({ request_id: "11111111-1111-4111-8111-111111111111", state: "queued" });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    expect(await screen.findByText(`${en.backups.settings.connection}: ${en.backups.settings.unmounted}`)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.reconnect }));
+    await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
+      destination: { kind: "reconnect" }, schedule
+    }));
+  });
+
+  it("qualifies a successful local-only backup when the offsite copy was skipped", async () => {
+    apiMocks.getActiveBackupJob.mockResolvedValue({ job: { ...job, state: "succeeded", success: true, backup_id: backup.backup_id } });
+    apiMocks.getBackupStatus.mockResolvedValue({ ...status, last_run: { ...status.last_run, offsite_status: "skipped_not_mounted" } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    expect(await screen.findByText(en.backups.localOnlyDescription)).toBeVisible();
+    expect(screen.getByText(en.backups.localOnly)).toBeVisible();
+  });
+
   it("keeps RU and EN dictionary key sets aligned", () => {
     expect(Object.keys(en.backups).sort()).toEqual(Object.keys(ru.backups).sort());
     expect(Object.keys(en.backups.values).sort()).toEqual(Object.keys(ru.backups.values).sort());

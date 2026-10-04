@@ -73,6 +73,82 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             settings.validated(candidate)
 
+    def write_mount(self):
+        unit, _ = settings.mount_file({"kind": "smb", "host": "192.168.1.100", "share": "backup_share",
+            "directory": "OfficeChat", "username": "backup", "password": "secret", "domain": ""})
+        settings.MOUNT_UNIT.write_bytes(unit)
+        settings.MOUNT_UNIT.chmod(0o644)
+        settings.CONFIG.write_text(f"BACKUP_ROOT=/var/backups/officechat/production\nOFFSITE_ROOT={settings.MOUNTPOINT}\nREQUIRE_OFFSITE=no\n")
+
+    def test_reconnect_checks_mount_without_changing_schedule_or_config(self):
+        self.write_mount()
+        before = settings.CONFIG.read_bytes()
+        with patch.object(settings, "check_mounted_destination") as probe:
+            settings.apply(request("reconnect", enabled=True))
+        probe.assert_called_once_with(before)
+        self.assertEqual(settings.CONFIG.read_bytes(), before)
+        self.assertFalse(settings.TIMER_OVERRIDE.exists())
+        self.assertEqual(settings.run.call_args_list[-1].args, (settings.SYSTEMCTL, "start", settings.UNIT_NAME))
+        self.assertFalse(any(settings.TIMER_NAME in call.args for call in settings.run.call_args_list))
+
+    def test_reconnect_does_not_persist_request_schedule(self):
+        candidate = request("reconnect", enabled=False)
+        current = settings.REQUEST_DIR / "current.json"
+        settings.atomic_write(current, json.dumps({"destination": {"kind": "smb"}, "schedule": {"enabled": True}}).encode())
+        original = current.read_bytes()
+        path = settings.REQUEST_DIR / f"{candidate['request_id']}.json"
+        settings.atomic_write(path, json.dumps(candidate).encode())
+        with patch.object(settings, "apply"), patch.object(settings, "Path", wraps=Path) as paths:
+            paths.side_effect = lambda value: (Path(self.temp.name) / "backup.lock" if value == "/run/lock/officechat/backup.lock" else
+                Path(self.temp.name) / "release.lock" if value == "/tmp/officechat-release.lock" else Path(value))
+            self.assertEqual(settings.main(candidate["request_id"]), 0)
+        self.assertEqual(current.read_bytes(), original)
+
+    def test_reconnect_failure_preserves_existing_files(self):
+        self.write_mount()
+        before = settings.CONFIG.read_bytes(), settings.MOUNT_UNIT.read_bytes()
+        with patch.object(settings, "run", side_effect=RuntimeError("mount failed")), self.assertRaises(RuntimeError):
+            settings.apply(request("reconnect"))
+        self.assertEqual((settings.CONFIG.read_bytes(), settings.MOUNT_UNIT.read_bytes()), before)
+        self.assertFalse(settings.TIMER_OVERRIDE.exists())
+
+    def test_reconnect_rejects_missing_or_untrusted_mount(self):
+        with self.assertRaises(ValueError):
+            settings.apply(request("reconnect"))
+        self.write_mount()
+        settings.MOUNT_UNIT.write_text("[Mount]\nWhat=//host/share\nWhere=/other\nType=cifs\n")
+        with self.assertRaises(ValueError):
+            settings.apply(request("reconnect"))
+        settings.run.assert_not_called()
+
+    def test_network_wait_retries_missing_route_and_stops_at_deadline(self):
+        self.write_mount()
+        with patch.object(settings.socket, "getaddrinfo", side_effect=OSError("no network")), \
+                patch.object(settings.time, "monotonic", side_effect=[0, 0, 0, 61]), \
+                patch.object(settings.time, "sleep") as sleep:
+            with self.assertRaisesRegex(settings.SettingsError, "NETWORK_ROUTE_UNAVAILABLE"):
+                settings.wait_for_mount_route()
+        sleep.assert_called_once_with(1)
+
+    def test_network_wait_handles_nfs_source(self):
+        unit, _ = settings.mount_file({"kind": "nfs", "host": "nas", "export": "/backups/chat", "version": "4.1"})
+        settings.MOUNT_UNIT.write_bytes(unit)
+        settings.MOUNT_UNIT.chmod(0o644)
+        self.assertEqual(settings.managed_mount_host(), "nas")
+
+    def test_network_wait_accepts_kernel_route_without_sending_data(self):
+        self.write_mount()
+        from unittest.mock import MagicMock
+        probe = MagicMock()
+        probe.__enter__.return_value = probe
+        probe.getsockname.return_value = ("192.168.0.157", 12345)
+        with patch.object(settings.socket, "getaddrinfo", return_value=[(2, 2, 17, "", ("192.168.1.100", 9))]), \
+                patch.object(settings.socket, "socket", return_value=probe):
+            settings.wait_for_mount_route()
+        probe.connect.assert_called_once_with(("192.168.1.100", 9))
+        probe.send.assert_not_called()
+        probe.sendto.assert_not_called()
+
     def test_smb_credentials_not_in_mount_unit(self):
         candidate = {"kind": "smb", "host": "fileserver", "share": "chat", "domain": "AD",
                      "directory": "OfficeChat", "username": "backup", "password": "secret123", "require_offsite": True}

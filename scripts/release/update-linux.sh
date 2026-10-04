@@ -199,6 +199,7 @@ snapshot_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-overrid
 snapshot_file "$OFFICECHAT_ENV_FILE" officechat.env
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
 snapshot_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
+snapshot_file "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE" officechat-backup-settings-recovery.service
 snapshot_file "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE" officechat-offsite-network.service
 snapshot_file "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" officechat-offsite-network.conf
 snapshot_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
@@ -226,6 +227,7 @@ rollback_update() {
   restore_file "$OFFICECHAT_ENV_FILE" officechat.env
   restore_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
   restore_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
+  restore_file "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE" officechat-backup-settings-recovery.service
   restore_file "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE" officechat-offsite-network.service
   restore_file "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" officechat-offsite-network.conf
   restore_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
@@ -328,6 +330,8 @@ install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.se
   "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.conf" \
   "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings-recovery.service" \
+  "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" \
   /etc/systemd/system/officechat-backup-settings@.service
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" \

@@ -407,6 +407,15 @@ class BackupAgentTestCase(unittest.TestCase):
         self.assertEqual(item["backup_type"], "pre_upgrade")
         self.assertTrue(item["protected"])
 
+    def test_protected_storage_copy_is_not_mislabeled_as_pre_upgrade(self) -> None:
+        directory = self.make_backup(manifest={"timestamp": timestamp(), "pre_upgrade": False,
+                                             "backup_type": "pre_storage_change"})
+        (directory / "PROTECTED").touch()
+        item = self.inspector.backup_item(directory.name)
+        self.assertEqual(item["backup_type"], "pre_storage_change")
+        self.assertTrue(item["protected"])
+        self.assertFalse(item["pre_upgrade"])
+
     def test_invalid_partial_symlink_and_unknown_ids(self) -> None:
         self.make_backup()
         (self.backup_root / "officechat-backup-20260805-120000Z.partial").mkdir()

@@ -150,6 +150,43 @@ describe("Backup Center", () => {
     expect(container.textContent).not.toContain("offsite/path");
   });
 
+  it("requires confirmation and new credentials to change storage while preserving the schedule", async () => {
+    const schedule = { enabled: true, days: ["Mon", "Wed"], time: "02:30" };
+    apiMocks.getBackupSettings.mockResolvedValue({
+      destination: { kind: "smb", host: "old-nas", share: "backup_share", directory: "OfficeChat",
+        domain: "AD", username: "backup", require_offsite: true }, schedule, next_run_at: null
+    });
+    apiMocks.updateBackupSettings.mockResolvedValue({ request_id: "00000000-0000-4000-8000-000000000124", state: "queued" });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: en.backups.settings.changeStorage }));
+    expect(screen.getByLabelText(en.backups.settings.host)).toHaveValue("old-nas");
+    expect(screen.getByLabelText(en.backups.settings.password)).toHaveValue("");
+    expect(screen.getByLabelText(en.backups.settings.enable)).toBeDisabled();
+    expect(screen.getByLabelText(en.backups.settings.time)).toBeDisabled();
+    expect(screen.getByRole("button", { name: en.backups.settings.changeSave })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(en.backups.settings.host), { target: { value: "new-nas" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.directory), { target: { value: "OfficeChatNew" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.password), { target: { value: "new-secret" } });
+    fireEvent.click(screen.getByLabelText(en.backups.settings.confirmChange));
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.changeSave }));
+    await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
+      destination: { kind: "smb", host: "new-nas", share: "backup_share", directory: "OfficeChatNew",
+        domain: "AD", username: "backup", password: "new-secret", require_offsite: true, replace_existing: true }, schedule
+    }));
+    expect(screen.getByLabelText(en.backups.settings.password)).toHaveValue("");
+  });
+
+  it("lets the operator cancel storage editing without sending a request", async () => {
+    apiMocks.getBackupSettings.mockResolvedValue({ destination: { kind: "nfs", host: "nas", export: "/chat",
+      version: "4.1", require_offsite: true }, schedule: { enabled: false, days: ["Mon"], time: "02:30" } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: en.backups.settings.changeStorage }));
+    expect(screen.getByLabelText(en.backups.settings.export)).toHaveValue("/chat");
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.cancelChange }));
+    expect(screen.queryByLabelText(en.backups.settings.confirmChange)).not.toBeInTheDocument();
+    expect(apiMocks.updateBackupSettings).not.toHaveBeenCalled();
+  });
+
   it("keeps an untested network destination's schedule disabled and passes SMB credentials only in the request", async () => {
     apiMocks.updateBackupSettings.mockResolvedValue({
       request_id: "00000000-0000-4000-8000-000000000124", state: "queued",

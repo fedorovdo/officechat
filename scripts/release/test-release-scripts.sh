@@ -1996,6 +1996,8 @@ cmp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.service" "$scheduled_
   fail_test "network readiness executor was not installed during update"
 cmp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "$scheduled_mount_dropin" ||
   fail_test "managed mount readiness dependency was not installed during update"
+cmp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings-recovery.service" "${rollback_etc}/officechat-backup-settings-recovery.service" ||
+  fail_test "storage migration recovery executor was not installed during update"
 grep -Fq -- '--scheduled' "$rollback_backup_unit" ||
   fail_test "updated backup executor does not record scheduled backups"
 [[ "$timer_hash_before" == "$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")" ]] ||

@@ -91,6 +91,160 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.run.call_args_list[-1].args, (settings.SYSTEMCTL, "start", settings.UNIT_NAME))
         self.assertFalse(any(settings.TIMER_NAME in call.args for call in settings.run.call_args_list))
 
+    def migration_fixture(self):
+        self.write_mount()
+        settings.atomic_write(settings.CREDENTIALS, b"username=old\npassword=old-secret\n")
+        settings.atomic_write(settings.TIMER_OVERRIDE, b"[Timer]\nOnCalendar=old-calendar\n", 0o644)
+        candidate = request("smb", enabled=True)
+        candidate["destination"] = {"kind": "smb", "host": "new-nas", "share": "backup_share",
+                                    "directory": "OfficeChatNew", "domain": "", "username": "new",
+                                    "password": "new-secret", "require_offsite": True, "replace_existing": True}
+        previous = {"destination": {"kind": "smb", "host": "192.168.1.100"}, "schedule": candidate["schedule"]}
+        settings.atomic_write(settings.REQUEST_DIR / "current.json", json.dumps(previous).encode())
+        settings.atomic_write(settings.REQUEST_DIR / f"{candidate['request_id']}.json", json.dumps(candidate).encode())
+        snapshot = {key: path.read_bytes() if path.exists() else None
+                    for key, (path, _) in settings.migration_files().items()}
+        return candidate, snapshot
+
+    def fake_migration_backup(self, config, lock_fd, backup_id=None):
+        settings.atomic_write(settings.BACKUP_STATUS, json.dumps({
+            "success": True, "verification_status": "passed", "backup_id": "officechat-backup-20261004-200000Z",
+            "offsite_status": "copied" if backup_id else "not_configured",
+        }).encode())
+
+    def migration_patches(self, backup=None):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch.object(settings, "unit_flag", return_value=True))
+        stack.enter_context(patch.object(settings.shutil, "which", return_value="/usr/sbin/mount.cifs"))
+        stack.enter_context(patch.object(settings, "check_mounted_destination"))
+        stack.enter_context(patch.object(settings, "migration_backup", side_effect=backup or self.fake_migration_backup))
+        return stack
+
+    def test_migration_preserves_calendar_and_copies_protected_backup_before_commit(self):
+        candidate, before = self.migration_fixture()
+        observed = []
+        def backup(config, lock_fd, backup_id=None):
+            observed.append((backup_id, settings.CONFIG.read_bytes(), config.read_bytes()))
+            self.fake_migration_backup(config, lock_fd, backup_id)
+        with self.migration_patches(backup):
+            settings.apply(candidate, 10)
+        self.assertIn((settings.SYSTEMCTL, "disable", "--now", settings.TIMER_NAME), [call.args for call in settings.run.call_args_list])
+        self.assertIn((settings.SYSTEMCTL, "enable", settings.TIMER_NAME), [call.args for call in settings.run.call_args_list])
+        self.assertEqual(len(observed), 2)
+        self.assertIsNone(observed[0][0])
+        self.assertIn(b"OFFSITE_ROOT=\n", observed[0][2])
+        self.assertIn(b"VERIFY_AFTER_BACKUP=yes", observed[0][2])
+        self.assertEqual(observed[1][0], "officechat-backup-20261004-200000Z")
+        self.assertEqual(observed[1][1], before["config"])  # Not committed during copy.
+        self.assertEqual(settings.TIMER_OVERRIDE.read_bytes(), before["timer"])
+        current = json.loads((settings.REQUEST_DIR / "current.json").read_text())
+        self.assertEqual(current["schedule"], candidate["schedule"])
+        self.assertEqual(current["destination"]["host"], "new-nas")
+        self.assertNotIn("password", current["destination"])
+        self.assertNotIn("replace_existing", current["destination"])
+        self.assertEqual(settings.migration_state(settings.migration_directory(candidate["request_id"]))["state"], "committed")
+        self.assertEqual(candidate["phase"], "completed")
+
+    def test_migration_copy_failure_restores_credentials_config_calendar_and_old_mount(self):
+        candidate, before = self.migration_fixture()
+        def backup(config, lock_fd, backup_id=None):
+            if backup_id:
+                raise RuntimeError("copy failed")
+            self.fake_migration_backup(config, lock_fd)
+        with self.migration_patches(backup), self.assertRaisesRegex(settings.SettingsError, "STORAGE_MIGRATION_FAILED"):
+            settings.apply(candidate, 10)
+        for key, (path, _) in settings.migration_files().items():
+            self.assertEqual(path.read_bytes() if path.exists() else None, before[key], key)
+        self.assertEqual(settings.migration_state(settings.migration_directory(candidate["request_id"]))["state"], "rolled_back")
+        calls = [call.args for call in settings.run.call_args_list]
+        self.assertEqual(calls[-1], (settings.SYSTEMCTL, "start", settings.TIMER_NAME))
+        self.assertIn((settings.SYSTEMCTL, "start", settings.UNIT_NAME), calls)
+
+    def test_local_backup_failure_never_disconnects_old_storage(self):
+        candidate, before = self.migration_fixture()
+        with self.migration_patches(lambda *_: (_ for _ in ()).throw(RuntimeError("backup failed"))), \
+                self.assertRaisesRegex(settings.SettingsError, "STORAGE_MIGRATION_FAILED"):
+            settings.apply(candidate, 10)
+        self.assertNotIn((settings.SYSTEMCTL, "stop", settings.UNIT_NAME), [call.args for call in settings.run.call_args_list])
+        self.assertEqual(settings.CONFIG.read_bytes(), before["config"])
+
+    def test_migration_rollback_failure_retains_journal_and_never_resumes_timer(self):
+        candidate, _ = self.migration_fixture()
+        def backup(config, lock_fd, backup_id=None):
+            if backup_id:
+                raise RuntimeError("copy failed")
+            self.fake_migration_backup(config, lock_fd)
+        with self.migration_patches(backup), patch.object(settings, "restore_migration", side_effect=RuntimeError("NAS unavailable")), \
+                self.assertRaisesRegex(settings.SettingsError, "STORAGE_ROLLBACK_FAILED"):
+            settings.apply(candidate, 10)
+        self.assertEqual(settings.migration_state(settings.migration_directory(candidate["request_id"]))["state"], "pending")
+        self.assertNotIn((settings.SYSTEMCTL, "start", settings.TIMER_NAME), [call.args for call in settings.run.call_args_list])
+
+    def test_migration_requires_confirmation_and_unchanged_schedule(self):
+        candidate, _ = self.migration_fixture()
+        candidate["destination"]["replace_existing"] = False
+        with self.assertRaisesRegex(ValueError, "explicit server migration"):
+            settings.apply(candidate)
+        candidate["destination"]["replace_existing"] = True
+        candidate["schedule"]["time"] = "03:00"
+        with self.migration_patches(), self.assertRaisesRegex(ValueError, "preserve"):
+            settings.apply(candidate)
+        self.assertFalse(any(settings.REQUEST_DIR.glob(".storage-change-*")))
+
+    def test_stop_post_recovers_interrupted_migration_and_removes_private_journal(self):
+        candidate, before = self.migration_fixture()
+        with self.migration_patches():
+            settings.apply(candidate, 10)
+        directory = settings.migration_directory(candidate["request_id"])
+        data = settings.migration_state(directory)
+        data["state"] = "pending"
+        settings.atomic_write(directory / "state.json", json.dumps(data).encode())
+        with patch.object(settings, "Path", wraps=Path) as paths, patch.object(settings, "check_mounted_destination"):
+            paths.side_effect = lambda value: (Path(self.temp.name) / "backup.lock" if value == "/run/lock/officechat/backup.lock" else
+                Path(self.temp.name) / "release.lock" if value == "/tmp/officechat-release.lock" else Path(value))
+            self.assertEqual(settings.recover_migration(candidate["request_id"]), 0)
+        self.assertFalse(directory.exists())
+        for key, (path, _) in settings.migration_files().items():
+            self.assertEqual(path.read_bytes() if path.exists() else None, before[key], key)
+        history = (settings.REQUEST_DIR / f"{candidate['request_id']}.json").read_text()
+        self.assertNotIn("new-secret", history)
+        self.assertEqual(json.loads(history)["state"], "failed")
+
+    def test_recovery_discards_incomplete_snapshot_without_changing_host_files(self):
+        candidate, before = self.migration_fixture()
+        directory = settings.migration_directory(candidate["request_id"])
+        directory.mkdir(mode=0o700)
+        settings.atomic_write(directory / "credentials", b"partial snapshot")
+        with patch.object(settings, "Path", wraps=Path) as paths:
+            paths.side_effect = lambda value: (Path(self.temp.name) / "backup.lock" if value == "/run/lock/officechat/backup.lock" else
+                Path(self.temp.name) / "release.lock" if value == "/tmp/officechat-release.lock" else Path(value))
+            self.assertEqual(settings.recover_pending_migrations(), 0)
+        self.assertFalse(directory.exists())
+        settings.run.assert_not_called()
+        for key, (path, _) in settings.migration_files().items():
+            self.assertEqual(path.read_bytes() if path.exists() else None, before[key], key)
+        self.assertNotIn("new-secret", (settings.REQUEST_DIR / f"{candidate['request_id']}.json").read_text())
+
+    def test_pending_recovery_failure_keeps_agent_blocked_and_preserves_private_journal(self):
+        candidate, _ = self.migration_fixture()
+        with self.migration_patches():
+            settings.apply(candidate, 10)
+        directory = settings.migration_directory(candidate["request_id"])
+        saved = settings.migration_state(directory)
+        saved["state"] = "pending"
+        settings.atomic_write(directory / "state.json", json.dumps(saved).encode())
+        with patch.object(settings, "Path", wraps=Path) as paths, \
+                patch.object(settings, "restore_migration", side_effect=RuntimeError("unavailable")):
+            paths.side_effect = lambda value: (Path(self.temp.name) / "backup.lock" if value == "/run/lock/officechat/backup.lock" else
+                Path(self.temp.name) / "release.lock" if value == "/tmp/officechat-release.lock" else Path(value))
+            self.assertEqual(settings.recover_pending_migrations(), 1)
+        self.assertTrue(directory.exists())
+        history = json.loads((settings.REQUEST_DIR / f"{candidate['request_id']}.json").read_text())
+        self.assertEqual(history["error_code"], "STORAGE_ROLLBACK_FAILED")
+        self.assertNotIn("password", history["destination"])
+        self.assertTrue((Path(self.temp.name) / "release.lock" / "settings-owner").exists())
+
     def test_reconnect_does_not_persist_request_schedule(self):
         candidate = request("reconnect", enabled=False)
         current = settings.REQUEST_DIR / "current.json"
@@ -219,6 +373,23 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(current["destination"], {"kind": "local"})
         self.assertEqual(len(current["schedule"]["days"]), 7)
         self.assertFalse(current["schedule"]["enabled"])
+
+    def test_unresolved_migration_blocks_new_settings_and_backup_verification(self):
+        config = replace(agent.AgentConfig(), state_directory=Path(self.temp.name) / "agent")
+        config.state_directory.mkdir(mode=0o700)
+        jobs = SimpleNamespace(active_job=lambda: None)
+        restores = SimpleNamespace(_has_active_restore=lambda: False)
+        controller = agent.SettingsController(config, jobs, restores)
+        (controller.directory / ".storage-change-11111111-1111-4111-8111-111111111111").mkdir(mode=0o700)
+        params = {"destination": {"kind": "unchanged"}, "schedule": request()["schedule"],
+                  "requested_by_user_id": "11111111-1111-4111-8111-111111111111", "requested_by_login": "admin"}
+        with self.assertRaisesRegex(agent.AgentError, "maintenance"):
+            controller.start(params)
+        protocol = agent.AgentProtocol(None, jobs, restores, controller)
+        with self.assertRaisesRegex(agent.AgentError, "settings are being changed"):
+            protocol.handle({"protocol_version": agent.PROTOCOL_VERSION, "request_id": params["requested_by_user_id"], "operation": "verify_backup", "params": {
+                "backup_id": "officechat-backup-20261004-200000Z",
+                "requested_by_user_id": params["requested_by_user_id"], "requested_by_login": "admin"}})
 
     def test_agent_queues_typed_request_without_exposing_password(self):
         config = replace(agent.AgentConfig(), state_directory=Path(self.temp.name) / "agent")

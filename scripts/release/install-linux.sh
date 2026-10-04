@@ -446,6 +446,7 @@ if [[ -n "$systemd_source" ]]; then
   as_root install -d -o root -g root -m 0755 "$(dirname "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE")"
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.service" "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE"
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.conf" "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE"
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings-recovery.service" "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE"
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" /etc/systemd/system/officechat-backup-settings@.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" /etc/systemd/system/officechat-backup-job.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" /etc/systemd/system/officechat-backup-verify@.service

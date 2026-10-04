@@ -9,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${OFFICECHAT_BACKUP_CONFIG:-/etc/officechat/backup.conf}"
 INCLUDE_IMAGES=0
 PRE_UPGRADE=0
+PRE_STORAGE_CHANGE=0
+COPY_EXISTING=""
 BACKUP_TYPE="manual"
 PARTIAL_DIR=""
 OFFSITE_PARTIAL_DIR=""
@@ -21,10 +23,12 @@ POST_HOOK_COMPLETED=0
 
 usage() {
   cat <<'EOF'
-Usage: backup-production.sh [--config FILE] [--dry-run] [--include-images] [--scheduled] [--pre-upgrade]
+Usage: backup-production.sh [--config FILE] [--dry-run] [--include-images] [--scheduled] [--pre-upgrade] [--pre-storage-change] [--copy-existing BACKUP_ID]
 
 Creates an atomic OfficeChat production backup. --pre-upgrade implies
 --include-images and protects the resulting backup from automatic rotation.
+--pre-storage-change protects the copy and skips rotation. --copy-existing
+copies a verified local backup to the configured offsite destination.
 EOF
 }
 
@@ -52,6 +56,16 @@ while (($# > 0)); do
       INCLUDE_IMAGES=1
       shift
       ;;
+    --pre-storage-change)
+      PRE_STORAGE_CHANGE=1
+      shift
+      ;;
+    --copy-existing)
+      (($# >= 2)) || fail "--copy-existing requires a backup ID"
+      COPY_EXISTING="$2"
+      [[ "$COPY_EXISTING" =~ ^officechat-backup-[0-9]{8}-[0-9]{6}Z$ ]] || fail "Invalid backup ID"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -62,6 +76,8 @@ while (($# > 0)); do
   esac
 done
 [[ "$PRE_UPGRADE" == "0" ]] || BACKUP_TYPE="pre_upgrade"
+[[ "$PRE_STORAGE_CHANGE" == "0" ]] || BACKUP_TYPE="pre_storage_change"
+[[ "$PRE_STORAGE_CHANGE" == "0" || "$PRE_UPGRADE" == "0" ]] || fail "Conflicting protected backup types"
 
 write_status() {
   local success="$1"
@@ -223,14 +239,27 @@ compose config --services >/dev/null
 require_compose_service "$POSTGRES_SERVICE"
 require_compose_service "$BACKEND_SERVICE"
 acquire_backup_lock
-run_hook "$PRE_BACKUP_HOOK" "pre-backup"
-PRE_HOOK_COMPLETED=1
+if [[ -z "$COPY_EXISTING" ]]; then
+  run_hook "$PRE_BACKUP_HOOK" "pre-backup"
+  PRE_HOOK_COMPLETED=1
+fi
 
 if [[ "$REQUIRE_ENCRYPTED_PRIVATE" == "yes" ]]; then
   [[ -n "$AGE_RECIPIENT" ]] || fail "REQUIRE_ENCRYPTED_PRIVATE requires AGE_RECIPIENT"
   require_command age
 fi
 
+if [[ -n "$COPY_EXISTING" ]]; then
+  is_dry_run && fail "Copy-existing does not support dry-run"
+  [[ "$PRE_STORAGE_CHANGE" == "1" && -n "$OFFSITE_ROOT" ]] ||
+    fail "Copy-existing requires a storage change and an offsite destination"
+  final_dir="${BACKUP_ROOT}/${COPY_EXISTING}"
+  backup_name="$COPY_EXISTING"
+  [[ -f "$final_dir/PROTECTED" && ! -L "$final_dir/PROTECTED" ]] ||
+    fail "Storage-change copy must be protected"
+  "${SCRIPT_DIR}/verify-backup.sh" --config "$CONFIG_FILE" "$final_dir"
+  verification_status="passed"
+else
 timestamp="$(date -u +%Y%m%d-%H%M%SZ)"
 backup_name="officechat-backup-${timestamp}"
 final_dir="${BACKUP_ROOT}/${backup_name}"
@@ -599,11 +628,12 @@ PY
 fi
 
 touch "$PARTIAL_DIR/SUCCESS"
-if [[ "$PRE_UPGRADE" == "1" ]]; then
+if [[ "$PRE_UPGRADE" == "1" || "$PRE_STORAGE_CHANGE" == "1" ]]; then
   touch "$PARTIAL_DIR/PROTECTED"
 fi
 mv "$PARTIAL_DIR" "$final_dir"
 PARTIAL_DIR=""
+fi
 
 offsite_status="not_configured"
 if [[ -n "$OFFSITE_ROOT" ]]; then
@@ -726,9 +756,11 @@ else
   warn "No off-site destination configured; this backup does not protect against server loss"
 fi
 
-run_rotation "$BACKUP_ROOT"
-[[ "$offsite_status" != "copied" ]] || run_rotation "$OFFSITE_ROOT"
-run_hook "$POST_BACKUP_HOOK" "post-backup"
+if [[ "$PRE_STORAGE_CHANGE" == "0" ]]; then
+  run_rotation "$BACKUP_ROOT"
+  [[ "$offsite_status" != "copied" ]] || run_rotation "$OFFSITE_ROOT"
+fi
+[[ -n "$COPY_EXISTING" ]] || run_hook "$POST_BACKUP_HOOK" "post-backup"
 POST_HOOK_COMPLETED=1
 write_status true "$final_dir" "$offsite_status" "$verification_status" ""
 log "Backup completed: ${final_dir}"

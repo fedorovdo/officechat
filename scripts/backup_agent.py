@@ -29,7 +29,7 @@ BACKUP_ID_PATTERN = re.compile(r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
 JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 SAFE_METADATA_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()\-]{0,159}$")
 SAFE_COMPONENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-BACKUP_TYPES = {"manual", "scheduled", "pre_upgrade", "unknown"}
+BACKUP_TYPES = {"manual", "scheduled", "pre_upgrade", "pre_storage_change", "unknown"}
 VERIFICATION_STATUSES = {"not_requested", "pending", "passed", "failed", "unknown"}
 OFFSITE_STATUSES = {"not_configured", "copied", "skipped_not_mounted", "failed", "unknown"}
 CURRENT_RESULTS = {"success", "failure", "unknown"}
@@ -444,8 +444,8 @@ class BackupInspector:
             manifest = {}
             warnings.append(exc.code)
         protected = self._is_protected(directory)
-        pre_upgrade = manifest.get("pre_upgrade") is True or protected
         explicit_type = _enum(manifest.get("backup_type"), BACKUP_TYPES)
+        pre_upgrade = manifest.get("pre_upgrade") is True or (protected and explicit_type != "pre_storage_change")
         backup_type = "pre_upgrade" if pre_upgrade else explicit_type
         size_bytes, size_warnings = self._backup_size(directory)
         warnings.extend(size_warnings)
@@ -1555,7 +1555,7 @@ class SettingsController:
 
     @staticmethod
     def _public(payload: dict[str, Any]) -> dict[str, Any]:
-        return {key: payload.get(key) for key in ("request_id", "state", "requested_at", "finished_at", "error_code")}
+        return {key: payload.get(key) for key in ("request_id", "state", "requested_at", "finished_at", "error_code", "phase", "backup_id")}
 
     def _refresh(self, request_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("state") not in {"queued", "running"}:
@@ -1595,6 +1595,11 @@ class SettingsController:
             latest = max(values, key=lambda item: item.get("requested_at", "")) if values else None
             return {"request": self._public(latest) if latest else None}
 
+    def maintenance_busy(self) -> bool:
+        latest = self.latest()["request"]
+        return bool(any(self.directory.glob(".storage-change-*")) or
+                    (latest and latest["state"] in {"queued", "running"}))
+
     def current(self) -> dict[str, Any]:
         current = self.directory / "current.json"
         try:
@@ -1622,7 +1627,7 @@ class SettingsController:
             raise AgentError("INVALID_PARAMS", "Backup settings request is invalid")
         with self._lock:
             if (self.jobs.active_job() or self.restores._has_active_restore()
-                    or (self.latest()["request"] and self.latest()["request"]["state"] in {"queued", "running"})):
+                    or self.maintenance_busy()):
                 raise AgentError("JOB_CONFLICT", "Another backup or maintenance operation is active")
             request_id = str(uuid.uuid4())
             payload = {"request_id": request_id, "state": "queued", "destination": destination,
@@ -1710,7 +1715,7 @@ class AgentProtocol:
                 raise AgentError("INVALID_PARAMS", "Create backup parameters are invalid")
             if self.jobs is None:
                 raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
-            if self.settings and self.settings.latest()["request"] and self.settings.latest()["request"]["state"] in {"queued", "running"}:
+            if self.settings and self.settings.maintenance_busy():
                 raise AgentError("JOB_CONFLICT", "Backup settings are being changed")
             data = self.jobs.create_job(
                 "create_backup",
@@ -1722,6 +1727,8 @@ class AgentProtocol:
                 raise AgentError("INVALID_PARAMS", "Backup verification parameters are invalid")
             if self.jobs is None:
                 raise AgentError("INTERNAL_ERROR", "Backup jobs are unavailable")
+            if self.settings and self.settings.maintenance_busy():
+                raise AgentError("JOB_CONFLICT", "Backup settings are being changed")
             data = self.jobs.create_job(
                 "verify_backup",
                 backup_id=validate_backup_id(params.get("backup_id")),
@@ -1745,7 +1752,7 @@ class AgentProtocol:
                 raise AgentError("INVALID_PARAMS", "Restore preparation parameters are invalid")
             if self.restores is None:
                 raise AgentError("INTERNAL_ERROR", "Restore controller is unavailable")
-            if self.settings and self.settings.latest()["request"] and self.settings.latest()["request"]["state"] in {"queued", "running"}:
+            if self.settings and self.settings.maintenance_busy():
                 raise AgentError("JOB_CONFLICT", "Backup settings are being changed")
             data = self.restores.prepare(params["backup_id"], params["requested_by_user_id"])
         elif operation == "start_restore":
@@ -1753,7 +1760,7 @@ class AgentProtocol:
                 raise AgentError("INVALID_PARAMS", "Restore request parameters are invalid")
             if self.restores is None:
                 raise AgentError("INTERNAL_ERROR", "Restore controller is unavailable")
-            if self.settings and self.settings.latest()["request"] and self.settings.latest()["request"]["state"] in {"queued", "running"}:
+            if self.settings and self.settings.maintenance_busy():
                 raise AgentError("JOB_CONFLICT", "Backup settings are being changed")
             data = self.restores.start(params)
         elif operation == "restore_status":

@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-BackupType = Literal["manual", "scheduled", "pre_upgrade", "unknown"]
+BackupType = Literal["manual", "scheduled", "pre_upgrade", "pre_storage_change", "unknown"]
 VerificationStatus = Literal["not_requested", "pending", "passed", "failed", "unknown"]
 OffsiteStatus = Literal["not_configured", "copied", "skipped_not_mounted", "failed", "unknown"]
 BackupJobOperation = Literal["create_backup", "verify_backup"]
@@ -23,6 +23,7 @@ class NfsBackupDestination(BaseModel):
     export: str = Field(min_length=2, max_length=255, pattern=r"^/(?:[a-zA-Z0-9_.-]+/?)+$")
     version: Literal["3", "4.1", "4.2"]
     require_offsite: bool = False
+    replace_existing: bool = False
 
 
 class SmbBackupDestination(BaseModel):
@@ -35,6 +36,7 @@ class SmbBackupDestination(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=512)
     require_offsite: bool = False
+    replace_existing: bool = False
 
 
 class BackupScheduleUpdate(BaseModel):
@@ -55,7 +57,9 @@ class BackupSettingsJobPublic(BaseModel):
     state: Literal["queued", "running", "succeeded", "failed"]
     requested_at: datetime
     finished_at: datetime | None = None
-    error_code: Literal["MOUNT_HELPER_MISSING", "MAINTENANCE_BUSY", "DESTINATION_READ_FAILED", "SETTINGS_APPLY_FAILED"] | None = None
+    error_code: Literal["MOUNT_HELPER_MISSING", "MAINTENANCE_BUSY", "DESTINATION_READ_FAILED", "SETTINGS_APPLY_FAILED", "STORAGE_MIGRATION_FAILED", "STORAGE_ROLLBACK_FAILED"] | None = None
+    phase: Literal["protected_backup", "connecting", "copying", "rolling_back", "completed"] | None = None
+    backup_id: str | None = Field(default=None, pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
 
 
 class BackupSettingsPublic(BaseModel):

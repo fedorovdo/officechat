@@ -98,6 +98,7 @@ run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.timer" "${RELEASE_DIR}/syst
 run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.service" "${RELEASE_DIR}/systemd/officechat-offsite-network.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "${RELEASE_DIR}/systemd/officechat-offsite-network.conf"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" "${RELEASE_DIR}/systemd/officechat-backup-agent.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings-recovery.service" "${RELEASE_DIR}/systemd/officechat-backup-settings-recovery.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings@.service" "${RELEASE_DIR}/systemd/officechat-backup-settings@.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-job.service" "${RELEASE_DIR}/systemd/officechat-backup-job.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-verify@.service" "${RELEASE_DIR}/systemd/officechat-backup-verify@.service"
@@ -132,6 +133,7 @@ run chmod 0644 \
   "${RELEASE_DIR}/systemd/officechat-offsite-network.service" \
   "${RELEASE_DIR}/systemd/officechat-offsite-network.conf" \
   "${RELEASE_DIR}/systemd/officechat-backup-agent.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup-settings-recovery.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-settings@.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-job.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-verify@.service" \

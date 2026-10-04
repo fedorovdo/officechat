@@ -22,7 +22,7 @@ export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partial
 export type CalendarEventType = "meeting" | "video_conference" | "office_event" | "training" | "maintenance" | "other";
 export type CalendarEventStatus = "scheduled" | "rescheduled" | "cancelled" | "completed";
 export type CalendarAudienceType = "all_active_users" | "selected_groups" | "selected_users";
-export type BackupType = "manual" | "scheduled" | "pre_upgrade" | "unknown";
+export type BackupType = "manual" | "scheduled" | "pre_upgrade" | "pre_storage_change" | "unknown";
 export type BackupVerificationStatus = "not_requested" | "pending" | "passed" | "failed" | "unknown";
 export type BackupOffsiteStatus = "not_configured" | "copied" | "skipped_not_mounted" | "failed" | "unknown";
 
@@ -95,12 +95,12 @@ export type BackupDestinationSettings =
   | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
   | { kind: "smb"; host: string; share: string; directory?: string; domain: string; username: string; require_offsite: boolean };
 export type BackupSettings = { destination: BackupDestinationSettings; schedule: BackupScheduleSettings; next_run_at: string | null };
-export type BackupSettingsJob = { request_id: string; state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null; error_code?: "MOUNT_HELPER_MISSING" | "MAINTENANCE_BUSY" | "DESTINATION_READ_FAILED" | "SETTINGS_APPLY_FAILED" | null };
+export type BackupSettingsJob = { request_id: string; state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null; error_code?: "MOUNT_HELPER_MISSING" | "MAINTENANCE_BUSY" | "DESTINATION_READ_FAILED" | "SETTINGS_APPLY_FAILED" | "STORAGE_MIGRATION_FAILED" | "STORAGE_ROLLBACK_FAILED" | null; phase?: "protected_backup" | "connecting" | "copying" | "rolling_back" | "completed" | null; backup_id?: string | null };
 export type BackupSettingsUpdate = {
   destination:
     | { kind: "local" | "unchanged" | "reconnect" }
-    | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
-    | { kind: "smb"; host: string; share: string; directory: string; domain: string; username: string; password: string; require_offsite: boolean };
+    | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean; replace_existing?: boolean }
+    | { kind: "smb"; host: string; share: string; directory: string; domain: string; username: string; password: string; require_offsite: boolean; replace_existing?: boolean };
   schedule: BackupScheduleSettings;
 };
 

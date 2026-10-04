@@ -651,8 +651,7 @@ EOF
 (
   exec 8>"$LOCK_FILE"
   flock -n 8
-  export OFFICECHAT_BACKUP_LOCK_FD=8
-  bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change >/dev/null
+  env OFFICECHAT_BACKUP_LOCK_FD=8 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change >/dev/null
 )
 migration_backup="$(find "$migration_local" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-*' ! -name 'officechat-backup-20200101-000000Z' -print -quit)"
 migration_id="$(basename "$migration_backup")"
@@ -670,8 +669,7 @@ export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$migration_remote"
 (
   exec 8>"$LOCK_FILE"
   flock -n 8
-  export OFFICECHAT_BACKUP_LOCK_FD=8
-  bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change --copy-existing "$migration_id" >/dev/null
+  env OFFICECHAT_BACKUP_LOCK_FD=8 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change --copy-existing "$migration_id" >/dev/null
 )
 [[ "$migration_dumps" == "$(grep -c ' pg_dump ' "$FAKE_LOG")" ]] || {
   echo "storage migration dumped the database twice" >&2

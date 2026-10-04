@@ -323,7 +323,16 @@ acquire_backup_lock() {
     [[ "$(stat -c '%u' "$LOCK_FILE")" == "$(id -u)" ]] ||
       fail "Lock file must be owned by the current user"
   fi
-  exec 9>"$LOCK_FILE"
+  if [[ -n "${OFFICECHAT_BACKUP_LOCK_FD:-}" ]]; then
+    [[ "$OFFICECHAT_BACKUP_LOCK_FD" =~ ^[0-9]+$ ]] || fail "Invalid inherited backup lock"
+    [[ -f "$LOCK_FILE" && -f "/proc/self/fd/$OFFICECHAT_BACKUP_LOCK_FD" ]] ||
+      fail "Inherited backup lock is unavailable"
+    [[ "$(stat -Lc '%d:%i' "/proc/self/fd/$OFFICECHAT_BACKUP_LOCK_FD")" == \
+       "$(stat -c '%d:%i' "$LOCK_FILE")" ]] || fail "Inherited backup lock does not match"
+    exec 9>&"$OFFICECHAT_BACKUP_LOCK_FD"
+  else
+    exec 9>"$LOCK_FILE"
+  fi
   chmod 600 "$LOCK_FILE"
   if ! flock -n 9; then
     printf 'FAIL: Another OfficeChat backup or restore operation is running\n' >&2

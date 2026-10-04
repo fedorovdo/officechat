@@ -1,0 +1,21 @@
+[Unit]
+Description=Recover an interrupted OfficeChat backup storage change
+Requires=docker.service
+After=local-fs.target docker.service
+Before=officechat-backup-agent.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+StateDirectory=officechat-backup-agent
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /opt/officechat/backup-settings.py --recover-pending
+TimeoutStartSec=5min
+PrivateTmp=false
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/officechat /etc/systemd/system /var/lib/officechat-backup-agent
+StandardOutput=journal
+StandardError=journal

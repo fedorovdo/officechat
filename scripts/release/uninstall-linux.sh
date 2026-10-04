@@ -29,6 +29,7 @@ if command -v systemctl >/dev/null 2>&1; then
   as_root rm -f /etc/systemd/system/officechat-backup-agent.service \
     /etc/systemd/system/officechat-backup-job.service \
     /etc/systemd/system/officechat-backup-verify@.service \
+    /etc/systemd/system/officechat-backup-settings-recovery.service \
     /etc/systemd/system/officechat-backup-settings@.service \
     /etc/systemd/system/officechat-restore@.service \
     "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" \

@@ -155,7 +155,8 @@ async def update_backup_settings(
     await record_audit_event_best_effort(
         event_type="backup.settings.requested", category="backup", action="update_settings",
         status="requested", actor=actor, target_type="backup_settings",
-        details={"destination_kind": payload.destination.kind, "schedule_enabled": payload.schedule.enabled},
+        details={"destination_kind": payload.destination.kind, "schedule_enabled": payload.schedule.enabled,
+                 "replace_existing": getattr(payload.destination, "replace_existing", False)},
         request=request,
     )
     try:

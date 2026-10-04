@@ -637,6 +637,59 @@ filtered_offsite_backup="$(find "$filtered_offsite_root" -mindepth 1 -maxdepth 1
   exit 1
 }
 
+# A storage change makes one protected local snapshot, then copies that same
+# snapshot under the executor's inherited flock without dumping the DB again.
+migration_local="${TMP_DIR}/migration-local"
+migration_remote="${TMP_DIR}/migration-remote"
+mkdir -p "$migration_remote/officechat-backup-20200101-000000Z" "$migration_local/officechat-backup-20200101-000000Z"
+write_config "$migration_local"
+cat >>"$CONFIG_FILE" <<EOF
+BACKUP_DEPLOYMENT_CONFIG=yes
+BACKUP_PRIVATE_CONFIG=yes
+EOF
+: >"$FAKE_LOG"
+(
+  exec 8>"$LOCK_FILE"
+  flock -n 8
+  export OFFICECHAT_BACKUP_LOCK_FD=8
+  bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change >/dev/null
+)
+migration_backup="$(find "$migration_local" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-*' ! -name 'officechat-backup-20200101-000000Z' -print -quit)"
+migration_id="$(basename "$migration_backup")"
+[[ -f "$migration_backup/PROTECTED" ]]
+python3 - "$migration_backup/metadata/manifest.json" <<'PYTYPE'
+import json, sys
+assert json.load(open(sys.argv[1]))["backup_type"] == "pre_storage_change"
+PYTYPE
+migration_dumps="$(grep -c ' pg_dump ' "$FAKE_LOG")"
+cat >>"$CONFIG_FILE" <<EOF
+OFFSITE_ROOT=${migration_remote}
+REQUIRE_OFFSITE=yes
+EOF
+export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$migration_remote"
+(
+  exec 8>"$LOCK_FILE"
+  flock -n 8
+  export OFFICECHAT_BACKUP_LOCK_FD=8
+  bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change --copy-existing "$migration_id" >/dev/null
+)
+[[ "$migration_dumps" == "$(grep -c ' pg_dump ' "$FAKE_LOG")" ]] || {
+  echo "storage migration dumped the database twice" >&2
+  exit 1
+}
+[[ -f "$migration_remote/$migration_id/SUCCESS" && -f "$migration_remote/$migration_id/PROTECTED" ]]
+[[ -f "$migration_backup/config/deployment-private.tar.gz" ]]
+[[ ! -e "$migration_remote/$migration_id/config/deployment-private.tar.gz" ]]
+# Ordinary history remains available on both destinations during a migration.
+# Re-copying to an existing target must fail and retain the local protected copy.
+if bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change --copy-existing "$migration_id" >/dev/null 2>&1; then
+  echo "storage migration overwrote an existing external backup" >&2
+  exit 1
+fi
+[[ -f "$migration_backup/SUCCESS" ]]
+[[ -d "$migration_local/officechat-backup-20200101-000000Z" && -d "$migration_remote/officechat-backup-20200101-000000Z" ]]
+export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$filtered_offsite_root"
+
 cat >"${FAKE_BIN}/rsync" <<'EOF'
 #!/usr/bin/env bash
 exit 7
@@ -811,6 +864,12 @@ done
   (acquire_backup_lock) >/dev/null 2>&1
   lock_status=$?
   set -e
+  OFFICECHAT_BACKUP_LOCK_FD=8 acquire_backup_lock
+  exec 7>"${TMP_DIR}/unrelated-lock"
+  if (OFFICECHAT_BACKUP_LOCK_FD=7 acquire_backup_lock) >/dev/null 2>&1; then
+    echo "unrelated inherited descriptor bypassed the backup lock" >&2
+    exit 1
+  fi
   [[ "$lock_status" == "75" ]] || {
     echo "parallel flock did not return the executor busy status" >&2
     exit 1

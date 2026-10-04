@@ -30,7 +30,9 @@ if command -v systemctl >/dev/null 2>&1; then
     /etc/systemd/system/officechat-backup-job.service \
     /etc/systemd/system/officechat-backup-verify@.service \
     /etc/systemd/system/officechat-backup-settings@.service \
-    /etc/systemd/system/officechat-restore@.service
+    /etc/systemd/system/officechat-restore@.service \
+    "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" \
+    "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE"
   as_root systemctl daemon-reload
 fi
 run_cmd compose down

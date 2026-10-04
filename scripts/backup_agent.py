@@ -373,6 +373,20 @@ def read_timer_status(unit_name: str) -> tuple[dict[str, Any], list[str]]:
     }, ([] if installed else ["TIMER_UNAVAILABLE"])
 
 
+def offsite_mount_present(root: str) -> bool | None:
+    """Inspect mount metadata without touching a possibly stalled NAS."""
+    try:
+        for line in Path("/proc/self/mountinfo").read_text().splitlines():
+            left, right = line.split(" - ", 1)
+            fields = left.split()
+            target = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
+            if target == root and right.split()[0] in {"cifs", "nfs", "nfs4"}:
+                return True
+        return False
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 class BackupInspector:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
@@ -555,9 +569,16 @@ class BackupInspector:
             retention[field] = int(value) if value and value.isdigit() else None
         offsite_configured = bool(simple_config.get("OFFSITE_ROOT"))
         offsite_required = simple_config.get("REQUIRE_OFFSITE") == "yes"
+        mounted = offsite_mount_present(simple_config["OFFSITE_ROOT"]) if offsite_configured else None
         offsite_status = last_run["offsite_status"] if last_run else "unknown"
         if not offsite_configured:
             warnings.append("OFFSITE_NOT_CONFIGURED")
+        elif mounted is False:
+            warnings.append("OFFSITE_NOT_MOUNTED")
+        elif mounted is None:
+            warnings.append("OFFSITE_MOUNT_STATUS_UNAVAILABLE")
+        if offsite_configured and last_run and last_run["offsite_status"] != "copied":
+            warnings.append("OFFSITE_COPY_MISSING")
 
         if status_missing:
             health = "never_run"
@@ -570,7 +591,10 @@ class BackupInspector:
             health = "degraded"
         else:
             health = "unknown"
-        if health == "healthy" and ("TIMER_DISABLED" in warnings or "BACKUP_STORAGE_LOW" in warnings):
+        if health == "healthy" and any(code in warnings for code in (
+            "TIMER_DISABLED", "BACKUP_STORAGE_LOW", "OFFSITE_NOT_MOUNTED",
+            "OFFSITE_MOUNT_STATUS_UNAVAILABLE", "OFFSITE_COPY_MISSING",
+        )):
             health = "degraded"
         return {
             "agent_status": "available",
@@ -581,7 +605,7 @@ class BackupInspector:
             "backup_root_capacity": capacity,
             "timer": timer,
             "retention": retention,
-            "offsite": {"configured": offsite_configured, "required": offsite_required, "status": offsite_status},
+            "offsite": {"configured": offsite_configured, "required": offsite_required, "status": offsite_status, "mounted": mounted},
             "warnings": list(dict.fromkeys(warnings)),
         }
 

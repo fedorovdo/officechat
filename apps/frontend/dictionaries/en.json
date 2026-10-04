@@ -86,6 +86,12 @@
       "destination": "Second-copy destination",
       "destinations": { "local": "Not configured; local only", "unmanaged": "Configured on the host", "unchanged": "Keep existing", "nfs": "NFS", "smb": "SMB / Windows" },
       "keepDestination": "Keep the current destination",
+      "connection": "Current storage connection",
+      "mounted": "Mounted",
+      "unmounted": "Not mounted — a new offsite copy cannot be created",
+      "mountUnknown": "Mount status unavailable",
+      "reconnect": "Reconnect storage",
+      "reconnectNote": "Reconnect uses the saved destination and credentials. The schedule stays unchanged.",
       "migration": "Changing an existing destination requires a controlled host migration. Existing backups are preserved.",
       "host": "Storage server address",
       "export": "NFS export path",
@@ -214,6 +220,9 @@
       "EXECUTOR_TIMEOUT": "The host backup executor timed out.",
       "UNKNOWN": "The backup operation failed. Review the agent journal."
     },
+    "lastOffsite": "Last offsite copy",
+    "localOnly": "Local copy only",
+    "localOnlyDescription": "The local backup was created and verified. It was not copied to offsite storage. Check the connection and create a new backup.",
     "jobMessages": {
       "queued": "The backup operation is waiting to start.",
       "running": "The backup is being created on the server.",
@@ -249,6 +258,9 @@
       "never_run": "Never run"
     },
     "warnings": {
+      "OFFSITE_NOT_MOUNTED": "Network storage is not mounted now. Reconnect it before creating an offsite copy.",
+      "OFFSITE_MOUNT_STATUS_UNAVAILABLE": "The current network storage mount status could not be determined.",
+      "OFFSITE_COPY_MISSING": "The last run did not create an offsite copy. Local backup and verification results are shown separately.",
       "BACKUP_AGENT_UNAVAILABLE": "The backup agent is unavailable.",
       "STATUS_MISSING": "No backup status has been recorded yet.",
       "STATUS_CORRUPT": "The latest backup status cannot be read safely.",

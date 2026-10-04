@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import json
 import fcntl
+import ipaddress
 import os
 import re
 import shutil
 import stat
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -103,7 +106,7 @@ def validated(request: dict) -> dict:
     if not isinstance(clock, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock):
         raise ValueError("Invalid calendar time")
     kind = destination.get("kind")
-    if kind in ("local", "unchanged"):
+    if kind in ("local", "unchanged", "reconnect"):
         if set(destination) != {"kind"}:
             raise ValueError("Invalid destination selector")
     elif kind == "nfs":
@@ -168,6 +171,77 @@ def mount_file(destination: dict) -> tuple[bytes, bytes | None]:
     return unit.encode(), secret
 
 
+def managed_mount_host() -> str:
+    """Read only the fixed, root-owned mount definition, never credentials."""
+    content = secure_read(MOUNT_UNIT, mode=0o644).decode()
+    fields = {}
+    for key in ("What", "Where", "Type"):
+        matches = re.findall(rf"^{key}=(.+)$", content, re.M)
+        if len(matches) != 1:
+            raise ValueError("Invalid managed mount definition")
+        fields[key] = matches[0]
+    if fields["Where"] != str(MOUNTPOINT):
+        raise ValueError("Unexpected mountpoint")
+    source = fields["What"]
+    if fields["Type"] == "cifs":
+        match = re.fullmatch(r"//([^/]+)/([^/]+)(?:/(.+))?", source)
+        if not match or not SHARE.fullmatch(match[2]) or not SMB_DIRECTORY.fullmatch(match[3] or ""):
+            raise ValueError("Invalid SMB source")
+    elif fields["Type"] == "nfs":
+        match = re.fullmatch(r"([^:]+):(/.+)", source)
+        if not match or not EXPORT.fullmatch(match[2]) or ".." in match[2].split("/"):
+            raise ValueError("Invalid NFS source")
+    else:
+        raise ValueError("Unsupported managed filesystem")
+    if not HOST.fullmatch(match[1]):
+        raise ValueError("Invalid mount host")
+    return match[1]
+
+
+def wait_for_mount_route(timeout: float = 60) -> None:
+    host = managed_mount_host()
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            addresses = socket.getaddrinfo(host, 9, type=socket.SOCK_DGRAM)
+            for family, kind, protocol, _, address in addresses:
+                try:
+                    # UDP connect asks the kernel for a route; no packet is sent.
+                    with socket.socket(family, kind, protocol) as probe:
+                        probe.settimeout(1)
+                        probe.connect(address)
+                        local = ipaddress.ip_address(probe.getsockname()[0])
+                        if not local.is_unspecified and not local.is_loopback:
+                            print("Offsite network route is ready", flush=True)
+                            return
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            raise SettingsError("NETWORK_ROUTE_UNAVAILABLE")
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+
+def check_mounted_destination(original_config: bytes) -> None:
+    run(FINDMNT, "--mountpoint", str(MOUNTPOINT), "--noheadings", "--output", "TARGET")
+    local_match = re.search(rb"^BACKUP_ROOT=(.*)$", original_config, re.M)
+    if local_match is None or MOUNTPOINT.stat().st_dev == Path(local_match[1].decode()).stat().st_dev:
+        raise ValueError("Offsite destination is on the local filesystem")
+    test = MOUNTPOINT / f".officechat-settings-check-{os.getpid()}"
+    fd = os.open(test, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            os.write(fd, b"OfficeChat mount test\n")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        if test.read_bytes() != b"OfficeChat mount test\n":
+            raise SettingsError("DESTINATION_READ_FAILED")
+    finally:
+        test.unlink(missing_ok=True)
+
+
 def apply(request: dict) -> None:
     validated(request)
     destination = request["destination"]
@@ -178,6 +252,15 @@ def apply(request: dict) -> None:
         raise ValueError("Existing offsite configuration must be managed on the server")
     if MOUNTPOINT.exists() and (MOUNTPOINT.is_symlink() or not MOUNTPOINT.is_dir()):
         raise ValueError("Mountpoint is unsafe")
+    if destination["kind"] == "reconnect":
+        if not previous_root[0]:
+            raise ValueError("No managed destination is configured")
+        managed_mount_host()
+        # Reconnect cannot change credentials, the destination or the schedule.
+        run(SYSTEMCTL, "reset-failed", UNIT_NAME)
+        run(SYSTEMCTL, "start", UNIT_NAME, timeout=100)
+        check_mounted_destination(original_config)
+        return
     if destination["kind"] in ("nfs", "smb") and previous_root[0]:
         raise ValueError("Changing an existing destination requires an explicit server migration")
     if destination["kind"] == "local" and previous_root[0]:
@@ -189,6 +272,8 @@ def apply(request: dict) -> None:
         if not shutil.which(helper, path="/usr/sbin:/sbin:/usr/bin:/bin"):
             raise SettingsError("MOUNT_HELPER_MISSING")
     if schedule["enabled"]:
+        if previous_root[0]:
+            check_mounted_destination(original_config)
         if destination["kind"] in ("nfs", "smb"):
             raise ValueError("Create and verify a manual offsite backup before enabling the timer")
         latest = json.loads(secure_read(BACKUP_STATUS))
@@ -216,26 +301,8 @@ def apply(request: dict) -> None:
                 atomic_write(CREDENTIALS, secret)
             atomic_write(MOUNT_UNIT, unit, 0o644)
             run(SYSTEMCTL, "daemon-reload")
-            run(SYSTEMCTL, "start", UNIT_NAME, timeout=65)
-            run(FINDMNT, "--mountpoint", str(MOUNTPOINT), "--noheadings", "--output", "TARGET")
-            local_match = re.search(rb"^BACKUP_ROOT=(.*)$", original_config, re.M)
-            if local_match is None:
-                raise ValueError("Backup root is unavailable")
-            local_root = Path(local_match.group(1).decode())
-            if MOUNTPOINT.stat().st_dev == local_root.stat().st_dev:
-                raise ValueError("Offsite destination is on the local filesystem")
-            test = MOUNTPOINT / f".officechat-settings-check-{os.getpid()}"
-            fd = os.open(test, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            try:
-                try:
-                    os.write(fd, b"OfficeChat mount test\n")
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-                if test.read_bytes() != b"OfficeChat mount test\n":
-                    raise SettingsError("DESTINATION_READ_FAILED")
-            finally:
-                test.unlink(missing_ok=True)
+            run(SYSTEMCTL, "start", UNIT_NAME, timeout=100)
+            check_mounted_destination(original_config)
             run(SYSTEMCTL, "enable", UNIT_NAME)
         if destination["kind"] != "unchanged":
             new_config = replace_backup_value(original_config, "OFFSITE_ROOT", str(MOUNTPOINT) if destination["kind"] != "local" else "")
@@ -295,13 +362,14 @@ def main(request_id: str) -> int:
             raise SettingsError("MAINTENANCE_BUSY") from exc
         apply(request)
         current_path = REQUEST_DIR / "current.json"
-        if request["destination"]["kind"] == "unchanged":
+        if request["destination"]["kind"] in ("unchanged", "reconnect"):
             previous = json.loads(secure_read(current_path)) if current_path.exists() else {}
             selected = previous.get("destination", {"kind": "unmanaged"})
         else:
             selected = {key: value for key, value in request["destination"].items() if key != "password"}
         current = {"destination": selected, "schedule": request["schedule"]}
-        atomic_write(REQUEST_DIR / "current.json", json.dumps(current).encode())
+        if request["destination"]["kind"] != "reconnect":
+            atomic_write(REQUEST_DIR / "current.json", json.dumps(current).encode())
         request["state"] = "succeeded"
         result = 0
     except Exception as exc:
@@ -328,7 +396,12 @@ def main(request_id: str) -> int:
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main(sys.argv[1] if len(sys.argv) == 2 else ""))
+        if sys.argv[1:] == ["--wait-network"]:
+            if os.geteuid() != 0:
+                raise ValueError("Network wait requires root")
+            wait_for_mount_route()
+        else:
+            raise SystemExit(main(sys.argv[1] if len(sys.argv) == 2 else ""))
     except (OSError, ValueError, json.JSONDecodeError):
         print("Backup settings executor rejected request", file=sys.stderr)
         raise SystemExit(1)

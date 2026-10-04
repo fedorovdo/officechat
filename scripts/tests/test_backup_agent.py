@@ -333,6 +333,22 @@ class BackupAgentTestCase(unittest.TestCase):
         self.assertEqual(result["last_success"]["backup_id"], "officechat-backup-20260804-120000Z")
         self.assertNotIn("STATUS_MISSING", result["warnings"])
 
+    @patch.object(backup_agent, "read_timer_status", return_value=({"enabled": True}, []))
+    def test_mount_state_is_live_even_when_last_copy_succeeded(self, _timer):
+        self.write_status()
+        self.backup_config.write_text("OFFSITE_ROOT=/mnt/officechat-offsite\nREQUIRE_OFFSITE=no\n")
+        with patch.object(backup_agent, "offsite_mount_present", return_value=False):
+            result = self.inspector.status()
+        self.assertEqual(result["offsite"]["status"], "copied")
+        self.assertFalse(result["offsite"]["mounted"])
+        self.assertEqual(result["backup_health"], "degraded")
+        self.assertIn("OFFSITE_NOT_MOUNTED", result["warnings"])
+
+    def test_mount_metadata_rejects_local_filesystem_at_offsite_path(self):
+        for fs, expected in (("cifs", True), ("nfs4", True), ("ext4", False)):
+            with patch.object(Path, "read_text", return_value=f"1 2 0:3 / /mnt/officechat-offsite rw - {fs} source rw\n"):
+                self.assertEqual(backup_agent.offsite_mount_present("/mnt/officechat-offsite"), expected)
+
     @patch.object(backup_agent, "read_timer_status", return_value=({}, ["TIMER_UNAVAILABLE"]))
     def test_missing_latest_json(self, _timer_status) -> None:
         result = self.inspector.status()

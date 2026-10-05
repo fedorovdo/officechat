@@ -31,6 +31,7 @@ import { AdminCard, AdminPageHeader, AdminPageShell, AdminStatCard, AdminTableCo
 import { AdminBackupSettings } from "./AdminBackupSettings";
 
 type AdminBackupsProps = { dictionary: Dictionary; locale: Locale };
+const SETTINGS_TRANSIENT_WARNINGS = new Set(["TIMER_DISABLED", "OFFSITE_NOT_CONFIGURED", "OFFSITE_NOT_MOUNTED", "OFFSITE_COPY_MISSING"]);
 
 export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const router = useRouter();
@@ -45,6 +46,7 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const [restoreReason, setRestoreReason] = useState("");
   const [activeJob, setActiveJob] = useState<OfficeChatBackupJob | null>(null);
   const [canManageSettings, setCanManageSettings] = useState(false);
+  const [settingsActive, setSettingsActive] = useState(false);
   const [confirmation, setConfirmation] = useState<"create" | "verify" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -55,6 +57,8 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const statusRequestActive = useRef(false);
+  const statusRequestId = useRef(0);
+  const listRequestId = useRef(0);
   const jobRequestActive = useRef(false);
   const restoreStateRef = useRef<RestoreRequest["state"] | null>(null);
   const text = dictionary.backups;
@@ -75,31 +79,39 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
     restoreStateRef.current = restoreRequest?.state ?? null;
   }, [restoreRequest]);
 
-  const loadStatus = useCallback(async (token: string) => {
-    if (statusRequestActive.current) return;
+  const loadStatus = useCallback(async (token: string, fresh = false) => {
+    if (statusRequestActive.current && !fresh) return;
+    const requestId = ++statusRequestId.current;
     statusRequestActive.current = true;
     try {
-      setStatus(await getBackupStatus(token));
+      const updated = await getBackupStatus(token);
+      if (requestId === statusRequestId.current) setStatus(updated);
     } catch (caughtError) {
-      if (!["queued", "running", "succeeded"].includes(restoreStateRef.current ?? "")) {
+      if (requestId === statusRequestId.current && !["queued", "running", "succeeded"].includes(restoreStateRef.current ?? "")) {
         setError(getLocalizedApiError(caughtError, dictionary.session));
       }
+      if (fresh) throw caughtError;
     } finally {
-      statusRequestActive.current = false;
+      if (requestId === statusRequestId.current) statusRequestActive.current = false;
     }
   }, [dictionary.session]);
 
-  const loadList = useCallback(async (token: string, selectedPage: number) => {
+  const loadList = useCallback(async (token: string, selectedPage: number, fresh = false) => {
+    const requestId = ++listRequestId.current;
     try {
       const response = await getBackups(token, selectedPage, 25);
+      if (requestId !== listRequestId.current) return;
       setBackups(response.items);
       setTotal(response.total);
       setHasNext(response.has_next);
     } catch (caughtError) {
-      setBackups([]);
-      setTotal(0);
-      setHasNext(false);
-      setError(getLocalizedApiError(caughtError, dictionary.session));
+      if (requestId === listRequestId.current) {
+        setBackups([]);
+        setTotal(0);
+        setHasNext(false);
+        setError(getLocalizedApiError(caughtError, dictionary.session));
+      }
+      if (fresh) throw caughtError;
     }
   }, [dictionary.session]);
 
@@ -123,7 +135,8 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const refreshBackupData = useCallback(async () => {
     const token = requireStoredAccessToken(locale);
     if (!token) return;
-    await Promise.all([loadStatus(token), loadList(token, page)]);
+    setError("");
+    await Promise.all([loadStatus(token, true), loadList(token, page, true)]);
   }, [loadList, loadStatus, locale, page]);
 
   useEffect(() => {
@@ -269,12 +282,12 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const warnings = Array.from(new Set([
     ...(status?.warnings ?? []),
     ...(status?.agent_status === "unavailable" ? ["BACKUP_AGENT_UNAVAILABLE"] : [])
-  ]));
+  ])).filter((warning) => !settingsActive || !SETTINGS_TRANSIENT_WARNINGS.has(warning));
   const lastVerified = status?.last_run?.verification_status ?? "unknown";
   const restoreReady = status?.last_success?.verification_status === "passed";
   const docsName = locale === "ru" ? "BACKUP_RESTORE_RU.md" : "BACKUP_RESTORE.md";
   const docsUrl = `${officeChatBrand.repositoryUrl.replace(/\/$/, "")}/blob/main/docs/${docsName}`;
-  const jobBusy = Boolean((activeJob && ["queued", "running", "verifying"].includes(activeJob.state)) ||
+  const jobBusy = Boolean(settingsActive || (activeJob && ["queued", "running", "verifying"].includes(activeJob.state)) ||
     (restoreRequest && ["queued", "running"].includes(restoreRequest.state)));
   const jobDuration = activeJob?.started_at
     ? Math.max(0, Math.floor(((activeJob.finished_at ? new Date(activeJob.finished_at).getTime() : now) - new Date(activeJob.started_at).getTime()) / 1000))
@@ -313,11 +326,11 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         <AdminStatCard label={text.verification} value={statusLabel(lastVerified)} />
         <AdminStatCard label={text.lastSize} value={formatBytes(status?.last_success?.backup_size_bytes)} />
         <AdminStatCard label={text.freeSpace} value={formatBytes(status?.backup_root_capacity.free_bytes)} />
-        <AdminStatCard label={text.nextRun} value={status?.timer.enabled ? formatDate(status.timer.next_run_at) : text.timerDisabled} />
-        <AdminStatCard label={text.lastOffsite} value={statusLabel(status?.offsite.status ?? "unknown")} />
+        <AdminStatCard label={text.nextRun} value={settingsActive ? text.settings.refreshingStatus : status?.timer.enabled ? formatDate(status.timer.next_run_at) : text.timerDisabled} />
+        <AdminStatCard label={text.lastOffsite} value={settingsActive ? text.settings.refreshingStatus : statusLabel(status?.offsite.status ?? "unknown")} />
       </section>
 
-      <AdminBackupSettings canManage={canManageSettings} dictionary={dictionary} locale={locale} onSaved={refreshBackupData} status={status} />
+      <AdminBackupSettings canManage={canManageSettings} dictionary={dictionary} locale={locale} onSaved={refreshBackupData} onActivityChange={setSettingsActive} status={status} />
 
       <AdminCard className="backup-list-card" description={text.listDescription} title={text.listTitle}>
         <AdminTableContainer className="backup-table-wrap">

@@ -87,6 +87,7 @@
       "destinations": { "local": "Not configured; local only", "unmanaged": "Configured on the host", "unchanged": "Keep existing", "nfs": "NFS", "smb": "SMB / Windows" },
       "keepDestination": "Keep the current destination",
       "connection": "Current storage connection",
+      "refreshingStatus": "Refreshing storage status…",
       "mounted": "Mounted",
       "unmounted": "Not mounted — a new offsite copy cannot be created",
       "mountUnknown": "Mount status unavailable",
@@ -121,7 +122,7 @@
       "save": "Check and save",
       "saving": "Submitting...",
       "job": "Settings operation",
-      "states": { "queued": "queued", "running": "checking connection and saving", "succeeded": "completed; check the new status", "failed": "failed; previous settings should remain, check the host journal" },
+      "states": { "queued": "queued", "running": "checking connection and saving", "succeeded": "completed; settings and status refreshed", "failed": "failed; previous settings should remain, check the host journal" },
       "mountHelperMissing": "Install nfs-common / nfs-utils or cifs-utils on the server, then retry.",
       "superadminOnly": "Only a superadmin can change the destination and schedule."
     },

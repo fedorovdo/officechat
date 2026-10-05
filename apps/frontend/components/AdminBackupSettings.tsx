@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   getBackupSettings, getBackupSettingsJob, getLatestBackupSettingsJob,
@@ -13,13 +13,15 @@ import { AdminCard } from "./AdminUI";
 
 const DAYS: BackupScheduleSettings["days"] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export function AdminBackupSettings({ dictionary, locale, canManage, status, onSaved }: {
+export function AdminBackupSettings({ dictionary, locale, canManage, status, onSaved, onActivityChange }: {
   dictionary: Dictionary; locale: Locale; canManage: boolean;
-  status: OfficeChatBackupStatus | null; onSaved: () => void;
+  status: OfficeChatBackupStatus | null; onSaved: () => Promise<void>;
+  onActivityChange: (active: boolean) => void;
 }) {
   const text = dictionary.backups.settings;
   const [current, setCurrent] = useState<BackupSettings | null>(null);
   const [job, setJob] = useState<BackupSettingsJob | null>(null);
+  const jobRef = useRef(job);
   const [kind, setKind] = useState<"local" | "unchanged" | "nfs" | "smb">("local");
   const [host, setHost] = useState("");
   const [exportPath, setExportPath] = useState("");
@@ -35,43 +37,76 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
   const [error, setError] = useState("");
   const [changing, setChanging] = useState(false);
   const [confirmChange, setConfirmChange] = useState(false);
+  const [synchronizing, setSynchronizing] = useState(false);
+
+  useEffect(() => { jobRef.current = job; }, [job]);
 
   useEffect(() => {
     const token = requireStoredAccessToken(locale);
     if (!token) return;
+    let cancelled = false;
     void Promise.all([getBackupSettings(token), getLatestBackupSettingsJob(token)]).then(([settings, last]) => {
+      if (cancelled) return;
       setCurrent(settings);
       setSchedule({ ...settings.schedule, days: settings.schedule.days.length ? settings.schedule.days : DAYS });
       setKind(settings.destination.kind === "local" ? "local" : "unchanged");
+      setSynchronizing(Boolean(last.request && !["queued", "running"].includes(last.request.state)));
       setJob(last.request);
-    }).catch((caught) => setError(getLocalizedApiError(caught, dictionary.session)));
+    }).catch((caught) => { if (!cancelled) setError(getLocalizedApiError(caught, dictionary.session)); });
+    return () => { cancelled = true; };
   }, [dictionary.session, locale]);
 
+  const requestId = job?.request_id;
   useEffect(() => {
-    if (!job || !["queued", "running"].includes(job.state)) return;
-    const interval = window.setInterval(() => {
+    if (!requestId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    let terminal = jobRef.current && !["queued", "running"].includes(jobRef.current.state) ? jobRef.current : null;
+    const retry = () => { if (!cancelled) timer = window.setTimeout(() => void poll(), 3000); };
+    const poll = async () => {
       const token = requireStoredAccessToken(locale);
       if (!token) return;
-      void getBackupSettingsJob(token, job.request_id).then(async (updated) => {
+      try {
+        const updated = terminal ?? await getBackupSettingsJob(token, requestId);
+        if (cancelled) return;
         setJob(updated);
+        if (["queued", "running"].includes(updated.state)) {
+          retry();
+          return;
+        }
+        terminal = updated;
+        setSynchronizing(true);
+        // Keep retrying until both the saved destination and live status are fresh.
+        // A terminal job must not stop synchronization after a transient read error.
+        const settings = await getBackupSettings(token);
+        if (cancelled) return;
+        await onSaved();
+        if (cancelled) return;
+        setCurrent(settings);
+        setSchedule(settings.schedule);
         if (updated.state === "succeeded") {
-          const settings = await getBackupSettings(token);
-          setCurrent(settings);
-          setSchedule(settings.schedule);
           setKind(settings.destination.kind === "local" ? "local" : "unchanged");
           setChanging(false);
           setConfirmChange(false);
-          onSaved();
         }
-      }).catch((caught) => setError(getLocalizedApiError(caught, dictionary.session)));
-    }, 3000);
-    return () => window.clearInterval(interval);
-  }, [dictionary.session, job, locale, onSaved]);
+        setError("");
+        setSynchronizing(false);
+      } catch (caught) {
+        if (cancelled) return;
+        setError(getLocalizedApiError(caught, dictionary.session));
+        retry();
+      }
+    };
+    // Also synchronize an operation that completed while this page was loading.
+    if (terminal) void poll();
+    else retry();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [dictionary.session, requestId, locale, onSaved]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
     const token = requireStoredAccessToken(locale);
-    if (!token || !canManage || busy || !current) return;
+    if (!token || !canManage || busy || active || !current) return;
     if (changing && !confirmChange) return;
     if (!changing && schedule.enabled && (status?.last_success?.verification_status !== "passed" ||
         ((kind === "nfs" || kind === "smb") ||
@@ -115,7 +150,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
 
   async function reconnect() {
     const token = requireStoredAccessToken(locale);
-    if (!token || !canManage || busy || !current) return;
+    if (!token || !canManage || busy || active || !current) return;
     setBusy(true);
     setError("");
     try {
@@ -129,18 +164,19 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
     }
   }
 
-  const active = Boolean(job && ["queued", "running"].includes(job.state));
+  const active = synchronizing || Boolean(job && ["queued", "running"].includes(job.state));
+  useEffect(() => { onActivityChange(active); }, [active, onActivityChange]);
   const configured = Boolean(current && current.destination.kind !== "local" && current.destination.kind !== "unmanaged");
   return <AdminCard title={text.title} description={text.description}>
     {error ? <p className="form-error">{error}</p> : null}
-    {job ? <p className={job.state === "failed" ? "form-error" : "note"}>{text.job}: {job.error_code === "MOUNT_HELPER_MISSING" ? text.mountHelperMissing : job.error_code === "STORAGE_ROLLBACK_FAILED" ? text.rollbackFailed : job.error_code === "STORAGE_MIGRATION_FAILED" ? text.migrationFailed : job.phase && ["queued", "running"].includes(job.state) ? text.phases[job.phase] : text.states[job.state]}</p> : null}
+    {job ? <p className={!synchronizing && job.state === "failed" ? "form-error" : "note"}>{text.job}: {synchronizing ? text.refreshingStatus : job.error_code === "MOUNT_HELPER_MISSING" ? text.mountHelperMissing : job.error_code === "STORAGE_ROLLBACK_FAILED" ? text.rollbackFailed : job.error_code === "STORAGE_MIGRATION_FAILED" ? text.migrationFailed : job.phase && ["queued", "running"].includes(job.state) ? text.phases[job.phase] : text.states[job.state]}</p> : null}
     {job?.backup_id ? <p className="note">{text.migrationBackup}: <code>{job.backup_id}</code></p> : null}
     <p>{text.current}: <strong>{current ? text.destinations[current.destination.kind] : text.loading}</strong></p>
     {current?.destination.kind === "nfs" ? <p><code>{current.destination.host}:{current.destination.export}</code></p> : null}
     {current?.destination.kind === "smb" ? <p><code>//{current.destination.host}/{current.destination.share}{current.destination.directory ? `/${current.destination.directory}` : ""}</code></p> : null}
     {configured ? <>
-      <p className={status?.offsite.mounted === false ? "form-error" : "note"}>
-        {text.connection}: {status?.offsite.mounted === true ? text.mounted : status?.offsite.mounted === false ? text.unmounted : text.mountUnknown}
+      <p className={!active && status?.offsite.mounted === false ? "form-error" : "note"}>
+        {text.connection}: {active ? text.refreshingStatus : status?.offsite.mounted === true ? text.mounted : status?.offsite.mounted === false ? text.unmounted : text.mountUnknown}
       </p>
       {canManage ? <>
         <button className="admin-button admin-button-secondary" disabled={busy || active || changing} onClick={() => void reconnect()} type="button">{text.reconnect}</button>

@@ -293,20 +293,22 @@ describe("Backup Center", () => {
   });
 
   it("shows real connection and timer failures after synchronization instead of hiding rollback errors", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     apiMocks.getBackupSettings.mockResolvedValue({ ...smbSettings, schedule: { ...smbSettings.schedule, enabled: false } });
     apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
     apiMocks.getBackupSettingsJob.mockResolvedValue(settingsJob);
     apiMocks.getBackupStatus.mockResolvedValue({ ...status, timer: { ...status.timer, enabled: false },
       offsite: { ...status.offsite, mounted: false }, warnings: ["TIMER_DISABLED", "OFFSITE_NOT_MOUNTED", "BACKUP_STORAGE_LOW"] });
-    render(<AdminBackups dictionary={en} locale="en" />);
-    await screen.findByText("//nas/backup_share/OfficeChat");
+    // Flush initial child and parent effects before asserting the active state.
+    // Keep the clock manual so a busy CI worker cannot finish the job early.
+    await act(async () => { render(<AdminBackups dictionary={en} locale="en" />); });
+    expect(screen.getByText("//nas/backup_share/OfficeChat")).toBeVisible();
     expect(screen.queryByText(en.backups.warnings.OFFSITE_NOT_MOUNTED)).not.toBeInTheDocument();
     expect(screen.getByText(en.backups.warnings.BACKUP_STORAGE_LOW)).toBeVisible();
     expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeDisabled();
     apiMocks.getBackupSettingsJob.mockResolvedValue({ ...settingsJob, state: "failed", error_code: "STORAGE_ROLLBACK_FAILED" });
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
-    expect(await screen.findByText(`${en.backups.settings.job}: ${en.backups.settings.rollbackFailed}`)).toBeVisible();
+    expect(screen.getByText(`${en.backups.settings.job}: ${en.backups.settings.rollbackFailed}`)).toBeVisible();
     expect(screen.getByText(`${en.backups.settings.connection}: ${en.backups.settings.unmounted}`)).toBeVisible();
     expect(screen.getByText(en.backups.warnings.OFFSITE_NOT_MOUNTED)).toBeVisible();
     expect(screen.getByText(en.backups.warnings.TIMER_DISABLED)).toBeVisible();

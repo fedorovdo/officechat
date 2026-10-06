@@ -13,7 +13,15 @@ const apiMocks = vi.hoisted(() => ({
   getBackupJob: vi.fn(),
   getBackups: vi.fn(),
   getBackupStatus: vi.fn(),
+  getBackupSettings: vi.fn(),
+  getLatestBackupSettingsJob: vi.fn(),
+  getBackupSettingsJob: vi.fn(),
+  updateBackupSettings: vi.fn(),
   getCurrentUser: vi.fn(),
+  getLatestRestore: vi.fn(),
+  getRestoreStatus: vi.fn(),
+  prepareRestore: vi.fn(),
+  startRestore: vi.fn(),
   requireStoredAccessToken: vi.fn(() => "test-token"),
   verifyBackup: vi.fn()
 }));
@@ -96,12 +104,30 @@ const job = {
   last_error: null
 };
 
+const smbSettings = {
+  destination: { kind: "smb", host: "nas", share: "backup_share", directory: "OfficeChat",
+    domain: "AD", username: "backup", require_offsite: true },
+  schedule: { enabled: true, days: ["Mon", "Wed"], time: "02:30" }, next_run_at: null
+};
+const settingsJob = {
+  request_id: "00000000-0000-4000-8000-000000000124", state: "running",
+  requested_at: "2026-10-05T15:00:00Z", finished_at: null, phase: "connecting"
+};
+const newSmbSettings = { ...smbSettings, destination: { ...smbSettings.destination, directory: "OfficeChatNew" } };
+
 describe("Backup Center", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.requireStoredAccessToken.mockReturnValue("test-token");
     apiMocks.getCurrentUser.mockResolvedValue(userFactory({ role: "superadmin" }));
+    apiMocks.getLatestRestore.mockResolvedValue({ request: null });
+    apiMocks.prepareRestore.mockResolvedValue({
+      challenge: "test-challenge-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", backup_id: backup.backup_id,
+      hostname: "chat.example.test", expires_in_seconds: 600
+    });
     apiMocks.getBackupStatus.mockResolvedValue(status);
+    apiMocks.getBackupSettings.mockResolvedValue({ destination: { kind: "local" }, schedule: { enabled: false, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], time: "02:30" }, next_run_at: null });
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: null });
     apiMocks.getActiveBackupJob.mockResolvedValue({ job: null });
     apiMocks.getBackups.mockResolvedValue({ items: [backup], page: 1, limit: 25, total: 1, has_next: false });
     apiMocks.getBackup.mockResolvedValue(backup);
@@ -118,10 +144,10 @@ describe("Backup Center", () => {
     expect(screen.getByRole("link", { name: en.adminUi.backToDashboard })).toHaveAttribute("href", "/en/dashboard");
     expect(within(screen.getByLabelText(en.backups.statusTitle)).getAllByRole("article")).toHaveLength(7);
     expect(container.querySelector(".backup-table-wrap")).toHaveClass("admin-table-container");
-    expect(screen.getByText(en.backups.scheduleFuture)).toBeInTheDocument();
+    expect(screen.getByText(en.backups.settings.title)).toBeInTheDocument();
     expect(screen.getByText(/--verify-only/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /restore/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.backups.restoreButton })).not.toBeInTheDocument();
     expect(container.querySelector(".backup-secondary-grid")).toBeInTheDocument();
   });
 
@@ -133,6 +159,209 @@ describe("Backup Center", () => {
     expect(within(dialog).getByText("database, uploads")).toBeInTheDocument();
     expect(container.textContent).not.toContain("/var/backups");
     expect(container.textContent).not.toContain("offsite/path");
+  });
+
+  it("requires confirmation and new credentials to change storage while preserving the schedule", async () => {
+    const schedule = { enabled: true, days: ["Mon", "Wed"], time: "02:30" };
+    apiMocks.getBackupSettings.mockResolvedValue({
+      destination: { kind: "smb", host: "old-nas", share: "backup_share", directory: "OfficeChat",
+        domain: "AD", username: "backup", require_offsite: true }, schedule, next_run_at: null
+    });
+    apiMocks.updateBackupSettings.mockResolvedValue({ request_id: "00000000-0000-4000-8000-000000000124", state: "queued" });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: en.backups.settings.changeStorage }));
+    expect(screen.getByLabelText(en.backups.settings.host)).toHaveValue("old-nas");
+    expect(screen.getByLabelText(en.backups.settings.password)).toHaveValue("");
+    expect(screen.getByLabelText(en.backups.settings.enable)).toBeDisabled();
+    expect(screen.getByLabelText(en.backups.settings.time)).toBeDisabled();
+    expect(screen.getByRole("button", { name: en.backups.settings.changeSave })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(en.backups.settings.host), { target: { value: "new-nas" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.directory), { target: { value: "OfficeChatNew" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.password), { target: { value: "new-secret" } });
+    fireEvent.click(screen.getByLabelText(en.backups.settings.confirmChange));
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.changeSave }));
+    await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
+      destination: { kind: "smb", host: "new-nas", share: "backup_share", directory: "OfficeChatNew",
+        domain: "AD", username: "backup", password: "new-secret", require_offsite: true, replace_existing: true }, schedule
+    }));
+    expect(screen.getByLabelText(en.backups.settings.password)).toHaveValue("");
+  });
+
+  it("lets the operator cancel storage editing without sending a request", async () => {
+    apiMocks.getBackupSettings.mockResolvedValue({ destination: { kind: "nfs", host: "nas", export: "/chat",
+      version: "4.1", require_offsite: true }, schedule: { enabled: false, days: ["Mon"], time: "02:30" } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: en.backups.settings.changeStorage }));
+    expect(screen.getByLabelText(en.backups.settings.export)).toHaveValue("/chat");
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.cancelChange }));
+    expect(screen.queryByLabelText(en.backups.settings.confirmChange)).not.toBeInTheDocument();
+    expect(apiMocks.updateBackupSettings).not.toHaveBeenCalled();
+  });
+
+  it("reloads the destination when opening a page with a completed settings job", async () => {
+    apiMocks.getBackupSettings.mockResolvedValueOnce(smbSettings).mockResolvedValue(newSmbSettings);
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: { ...settingsJob, state: "succeeded", phase: "completed" } });
+    apiMocks.getBackupStatus.mockResolvedValue({ ...status, offsite: { ...status.offsite, mounted: true } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    expect(await screen.findByText("//nas/backup_share/OfficeChatNew")).toBeVisible();
+    expect(screen.getByText(`${en.backups.settings.connection}: ${en.backups.settings.mounted}`)).toBeVisible();
+  });
+
+  it("retries a failed settings read after completion without a page reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    apiMocks.getBackupSettings.mockResolvedValueOnce(smbSettings)
+      .mockRejectedValueOnce(new Error("Temporary settings read failure")).mockResolvedValue(newSmbSettings);
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
+    apiMocks.getBackupSettingsJob.mockResolvedValue({ ...settingsJob, state: "succeeded", phase: "completed" });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    await screen.findByText("//nas/backup_share/OfficeChat");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(await screen.findByText("//nas/backup_share/OfficeChatNew")).toBeVisible();
+    expect(screen.getByRole("button", { name: en.backups.settings.changeStorage })).toBeEnabled();
+    expect(screen.queryByText("Temporary settings read failure")).not.toBeInTheDocument();
+  });
+
+  it("fetches fresh connection status even with an older request in flight and ignores its late response", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    type MountedStatus = typeof status & { offsite: typeof status.offsite & { mounted: boolean } };
+    let resolveOld!: (value: MountedStatus) => void;
+    const oldResponse = new Promise<MountedStatus>((resolve) => { resolveOld = resolve; });
+    apiMocks.getBackupStatus.mockReturnValueOnce(oldResponse)
+      .mockResolvedValue({ ...status, offsite: { ...status.offsite, mounted: true } });
+    apiMocks.getBackupSettings.mockResolvedValueOnce(smbSettings).mockResolvedValue(newSmbSettings);
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
+    apiMocks.getBackupSettingsJob.mockResolvedValue({ ...settingsJob, state: "succeeded", phase: "completed" });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    await screen.findByText("//nas/backup_share/OfficeChat");
+    await waitFor(() => expect(apiMocks.getBackupStatus).toHaveBeenCalledTimes(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await screen.findByText("//nas/backup_share/OfficeChatNew");
+    expect(apiMocks.getBackupStatus).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveOld({ ...status, offsite: { ...status.offsite, configured: false, mounted: false } }); });
+    expect(screen.getByText(`${en.backups.settings.connection}: ${en.backups.settings.mounted}`)).toBeVisible();
+  });
+
+  it("refreshes restored settings and mount status after a failed storage change", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    apiMocks.getBackupSettings.mockResolvedValue(smbSettings);
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
+    apiMocks.getBackupSettingsJob.mockResolvedValue({ ...settingsJob, state: "failed", error_code: "STORAGE_MIGRATION_FAILED" });
+    apiMocks.getBackupStatus.mockResolvedValueOnce({ ...status, offsite: { ...status.offsite, mounted: false } })
+      .mockResolvedValue({ ...status, offsite: { ...status.offsite, mounted: true } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    await screen.findByText("//nas/backup_share/OfficeChat");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(await screen.findByText(`${en.backups.settings.connection}: ${en.backups.settings.mounted}`)).toBeVisible();
+    expect(screen.getByText(`${en.backups.settings.job}: ${en.backups.settings.migrationFailed}`)).toBeVisible();
+    expect(screen.getByLabelText(en.backups.settings.enable)).toBeChecked();
+  });
+
+  it("retries live status errors after completion and keeps actions locked until synchronization succeeds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    apiMocks.getBackupSettings.mockResolvedValueOnce(smbSettings).mockResolvedValue(newSmbSettings);
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
+    apiMocks.getBackupSettingsJob.mockResolvedValue({ ...settingsJob, state: "succeeded", phase: "completed" });
+    apiMocks.getBackupStatus.mockResolvedValueOnce(status).mockRejectedValueOnce(new Error("Temporary status failure"))
+      .mockResolvedValue({ ...status, offsite: { ...status.offsite, mounted: true } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    await screen.findByText("//nas/backup_share/OfficeChat");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.getByRole("button", { name: en.backups.settings.changeStorage })).toBeDisabled();
+    expect(screen.getByText(`${en.backups.settings.connection}: ${en.backups.settings.refreshingStatus}`)).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(await screen.findByText("//nas/backup_share/OfficeChatNew")).toBeVisible();
+    expect(screen.getByRole("button", { name: en.backups.settings.changeStorage })).toBeEnabled();
+    expect(screen.queryByText("Temporary status failure")).not.toBeInTheDocument();
+  });
+
+  it("does not overlap settings polls and cancels pending polling when unmounted", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let resolveJob!: (value: typeof settingsJob) => void;
+    const delayedJob = new Promise<typeof settingsJob>((resolve) => { resolveJob = resolve; });
+    apiMocks.getBackupSettings.mockResolvedValue(smbSettings);
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
+    apiMocks.getBackupSettingsJob.mockReturnValue(delayedJob);
+    const { unmount } = render(<AdminBackups dictionary={en} locale="en" />);
+    await screen.findByText("//nas/backup_share/OfficeChat");
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    expect(apiMocks.getBackupSettingsJob).toHaveBeenCalledTimes(1);
+    unmount();
+    await act(async () => { resolveJob(settingsJob); });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(apiMocks.getBackupSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows real connection and timer failures after synchronization instead of hiding rollback errors", async () => {
+    vi.useFakeTimers();
+    apiMocks.getBackupSettings.mockResolvedValue({ ...smbSettings, schedule: { ...smbSettings.schedule, enabled: false } });
+    apiMocks.getLatestBackupSettingsJob.mockResolvedValue({ request: settingsJob });
+    apiMocks.getBackupSettingsJob.mockResolvedValue(settingsJob);
+    apiMocks.getBackupStatus.mockResolvedValue({ ...status, timer: { ...status.timer, enabled: false },
+      offsite: { ...status.offsite, mounted: false }, warnings: ["TIMER_DISABLED", "OFFSITE_NOT_MOUNTED", "BACKUP_STORAGE_LOW"] });
+    // Flush initial child and parent effects before asserting the active state.
+    // Keep the clock manual so a busy CI worker cannot finish the job early.
+    await act(async () => { render(<AdminBackups dictionary={en} locale="en" />); });
+    expect(screen.getByText("//nas/backup_share/OfficeChat")).toBeVisible();
+    expect(screen.queryByText(en.backups.warnings.OFFSITE_NOT_MOUNTED)).not.toBeInTheDocument();
+    expect(screen.getByText(en.backups.warnings.BACKUP_STORAGE_LOW)).toBeVisible();
+    expect(screen.getByRole("button", { name: en.backups.createBackup })).toBeDisabled();
+    apiMocks.getBackupSettingsJob.mockResolvedValue({ ...settingsJob, state: "failed", error_code: "STORAGE_ROLLBACK_FAILED" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.getByText(`${en.backups.settings.job}: ${en.backups.settings.rollbackFailed}`)).toBeVisible();
+    expect(screen.getByText(`${en.backups.settings.connection}: ${en.backups.settings.unmounted}`)).toBeVisible();
+    expect(screen.getByText(en.backups.warnings.OFFSITE_NOT_MOUNTED)).toBeVisible();
+    expect(screen.getByText(en.backups.warnings.TIMER_DISABLED)).toBeVisible();
+    expect(screen.getByLabelText(en.backups.settings.enable)).not.toBeChecked();
+  });
+
+  it("keeps an untested network destination's schedule disabled and passes SMB credentials only in the request", async () => {
+    apiMocks.updateBackupSettings.mockResolvedValue({
+      request_id: "00000000-0000-4000-8000-000000000124", state: "queued",
+      requested_at: "2026-10-03T10:00:00Z", finished_at: null
+    });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    const destination = await screen.findByLabelText(en.backups.settings.destination);
+    fireEvent.change(destination, { target: { value: "smb" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.host), { target: { value: "fileserver" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.share), { target: { value: "chat" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.directory), { target: { value: "OfficeChat" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.username), { target: { value: "backup" } });
+    fireEvent.change(screen.getByLabelText(en.backups.settings.password), { target: { value: "example-secret" } });
+    fireEvent.click(screen.getByLabelText(en.backups.settings.enable));
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.save }));
+    expect(apiMocks.updateBackupSettings).not.toHaveBeenCalled();
+    expect(screen.getByText(en.backups.settings.verifyFirst)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(en.backups.settings.enable));
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.save }));
+    await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
+      destination: { kind: "smb", host: "fileserver", share: "chat", directory: "OfficeChat", domain: "", username: "backup",
+        password: "example-secret", require_offsite: false },
+      schedule: { enabled: false, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], time: "02:30" }
+    }));
+    expect(screen.queryByText("example-secret")).not.toBeInTheDocument();
+  });
+
+  it("requires reason, exact host, and backup ID before starting restore", async () => {
+    render(<AdminBackups dictionary={en} locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: en.backups.details }));
+    await screen.findByRole("dialog", { name: en.backups.detailTitle });
+    fireEvent.click(screen.getByRole("button", { name: en.backups.restoreButton }));
+    const dialog = await screen.findByRole("dialog", { name: en.backups.restoreConfirmTitle });
+    const start = within(dialog).getByRole("button", { name: en.backups.restoreConfirmButton });
+    expect(start).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: en.backups.restoreReason }), {
+      target: { value: "Recovering messages after an operator incident" }
+    });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: en.backups.restoreTypeHost }), {
+      target: { value: "chat.example.test" }
+    });
+    expect(start).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: en.backups.restoreTypeBackup }), {
+      target: { value: backup.backup_id }
+    });
+    expect(start).toBeEnabled();
+    expect(apiMocks.startRestore).not.toHaveBeenCalled();
   });
 
   it("shows agent unavailable and warnings without a toast loop", async () => {
@@ -210,7 +439,7 @@ describe("Backup Center", () => {
 
     const { unmount } = render(<AdminBackups dictionary={en} locale="en" />);
     await screen.findByText(en.backups.activeJobTitle);
-    await waitFor(() => expect(vi.getTimerCount()).toBe(3));
+    await waitFor(() => expect(vi.getTimerCount()).toBeGreaterThanOrEqual(3));
     const statusCallsBeforePoll = apiMocks.getBackupStatus.mock.calls.length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3_000);
@@ -220,6 +449,64 @@ describe("Backup Center", () => {
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not show a transient data-loading error after a successful restore", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const restore = {
+      request_id: "00000000-0000-4000-8000-000000000456",
+      backup_id: backup.backup_id,
+      hostname: "chat.example.test",
+      state: "running" as const,
+      requested_at: job.requested_at,
+      started_at: job.requested_at,
+      finished_at: null,
+      last_error: null
+    };
+    apiMocks.getLatestRestore.mockResolvedValue({ request: restore });
+    apiMocks.getRestoreStatus.mockResolvedValue({
+      ...restore, state: "succeeded", finished_at: "2026-08-05T10:02:00Z"
+    });
+    apiMocks.getBackupStatus.mockRejectedValue(new Error("The backend is restarting"));
+
+    const { container, unmount } = render(<AdminBackups dictionary={ru} locale="ru" />);
+    await screen.findByText(ru.backups.restoreOperation);
+    await waitFor(() => expect(apiMocks.getBackupStatus).toHaveBeenCalled());
+    expect(container.querySelector(".form-error")).not.toBeInTheDocument();
+    const statusCalls = apiMocks.getBackupStatus.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(screen.getByText(ru.backups.restoreStates.succeeded)).toBeInTheDocument());
+    expect(container.querySelector(".form-error")).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(apiMocks.getBackupStatus).toHaveBeenCalledTimes(statusCalls);
+
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("shows disconnected storage separately from a previously copied backup and reconnects without editing the schedule", async () => {
+    const schedule = { enabled: true, days: ["Mon"], time: "02:30" };
+    apiMocks.getBackupSettings.mockResolvedValue({ destination: { kind: "smb", host: "nas", share: "backups", directory: "Chat" }, schedule });
+    apiMocks.getBackupStatus.mockResolvedValue({ ...status, offsite: { ...status.offsite, mounted: false } });
+    apiMocks.updateBackupSettings.mockResolvedValue({ request_id: "11111111-1111-4111-8111-111111111111", state: "queued" });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    expect(await screen.findByText(`${en.backups.settings.connection}: ${en.backups.settings.unmounted}`)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: en.backups.settings.reconnect }));
+    await waitFor(() => expect(apiMocks.updateBackupSettings).toHaveBeenCalledWith("test-token", {
+      destination: { kind: "reconnect" }, schedule
+    }));
+  });
+
+  it("qualifies a successful local-only backup when the offsite copy was skipped", async () => {
+    apiMocks.getActiveBackupJob.mockResolvedValue({ job: { ...job, state: "succeeded", success: true, backup_id: backup.backup_id } });
+    apiMocks.getBackupStatus.mockResolvedValue({ ...status, last_run: { ...status.last_run, offsite_status: "skipped_not_mounted" } });
+    render(<AdminBackups dictionary={en} locale="en" />);
+    expect(await screen.findByText(en.backups.localOnlyDescription)).toBeVisible();
+    expect(screen.getByText(en.backups.localOnly)).toBeVisible();
   });
 
   it("keeps RU and EN dictionary key sets aligned", () => {

@@ -11,7 +11,7 @@ import {
   useState
 } from "react";
 
-import { isAdminRole, type OfficeChatUser } from "../lib/api";
+import { getReleaseUpdate, isAdminRole, requireStoredAccessToken, type OfficeChatReleaseUpdate, type OfficeChatUser } from "../lib/api";
 import {
   calculateFixedPopoverPosition,
   type FixedPopoverPosition
@@ -42,6 +42,7 @@ export function SidebarAccountFooter({
   onOpenSettings
 }: SidebarAccountFooterProps) {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const [releaseUpdate, setReleaseUpdate] = useState<OfficeChatReleaseUpdate | null>(null);
   const [adminMenuPosition, setAdminMenuPosition] =
     useState<FixedPopoverPosition | null>(null);
   const adminMenuRef = useRef<HTMLElement | null>(null);
@@ -49,6 +50,26 @@ export function SidebarAccountFooter({
   const focusFirstItemOnOpenRef = useRef(false);
   const adminMenuId = useId();
   const showAdminMenu = Boolean(currentUser && isAdminRole(currentUser.role));
+
+  useEffect(() => {
+    if (currentUser?.role !== "superadmin") {
+      setReleaseUpdate(null);
+      return;
+    }
+    let cancelled = false;
+    const check = () => {
+      const token = requireStoredAccessToken(locale);
+      if (!token) return;
+      void getReleaseUpdate(token).then((result) => {
+        if (!cancelled) setReleaseUpdate(result);
+      }).catch(() => {
+        if (!cancelled) setReleaseUpdate(null);
+      });
+    };
+    check();
+    const interval = window.setInterval(check, 3_600_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [currentUser?.role, locale]);
 
   function closeAdminMenu({ restoreFocus = false } = {}) {
     setIsAdminMenuOpen(false);
@@ -253,7 +274,7 @@ export function SidebarAccountFooter({
               title={dictionary.appShell.adminMenu}
               type="button"
             >
-              <span aria-hidden="true">...</span>
+              <span aria-hidden="true">{releaseUpdate?.status === "update_available" ? "↑" : "..."}</span>
             </button>
             {isAdminMenuOpen && typeof document !== "undefined" ? createPortal(
               <nav
@@ -278,12 +299,17 @@ export function SidebarAccountFooter({
                 <Link href={`/${locale}/admin/storage`} onClick={() => closeAdminMenu()} role="menuitem">
                   {dictionary.retention.title}
                 </Link>
-                {currentUser?.role === "superadmin" ? <Link href={`/${locale}/admin/backups`} onClick={() => closeAdminMenu()} role="menuitem">
+                {(currentUser?.role === "superadmin" || (currentUser?.role === "admin" && currentUser.permissions.includes("can_restore_backup"))) ? <Link href={`/${locale}/admin/backups`} onClick={() => closeAdminMenu()} role="menuitem">
                   {dictionary.backups.title}
                 </Link> : null}
                 <Link href={`/${locale}/admin/audit`} onClick={() => closeAdminMenu()} role="menuitem">
                   {dictionary.audit.title}
                 </Link>
+                {releaseUpdate?.status === "update_available" ? (
+                  <Link href={`/${locale}/about`} onClick={() => closeAdminMenu()} role="menuitem">
+                    {dictionary.appShell.updateAvailable}: {releaseUpdate.latest_version}
+                  </Link>
+                ) : null}
               </nav>,
               document.body
             ) : null}

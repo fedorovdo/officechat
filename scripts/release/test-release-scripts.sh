@@ -845,12 +845,12 @@ if [[ "${1:-}" == "restart" && "${2:-}" == "officechat-backup-agent.service" && 
   rm -f -- "$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE"
   python3 - "$OFFICECHAT_BACKUP_AGENT_SOCKET_FILE" <<'PY_SOCKET'
 import os
-import socket
+import stat
 import sys
 
-listener = socket.socket(socket.AF_UNIX)
-listener.bind(sys.argv[1])
-listener.close()
+# The fake agent only needs a socket inode for the updater's file checks;
+# it does not accept connections or require IPC access in the test runner.
+os.mknod(sys.argv[1], stat.S_IFSOCK | 0o660)
 os.chmod(sys.argv[1], 0o660)
 PY_SOCKET
 fi
@@ -1147,13 +1147,18 @@ grep -Fq 'ExecStart=/opt/officechat/restore-production.sh --config /etc/officech
   echo "Verification executor command is not fixed" >&2
   exit 1
 }
-for unit_name in officechat-backup.service officechat-backup.timer officechat-backup-agent.service officechat-backup-job.service 'officechat-backup-verify@.service'; do
+for unit_name in officechat-backup.service officechat-backup.timer officechat-backup-agent.service officechat-backup-job.service 'officechat-backup-verify@.service' 'officechat-restore@.service'; do
   grep -Fq "install -o root -g root -m 0644 \"\${systemd_source}/${unit_name}\"" \
     "${SCRIPT_DIR}/install-linux.sh" || {
     echo "Installer does not explicitly install ${unit_name} as root-owned" >&2
     exit 1
   }
 done
+grep -Fq 'ExecStart=/usr/bin/python3 /opt/officechat/restore-request.py %i' \
+  "${ROOT_DIR}/deploy/systemd/officechat-restore@.service" || {
+  echo "Restore executor must use a fixed request ID and executable" >&2
+  exit 1
+}
 grep -Fq "as_root chown root:root \"\${OFFICECHAT_INSTALL_DIR}/backup-production.sh\"" \
   "${SCRIPT_DIR}/install-linux.sh" || {
   echo "Installer does not enforce root ownership for privileged backup scripts" >&2
@@ -1786,8 +1791,10 @@ rollback_https="${rollback_install}/docker-compose.https-override.yml"
 rollback_override="${rollback_install}/docker-compose.version-override.yml"
 rollback_agent_config="${rollback_etc}/backup-agent.conf"
 rollback_agent_unit="${rollback_etc}/officechat-backup-agent.service"
+rollback_backup_unit="${rollback_etc}/officechat-backup.service"
 rollback_job_unit="${rollback_etc}/officechat-backup-job.service"
 rollback_verify_unit="${rollback_etc}/officechat-backup-verify@.service"
+rollback_restore_unit="${rollback_etc}/officechat-restore@.service"
 rollback_caddy_file="${rollback_install}/caddy/Caddyfile.example"
 rollback_caddy_compose="${rollback_install}/caddy/docker-compose.caddy.yml"
 mkdir -p "${rollback_install}/backup" "${rollback_install}/caddy" "$rollback_etc"
@@ -1797,11 +1804,20 @@ printf 'services:\n  backend:\n    image: ghcr.io/fedorovdo/officechat-backend:0
 printf 'OFFICECHAT_VERSION=0.1.0-rc2\nOFFICECHAT_BUILD_SHA=old-sha\nOFFICECHAT_BUILD_DATE=old-date\nAPP_SECRET_KEY=rollback-secret\n' >"$rollback_env"
 printf '0.1.0-rc2\n' >"${rollback_install}/VERSION"
 printf 'old-agent\n' >"${rollback_install}/backup-agent.py"
+printf 'old-restore-request\n' >"${rollback_install}/restore-request.py"
 printf '{"old":true}\n' >"${rollback_install}/RELEASE.json"
 printf 'old-agent-config\n' >"$rollback_agent_config"
 printf 'old-agent-unit\n' >"$rollback_agent_unit"
+printf 'old-scheduled-backup-unit\n' >"$rollback_backup_unit"
+rollback_network_unit="${rollback_etc}/officechat-offsite-network.service"
+rollback_mount_dropin="${rollback_etc}/mnt-officechat\\x2doffsite.mount.d/20-officechat-network.conf"
+mkdir -p "$(dirname "$rollback_mount_dropin")"
+printf 'old-network-unit\n' >"$rollback_network_unit"
+printf 'old-mount-dropin\n' >"$rollback_mount_dropin"
+
 printf 'old-job-unit\n' >"$rollback_job_unit"
 printf 'old-verify-unit\n' >"$rollback_verify_unit"
+printf 'old-restore-unit\n' >"$rollback_restore_unit"
 printf 'old-backup-script\n' >"${rollback_install}/backup-production.sh"
 printf 'old-verify-script\n' >"${rollback_install}/verify-backup.sh"
 printf 'old-restore-script\n' >"${rollback_install}/restore-production.sh"
@@ -1811,8 +1827,8 @@ printf 'services:\n  caddy: {}\n' >"$rollback_caddy_compose"
 
 declare -A rollback_hashes=()
 for rollback_file in "$rollback_compose" "$rollback_https" "$rollback_override" "$rollback_env" \
-  "$rollback_agent_config" "$rollback_agent_unit" "${rollback_install}/backup-agent.py" \
-  "$rollback_job_unit" "$rollback_verify_unit" "${rollback_install}/backup-production.sh" \
+  "$rollback_agent_config" "$rollback_agent_unit" "$rollback_backup_unit" "$rollback_network_unit" "$rollback_mount_dropin" "${rollback_install}/backup-agent.py" \
+  "${rollback_install}/restore-request.py" "$rollback_job_unit" "$rollback_verify_unit" "$rollback_restore_unit" "${rollback_install}/backup-production.sh" \
   "${rollback_install}/verify-backup.sh" \
   "${rollback_install}/restore-production.sh" "${rollback_install}/backup/lib.sh" \
   "${rollback_install}/RELEASE.json" "${rollback_install}/VERSION" \
@@ -1837,16 +1853,19 @@ if env \
   OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
   OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
   OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+  OFFICECHAT_BACKUP_UNIT_FILE="$rollback_backup_unit" \
   OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
   OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+  OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
   OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${rollback_root}/agent.sock" \
-  bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >/dev/null 2>&1; then
+  bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >"${rollback_root}/update.out" 2>&1; then
   echo "update unexpectedly succeeded with a simulated migration failure" >&2
   exit 1
 fi
 migrations_after="$(grep -Fc 'alembic upgrade head' "$FAKE_LOG" || true)"
 [[ "$migrations_after" -eq $((migrations_before + 1)) ]] || {
   echo "rollback test did not reach the simulated migration failure" >&2
+  tail -30 "${rollback_root}/update.out" >&2
   exit 1
 }
 
@@ -1892,8 +1911,10 @@ for enabled_status in 0 1; do
       OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
       OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
       OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+      OFFICECHAT_BACKUP_UNIT_FILE="$rollback_backup_unit" \
       OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
       OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+      OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
       OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="$lifecycle_socket" \
       bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >/dev/null 2>&1; then
       echo "agent lifecycle test unexpectedly succeeded past simulated migration failure" >&2
@@ -1933,6 +1954,60 @@ for enabled_status in 0 1; do
     fi
   done
 done
+
+scheduled_update_log="${TMP_DIR}/scheduled-executor-update.log"
+scheduled_timer="${rollback_etc}/officechat-backup.timer"
+scheduled_timer_dropin="${scheduled_timer}.d/10-officechat-settings.conf"
+mkdir -p "${scheduled_timer}.d"
+printf '[Timer]\nOnCalendar=*-*-* 02:30:00\n' >"$scheduled_timer"
+printf '[Timer]\nOnCalendar=\nOnCalendar=Mon..Fri *-*-* 03:45:00\n' >"$scheduled_timer_dropin"
+timer_hash_before="$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")"
+scheduled_network_unit="${rollback_etc}/officechat-offsite-network.service"
+scheduled_mount_dropin="${rollback_etc}/mnt-officechat\\x2doffsite.mount.d/20-officechat-network.conf"
+
+: >"$scheduled_update_log"
+env \
+  OFFICECHAT_FAKE_DOCKER_LOG="$scheduled_update_log" \
+  OFFICECHAT_INSTALL_DIR="$rollback_install" \
+  OFFICECHAT_DATA_DIR="${rollback_root}/data" \
+  OFFICECHAT_BACKUP_DIR="${rollback_root}/backups" \
+  OFFICECHAT_ENV_FILE="$rollback_env" \
+  OFFICECHAT_COMPOSE_FILE="$rollback_compose" \
+  OFFICECHAT_HTTPS_OVERRIDE_FILE="$rollback_https" \
+  OFFICECHAT_VERSION_OVERRIDE_FILE="$rollback_override" \
+  OFFICECHAT_RELEASE_METADATA_FILE="$RELEASE_METADATA_FILE" \
+  OFFICECHAT_LOCK_FILE="${rollback_root}/scheduled-executor.lock" \
+  OFFICECHAT_BACKUP_GROUP=root \
+  OFFICECHAT_BACKUP_CONFIG_FILE="${rollback_etc}/backup.conf" \
+  OFFICECHAT_BACKUP_AGENT_CONFIG_FILE="$rollback_agent_config" \
+  OFFICECHAT_BACKUP_AGENT_UNIT_FILE="$rollback_agent_unit" \
+  OFFICECHAT_BACKUP_UNIT_FILE="$rollback_backup_unit" \
+  OFFICECHAT_BACKUP_JOB_UNIT_FILE="$rollback_job_unit" \
+  OFFICECHAT_BACKUP_VERIFY_UNIT_FILE="$rollback_verify_unit" \
+  OFFICECHAT_RESTORE_UNIT_FILE="$rollback_restore_unit" \
+  OFFICECHAT_BACKUP_AGENT_SOCKET_FILE="${rollback_root}/scheduled-executor.sock" \
+  bash "${SCRIPT_DIR}/update-linux.sh" --no-backup 0.1.0-rc3 >"${rollback_root}/scheduled-update.out" 2>&1 || {
+    tail -30 "${rollback_root}/scheduled-update.out" >&2
+    fail_test "scheduled executor update failed"
+  }
+cmp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "$rollback_backup_unit" ||
+  fail_test "updater did not replace the legacy scheduled backup executor"
+cmp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.service" "$scheduled_network_unit" ||
+  fail_test "network readiness executor was not installed during update"
+cmp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "$scheduled_mount_dropin" ||
+  fail_test "managed mount readiness dependency was not installed during update"
+cmp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings-recovery.service" "${rollback_etc}/officechat-backup-settings-recovery.service" ||
+  fail_test "storage migration recovery executor was not installed during update"
+grep -Fq -- '--scheduled' "$rollback_backup_unit" ||
+  fail_test "updated backup executor does not record scheduled backups"
+[[ "$timer_hash_before" == "$(sha256sum "$scheduled_timer" "$scheduled_timer_dropin")" ]] ||
+  fail_test "updater replaced the existing backup schedule"
+if grep -Fq 'officechat-backup.timer' "$scheduled_update_log" ||
+  grep -Eq 'systemctl (start|restart|stop|enable|disable).*officechat-backup\.service' "$scheduled_update_log"; then
+  fail_test "updater changed timer state or launched a backup"
+fi
+grep -Fq 'systemctl daemon-reload' "$scheduled_update_log" ||
+  fail_test "updated scheduled executor was not reloaded"
 
 verify_output="$(bash "${SCRIPT_DIR}/verify-install.sh" --dry-run 2>&1)"
 [[ "$verify_output" == *"Uploads writable mutation probe skipped"* ]] || {

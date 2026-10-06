@@ -2,6 +2,13 @@
 
 Volume `officechat_caddy_data` содержит private root/intermediate keys. Потеря volume создаст новый CA и потребует повторной установки `root.crt` на всех клиентах. Архив CA является критическим секретом.
 
+**Формат архива:** команды ниже создают и восстанавливают архив всего data
+volume. Архив `caddy/caddy-ca.tar.gz` из `backup-production.sh` содержит только
+содержимое `/data/caddy/pki` и требует другого каталога распаковки. Для него
+используйте [процедуру переноса на новый сервер](restore-to-new-server_RU.md#6-восстановить-исходный-ca-и-перевыпустить-сертификат-нового-имени).
+После смены CA отдельно перевыпустите leaf certificate нового hostname;
+успех `curl --cacert` на сервере не заменяет проверку доверия Windows/браузера.
+
 Operational Compose-команды ниже предназначены для установки из release bundle
 и используют `/opt/officechat/.env` и установленный Caddy Compose-файл. При
 работе непосредственно из source checkout используйте явно исходные пути

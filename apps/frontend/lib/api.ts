@@ -14,14 +14,15 @@ export type PermissionKey =
   | "can_broadcast"
   | "can_pin_messages"
   | "can_manage_calendar"
-  | "can_manage_directory";
+  | "can_manage_directory"
+  | "can_restore_backup";
 export type BroadcastPriority = "normal" | "important" | "urgent";
 export type BroadcastAudienceType = "all_active_users" | "selected_groups" | "selected_users";
 export type BroadcastStatus = "draft" | "sending" | "sent" | "failed" | "partially_failed" | "retracted";
 export type CalendarEventType = "meeting" | "video_conference" | "office_event" | "training" | "maintenance" | "other";
 export type CalendarEventStatus = "scheduled" | "rescheduled" | "cancelled" | "completed";
 export type CalendarAudienceType = "all_active_users" | "selected_groups" | "selected_users";
-export type BackupType = "manual" | "scheduled" | "pre_upgrade" | "unknown";
+export type BackupType = "manual" | "scheduled" | "pre_upgrade" | "pre_storage_change" | "unknown";
 export type BackupVerificationStatus = "not_requested" | "pending" | "passed" | "failed" | "unknown";
 export type BackupOffsiteStatus = "not_configured" | "copied" | "skipped_not_mounted" | "failed" | "unknown";
 
@@ -83,9 +84,24 @@ export type OfficeChatBackupStatus = {
     unit_name: "officechat-backup.timer";
   };
   retention: { daily: number | null; weekly: number | null; monthly: number | null };
-  offsite: { configured: boolean; required: boolean; status: BackupOffsiteStatus };
+  offsite: { configured: boolean; required: boolean; status: BackupOffsiteStatus; mounted?: boolean | null };
   warnings: string[];
   error_code?: string | null;
+};
+
+export type BackupScheduleSettings = { enabled: boolean; days: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[]; time: string };
+export type BackupDestinationSettings =
+  | { kind: "local" | "unchanged" | "unmanaged" }
+  | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean }
+  | { kind: "smb"; host: string; share: string; directory?: string; domain: string; username: string; require_offsite: boolean };
+export type BackupSettings = { destination: BackupDestinationSettings; schedule: BackupScheduleSettings; next_run_at: string | null };
+export type BackupSettingsJob = { request_id: string; state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null; error_code?: "MOUNT_HELPER_MISSING" | "MAINTENANCE_BUSY" | "DESTINATION_READ_FAILED" | "SETTINGS_APPLY_FAILED" | "STORAGE_MIGRATION_FAILED" | "STORAGE_ROLLBACK_FAILED" | null; phase?: "protected_backup" | "connecting" | "copying" | "rolling_back" | "completed" | null; backup_id?: string | null };
+export type BackupSettingsUpdate = {
+  destination:
+    | { kind: "local" | "unchanged" | "reconnect" }
+    | { kind: "nfs"; host: string; export: string; version: "3" | "4.1" | "4.2"; require_offsite: boolean; replace_existing?: boolean }
+    | { kind: "smb"; host: string; share: string; directory: string; domain: string; username: string; password: string; require_offsite: boolean; replace_existing?: boolean };
+  schedule: BackupScheduleSettings;
 };
 
 export type OfficeChatBackupJob = {
@@ -102,6 +118,55 @@ export type OfficeChatBackupJob = {
   safe_message: string;
   last_error: string | null;
 };
+
+export type OfficeChatReleaseUpdate = {
+  current_version: string;
+  latest_version: string | null;
+  release_url: string | null;
+  status: "update_available" | "current" | "unavailable" | "unsupported";
+};
+
+export type RestorePreparation = {
+  challenge: string;
+  backup_id: string;
+  hostname: string;
+  expires_in_seconds: number;
+};
+
+export type RestoreRequest = {
+  request_id: string;
+  backup_id: string;
+  hostname: string;
+  state: "queued" | "running" | "succeeded" | "failed";
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+};
+
+export function prepareRestore(token: string, backupId: string) {
+  return apiFetch<RestorePreparation>(`/api/admin/backups/${encodeURIComponent(backupId)}/restore/prepare`, token, { method: "POST" });
+}
+
+export function startRestore(token: string, payload: {
+  backup_id: string; challenge: string; confirm_hostname: string; confirm_backup: string; reason: string;
+}) {
+  return apiFetch<RestoreRequest>("/api/admin/backups/restores", token, {
+    method: "POST", body: JSON.stringify(payload)
+  });
+}
+
+export function getLatestRestore(token: string) {
+  return apiFetch<{ request: RestoreRequest | null }>("/api/admin/backups/restores/latest", token);
+}
+
+export function getRestoreStatus(token: string, requestId: string) {
+  return apiFetch<RestoreRequest>(`/api/admin/backups/restores/${encodeURIComponent(requestId)}`, token);
+}
+
+export function getReleaseUpdate(token: string) {
+  return apiFetch<OfficeChatReleaseUpdate>("/api/system/updates", token);
+}
 
 export type OfficeChatUser = {
   id: string;
@@ -1246,6 +1311,8 @@ export type RetentionRunResult = {
 
 export type StorageStats = {
   uploads_total_bytes: number;
+  disk_total_bytes: number | null;
+  disk_free_bytes: number | null;
   avatar_bytes: number;
   group_attachment_bytes: number;
   direct_attachment_bytes: number;
@@ -1578,6 +1645,22 @@ export function getStorageStats(token: string) {
 
 export function getBackupStatus(token: string) {
   return apiFetch<OfficeChatBackupStatus>("/api/admin/backups/status", token);
+}
+
+export function getBackupSettings(token: string) {
+  return apiFetch<BackupSettings>("/api/admin/backups/settings", token);
+}
+
+export function updateBackupSettings(token: string, payload: BackupSettingsUpdate) {
+  return apiFetch<BackupSettingsJob>("/api/admin/backups/settings", token, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function getLatestBackupSettingsJob(token: string) {
+  return apiFetch<{ request: BackupSettingsJob | null }>("/api/admin/backups/settings/jobs/latest", token);
+}
+
+export function getBackupSettingsJob(token: string, requestId: string) {
+  return apiFetch<BackupSettingsJob>(`/api/admin/backups/settings/jobs/${encodeURIComponent(requestId)}`, token);
 }
 
 export function getBackups(token: string, page = 1, limit = 25) {

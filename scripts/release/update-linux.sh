@@ -75,6 +75,20 @@ elif [[ -f "${SCRIPT_DIR}/backup-agent.py" ]]; then
   agent_source="${SCRIPT_DIR}/backup-agent.py"
 fi
 [[ -n "$agent_source" ]] || fail "Backup agent executable not found"
+settings_source=""
+if [[ -f "${SCRIPT_DIR}/../backup_settings.py" ]]; then
+  settings_source="${SCRIPT_DIR}/../backup_settings.py"
+elif [[ -f "${SCRIPT_DIR}/backup-settings.py" ]]; then
+  settings_source="${SCRIPT_DIR}/backup-settings.py"
+fi
+[[ -n "$settings_source" ]] || fail "Backup settings executor not found"
+restore_request_source=""
+if [[ -f "${SCRIPT_DIR}/../restore_request.py" ]]; then
+  restore_request_source="${SCRIPT_DIR}/../restore_request.py"
+elif [[ -f "${SCRIPT_DIR}/restore-request.py" ]]; then
+  restore_request_source="${SCRIPT_DIR}/restore-request.py"
+fi
+[[ -n "$restore_request_source" ]] || fail "Restore request executor not found"
 
 agent_config_source=""
 if [[ -f "${SCRIPT_DIR}/../../deploy/backup/officechat-backup-agent.conf.example" ]]; then
@@ -184,10 +198,18 @@ snapshot_file "$OFFICECHAT_COMPOSE_FILE" docker-compose.yml
 snapshot_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
 snapshot_file "$OFFICECHAT_ENV_FILE" officechat.env
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+snapshot_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
+snapshot_file "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE" officechat-backup-settings-recovery.service
+snapshot_file "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE" officechat-offsite-network.service
+snapshot_file "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" officechat-offsite-network.conf
 snapshot_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
 snapshot_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
+snapshot_file "$OFFICECHAT_RESTORE_UNIT_FILE" 'officechat-restore@.service'
 snapshot_file "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" backup-agent.conf
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" backup-agent.py
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-settings.py" backup-settings.py
+snapshot_file /etc/systemd/system/officechat-backup-settings@.service 'officechat-backup-settings@.service'
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-request.py" restore-request.py
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" backup-production.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
@@ -204,10 +226,18 @@ rollback_update() {
   restore_file "$OFFICECHAT_VERSION_OVERRIDE_FILE" docker-compose.version-override.yml
   restore_file "$OFFICECHAT_ENV_FILE" officechat.env
   restore_file "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE" officechat-backup-agent.service
+  restore_file "$OFFICECHAT_BACKUP_UNIT_FILE" officechat-backup.service
+  restore_file "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE" officechat-backup-settings-recovery.service
+  restore_file "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE" officechat-offsite-network.service
+  restore_file "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE" officechat-offsite-network.conf
   restore_file "$OFFICECHAT_BACKUP_JOB_UNIT_FILE" officechat-backup-job.service
   restore_file "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE" 'officechat-backup-verify@.service'
+  restore_file "$OFFICECHAT_RESTORE_UNIT_FILE" 'officechat-restore@.service'
   restore_file "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE" backup-agent.conf
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup-agent.py" backup-agent.py
+  restore_file "${OFFICECHAT_INSTALL_DIR}/backup-settings.py" backup-settings.py
+  restore_file /etc/systemd/system/officechat-backup-settings@.service 'officechat-backup-settings@.service'
+  restore_file "${OFFICECHAT_INSTALL_DIR}/restore-request.py" restore-request.py
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" backup-production.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
@@ -268,6 +298,8 @@ ensure_backup_agent_group
 ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
 ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
 install -o root -g root -m 0755 "$agent_source" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
+install -o root -g root -m 0755 "$settings_source" "${OFFICECHAT_INSTALL_DIR}/backup-settings.py"
+install -o root -g root -m 0755 "$restore_request_source" "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
 for backup_tool in backup-production.sh verify-backup.sh restore-production.sh; do
   if [[ -f "${SCRIPT_DIR}/${backup_tool}" && "${SCRIPT_DIR}/${backup_tool}" != "${OFFICECHAT_INSTALL_DIR}/${backup_tool}" ]]; then
     install -o root -g root -m 0755 "${SCRIPT_DIR}/${backup_tool}" "${OFFICECHAT_INSTALL_DIR}/${backup_tool}"
@@ -289,10 +321,25 @@ chown root:root "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
 chmod 600 "$OFFICECHAT_BACKUP_AGENT_CONFIG_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-agent.service" \
   "$OFFICECHAT_BACKUP_AGENT_UNIT_FILE"
+# Refresh the scheduled executor without replacing the timer or its schedule
+# drop-ins, and without starting a backup or changing the timer's state.
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup.service" \
+  "$OFFICECHAT_BACKUP_UNIT_FILE"
+install -d -o root -g root -m 0755 "$(dirname "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE")"
+install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.service" \
+  "$OFFICECHAT_OFFSITE_NETWORK_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.conf" \
+  "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings-recovery.service" \
+  "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" \
+  /etc/systemd/system/officechat-backup-settings@.service
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" \
   "$OFFICECHAT_BACKUP_JOB_UNIT_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" \
   "$OFFICECHAT_BACKUP_VERIFY_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-restore@.service" \
+  "$OFFICECHAT_RESTORE_UNIT_FILE"
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload

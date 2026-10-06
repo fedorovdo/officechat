@@ -10,20 +10,28 @@ import {
   getBackupJob,
   getBackups,
   getBackupStatus,
+  getLatestRestore,
+  getRestoreStatus,
   getCurrentUser,
   getLocalizedApiError,
   requireStoredAccessToken,
+  prepareRestore,
+  startRestore,
   verifyBackup,
   type OfficeChatBackup,
   type OfficeChatBackupJob,
-  type OfficeChatBackupStatus
+  type OfficeChatBackupStatus,
+  type RestorePreparation,
+  type RestoreRequest
 } from "../lib/api";
 import { officeChatBrand } from "../lib/brand";
 import { formatFileSize } from "../lib/files";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { AdminCard, AdminPageHeader, AdminPageShell, AdminStatCard, AdminTableContainer } from "./AdminUI";
+import { AdminBackupSettings } from "./AdminBackupSettings";
 
 type AdminBackupsProps = { dictionary: Dictionary; locale: Locale };
+const SETTINGS_TRANSIENT_WARNINGS = new Set(["TIMER_DISABLED", "OFFSITE_NOT_CONFIGURED", "OFFSITE_NOT_MOUNTED", "OFFSITE_COPY_MISSING"]);
 
 export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const router = useRouter();
@@ -31,7 +39,14 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const [backups, setBackups] = useState<OfficeChatBackup[]>([]);
   const [selected, setSelected] = useState<OfficeChatBackup | null>(null);
   const [verificationTarget, setVerificationTarget] = useState<string | null>(null);
+  const [restorePreparation, setRestorePreparation] = useState<RestorePreparation | null>(null);
+  const [restoreRequest, setRestoreRequest] = useState<RestoreRequest | null>(null);
+  const [confirmHostname, setConfirmHostname] = useState("");
+  const [confirmBackup, setConfirmBackup] = useState("");
+  const [restoreReason, setRestoreReason] = useState("");
   const [activeJob, setActiveJob] = useState<OfficeChatBackupJob | null>(null);
+  const [canManageSettings, setCanManageSettings] = useState(false);
+  const [settingsActive, setSettingsActive] = useState(false);
   const [confirmation, setConfirmation] = useState<"create" | "verify" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -42,7 +57,10 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const statusRequestActive = useRef(false);
+  const statusRequestId = useRef(0);
+  const listRequestId = useRef(0);
   const jobRequestActive = useRef(false);
+  const restoreStateRef = useRef<RestoreRequest["state"] | null>(null);
   const text = dictionary.backups;
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }),
@@ -54,31 +72,46 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   ), [dateFormatter, text.noData]);
   const formatBytes = (value: number | null | undefined) => value === null || value === undefined ? text.noData : formatFileSize(value);
   const statusLabel = (value: string) => text.values[value as keyof typeof text.values] ?? text.values.unknown;
+  const backupTypeLabel = (value: string) => value === "unknown" ? text.typeUnrecorded : statusLabel(value);
   const warningLabel = (value: string) => text.warnings[value as keyof typeof text.warnings] ?? text.warnings.UNKNOWN;
 
-  const loadStatus = useCallback(async (token: string) => {
-    if (statusRequestActive.current) return;
+  useEffect(() => {
+    restoreStateRef.current = restoreRequest?.state ?? null;
+  }, [restoreRequest]);
+
+  const loadStatus = useCallback(async (token: string, fresh = false) => {
+    if (statusRequestActive.current && !fresh) return;
+    const requestId = ++statusRequestId.current;
     statusRequestActive.current = true;
     try {
-      setStatus(await getBackupStatus(token));
+      const updated = await getBackupStatus(token);
+      if (requestId === statusRequestId.current) setStatus(updated);
     } catch (caughtError) {
-      setError(getLocalizedApiError(caughtError, dictionary.session));
+      if (requestId === statusRequestId.current && !["queued", "running", "succeeded"].includes(restoreStateRef.current ?? "")) {
+        setError(getLocalizedApiError(caughtError, dictionary.session));
+      }
+      if (fresh) throw caughtError;
     } finally {
-      statusRequestActive.current = false;
+      if (requestId === statusRequestId.current) statusRequestActive.current = false;
     }
   }, [dictionary.session]);
 
-  const loadList = useCallback(async (token: string, selectedPage: number) => {
+  const loadList = useCallback(async (token: string, selectedPage: number, fresh = false) => {
+    const requestId = ++listRequestId.current;
     try {
       const response = await getBackups(token, selectedPage, 25);
+      if (requestId !== listRequestId.current) return;
       setBackups(response.items);
       setTotal(response.total);
       setHasNext(response.has_next);
     } catch (caughtError) {
-      setBackups([]);
-      setTotal(0);
-      setHasNext(false);
-      setError(getLocalizedApiError(caughtError, dictionary.session));
+      if (requestId === listRequestId.current) {
+        setBackups([]);
+        setTotal(0);
+        setHasNext(false);
+        setError(getLocalizedApiError(caughtError, dictionary.session));
+      }
+      if (fresh) throw caughtError;
     }
   }, [dictionary.session]);
 
@@ -87,7 +120,12 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
     if (!token) return;
     setRefreshing(true);
     setError("");
-    const active = await getActiveBackupJob(token).catch(() => ({ job: null }));
+    const [active, latestRestore] = await Promise.all([
+      getActiveBackupJob(token).catch(() => ({ job: null })),
+      getLatestRestore(token).catch(() => ({ request: null }))
+    ]);
+    restoreStateRef.current = latestRestore.request?.state ?? null;
+    setRestoreRequest(latestRestore.request);
     setActiveJob((current) => current && ["queued", "running", "verifying"].includes(current.state) ? current : active.job);
     await Promise.all([loadStatus(token), loadList(token, selectedPage)]);
     setRefreshing(false);
@@ -97,17 +135,19 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   const refreshBackupData = useCallback(async () => {
     const token = requireStoredAccessToken(locale);
     if (!token) return;
-    await Promise.all([loadStatus(token), loadList(token, page)]);
+    setError("");
+    await Promise.all([loadStatus(token, true), loadList(token, page, true)]);
   }, [loadList, loadStatus, locale, page]);
 
   useEffect(() => {
     const token = requireStoredAccessToken(locale);
     if (!token) return;
     void getCurrentUser(token).then((user) => {
-      if (user.role !== "superadmin") {
+      if (user.role !== "superadmin" && (user.role !== "admin" || !user.permissions.includes("can_restore_backup"))) {
         router.replace(`/${locale}/dashboard`);
         return;
       }
+      setCanManageSettings(user.role === "superadmin");
       void loadAll(1);
     }).catch((caughtError) => {
       setError(getLocalizedApiError(caughtError, dictionary.session));
@@ -116,11 +156,12 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
   }, [dictionary.session, loadAll, locale, router]);
 
   useEffect(() => {
+    if (restoreRequest && ["queued", "running", "succeeded"].includes(restoreRequest.state)) return;
     const token = requireStoredAccessToken(locale);
     if (!token) return;
     const interval = window.setInterval(() => void loadStatus(token), 60_000);
     return () => window.clearInterval(interval);
-  }, [loadStatus, locale]);
+  }, [loadStatus, locale, restoreRequest]);
 
   useEffect(() => {
     if (!activeJob || !["queued", "running", "verifying"].includes(activeJob.state)) return;
@@ -142,6 +183,19 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
     const interval = window.setInterval(() => void poll(), 3_000);
     return () => window.clearInterval(interval);
   }, [activeJob, dictionary.session, locale, refreshBackupData]);
+
+  useEffect(() => {
+    if (!restoreRequest || !["queued", "running"].includes(restoreRequest.state)) return;
+    const interval = window.setInterval(() => {
+      const token = requireStoredAccessToken(locale);
+      if (token) void getRestoreStatus(token, restoreRequest.request_id).then((request) => {
+        restoreStateRef.current = request.state;
+        setRestoreRequest(request);
+        if (request.state === "succeeded") setError("");
+      }).catch(() => undefined);
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [locale, restoreRequest]);
 
   useEffect(() => {
     if (!activeJob || !["queued", "running", "verifying"].includes(activeJob.state)) return;
@@ -184,34 +238,85 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
     }
   }
 
+  async function openRestore(backupId: string) {
+    const token = requireStoredAccessToken(locale);
+    if (!token) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      setRestorePreparation(await prepareRestore(token, backupId));
+      setSelected(null);
+      setConfirmHostname("");
+      setConfirmBackup("");
+      setRestoreReason("");
+    } catch (caughtError) {
+      setError(getLocalizedApiError(caughtError, dictionary.session));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirmRestore() {
+    const token = requireStoredAccessToken(locale);
+    if (!token || !restorePreparation || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const request = await startRestore(token, {
+        backup_id: restorePreparation.backup_id,
+        challenge: restorePreparation.challenge,
+        confirm_hostname: confirmHostname.trim(),
+        confirm_backup: confirmBackup.trim(),
+        reason: restoreReason.trim().replace(/\s+/g, " ")
+      });
+      restoreStateRef.current = request.state;
+      setRestoreRequest(request);
+      setRestorePreparation(null);
+    } catch (caughtError) {
+      setError(getLocalizedApiError(caughtError, dictionary.session));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const warnings = Array.from(new Set([
     ...(status?.warnings ?? []),
     ...(status?.agent_status === "unavailable" ? ["BACKUP_AGENT_UNAVAILABLE"] : [])
-  ]));
+  ])).filter((warning) => !settingsActive || !SETTINGS_TRANSIENT_WARNINGS.has(warning));
   const lastVerified = status?.last_run?.verification_status ?? "unknown";
   const restoreReady = status?.last_success?.verification_status === "passed";
   const docsName = locale === "ru" ? "BACKUP_RESTORE_RU.md" : "BACKUP_RESTORE.md";
   const docsUrl = `${officeChatBrand.repositoryUrl.replace(/\/$/, "")}/blob/main/docs/${docsName}`;
-  const jobBusy = Boolean(activeJob && ["queued", "running", "verifying"].includes(activeJob.state));
+  const jobBusy = Boolean(settingsActive || (activeJob && ["queued", "running", "verifying"].includes(activeJob.state)) ||
+    (restoreRequest && ["queued", "running"].includes(restoreRequest.state)));
   const jobDuration = activeJob?.started_at
     ? Math.max(0, Math.floor(((activeJob.finished_at ? new Date(activeJob.finished_at).getTime() : now) - new Date(activeJob.started_at).getTime()) / 1000))
     : 0;
   const restoreBackupId = selected?.backup_id ?? status?.last_success?.backup_id ?? "<BACKUP_ID>";
   const restoreCommand = `/opt/officechat/restore-production.sh \\\n  --config /etc/officechat/backup.conf \\\n  --backup-id ${restoreBackupId} \\\n  --verify-only`;
 
+  const localOnlyJob = Boolean(activeJob?.state === "succeeded" && activeJob.operation === "create_backup" &&
+    status?.offsite.configured && status.last_run?.backup_id === activeJob.backup_id &&
+    status.last_run?.offsite_status !== "copied");
+
   return (
     <AdminPageShell ariaLabel={text.title} className="admin-backups-page" wide>
       <AdminPageHeader
-        actions={<><button className="admin-button" disabled={jobBusy || refreshing} onClick={() => setConfirmation("create")} type="button">{text.createBackup}</button><button className="admin-button admin-button-secondary" disabled={refreshing} onClick={() => void loadAll(page)} type="button">{refreshing ? text.refreshing : text.refresh}</button></>}
+        actions={<><button className="admin-button" disabled={jobBusy || refreshing} onClick={() => setConfirmation("create")} type="button">{text.createBackup}</button><button className="admin-button admin-button-secondary" disabled={refreshing || jobBusy} onClick={() => void loadAll(page)} type="button">{refreshing ? text.refreshing : text.refresh}</button></>}
         backHref={`/${locale}/dashboard`}
         backLabel={dictionary.adminUi.backToDashboard}
         description={text.description}
         title={text.title}
       />
       {error ? <p className="form-error">{error}</p> : null}
+      {restoreRequest ? <AdminCard title={text.restoreOperation} description={text.restoreStates[restoreRequest.state]}>
+        <p>{text.id}: <code>{restoreRequest.backup_id}</code></p>
+        <p>{text.jobState}: {restoreRequest.state}</p>
+        {restoreRequest.state === "failed" ? <p className="form-error">{text.restoreFailed}</p> : null}
+      </AdminCard> : null}
       {warnings.length > 0 ? <section aria-label={text.systemWarnings} className="backup-warning-banner"><strong>{text.systemWarnings}</strong><ul>{warnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}</ul></section> : null}
-      {activeJob ? <AdminCard className={`backup-job-panel backup-job-${activeJob.state}`} title={text.activeJobTitle} description={text.jobMessages[activeJob.state as keyof typeof text.jobMessages] ?? text.jobMessages.unknown}>
-        <dl className="backup-job-grid"><div><dt>{text.jobOperation}</dt><dd>{statusLabel(activeJob.operation)}</dd></div><div><dt>{text.jobState}</dt><dd>{statusLabel(activeJob.state)}</dd></div><div><dt>{text.id}</dt><dd>{activeJob.backup_id ?? text.noData}</dd></div><div><dt>{text.jobStarted}</dt><dd>{formatDate(activeJob.started_at ?? activeJob.requested_at)}</dd></div><div><dt>{text.jobDuration}</dt><dd>{jobDuration} {text.seconds}</dd></div><div><dt>{text.jobResult}</dt><dd>{activeJob.success === null ? text.noData : (activeJob.success ? text.values.success : text.values.failure)}</dd></div></dl>
+      {activeJob ? <AdminCard className={`backup-job-panel backup-job-${activeJob.state}`} title={text.activeJobTitle} description={localOnlyJob ? text.localOnlyDescription : (text.jobMessages[activeJob.state as keyof typeof text.jobMessages] ?? text.jobMessages.unknown)}>
+        <dl className="backup-job-grid"><div><dt>{text.jobOperation}</dt><dd>{statusLabel(activeJob.operation)}</dd></div><div><dt>{text.jobState}</dt><dd>{statusLabel(activeJob.state)}</dd></div><div><dt>{text.id}</dt><dd>{activeJob.backup_id ?? text.noData}</dd></div><div><dt>{text.jobStarted}</dt><dd>{formatDate(activeJob.started_at ?? activeJob.requested_at)}</dd></div><div><dt>{text.jobDuration}</dt><dd>{jobDuration} {text.seconds}</dd></div><div><dt>{text.jobResult}</dt><dd>{activeJob.success === null ? text.noData : (localOnlyJob ? text.localOnly : activeJob.success ? text.values.success : text.values.failure)}</dd></div></dl>
         {activeJob.last_error ? <p className="form-error">{text.jobErrors[activeJob.last_error as keyof typeof text.jobErrors] ?? text.jobErrors.UNKNOWN}</p> : null}
       </AdminCard> : null}
 
@@ -221,16 +326,18 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         <AdminStatCard label={text.verification} value={statusLabel(lastVerified)} />
         <AdminStatCard label={text.lastSize} value={formatBytes(status?.last_success?.backup_size_bytes)} />
         <AdminStatCard label={text.freeSpace} value={formatBytes(status?.backup_root_capacity.free_bytes)} />
-        <AdminStatCard label={text.nextRun} value={status?.timer.enabled ? formatDate(status.timer.next_run_at) : text.timerDisabled} />
-        <AdminStatCard label={text.offsite} value={statusLabel(status?.offsite.status ?? "unknown")} />
+        <AdminStatCard label={text.nextRun} value={settingsActive ? text.settings.refreshingStatus : status?.timer.enabled ? formatDate(status.timer.next_run_at) : text.timerDisabled} />
+        <AdminStatCard label={text.lastOffsite} value={settingsActive ? text.settings.refreshingStatus : statusLabel(status?.offsite.status ?? "unknown")} />
       </section>
+
+      <AdminBackupSettings canManage={canManageSettings} dictionary={dictionary} locale={locale} onSaved={refreshBackupData} onActivityChange={setSettingsActive} status={status} />
 
       <AdminCard className="backup-list-card" description={text.listDescription} title={text.listTitle}>
         <AdminTableContainer className="backup-table-wrap">
           <table className="admin-table backup-table">
             <thead><tr><th>{text.date}</th><th>{text.id}</th><th>{text.type}</th><th>{text.size}</th><th>{text.version}</th><th>{text.migration}</th><th>{text.verification}</th><th>{text.offsite}</th><th>{text.actions}</th></tr></thead>
             <tbody>{backups.map((backup) => <tr key={backup.backup_id}>
-              <td>{formatDate(backup.created_at)}</td><td><code title={backup.backup_id}>{backup.backup_id}</code></td><td>{statusLabel(backup.backup_type)}</td><td>{formatBytes(backup.size_bytes)}</td><td>{backup.officechat_version ?? text.noData}</td><td>{backup.alembic_revision ?? text.noData}</td><td><span className={`admin-badge backup-badge-${backup.verification_status}`}>{statusLabel(backup.verification_status)}</span></td><td>{statusLabel(backup.offsite_status)}</td><td><button className="table-action" onClick={() => void openDetails(backup.backup_id)} type="button">{text.details}</button></td>
+              <td>{formatDate(backup.created_at)}</td><td><code title={backup.backup_id}>{backup.backup_id}</code></td><td>{backupTypeLabel(backup.backup_type)}</td><td>{formatBytes(backup.size_bytes)}</td><td>{backup.officechat_version ?? text.noData}</td><td>{backup.alembic_revision ?? text.noData}</td><td><span className={`admin-badge backup-badge-${backup.verification_status}`}>{statusLabel(backup.verification_status)}</span></td><td>{statusLabel(backup.offsite_status)}</td><td><button className="table-action" onClick={() => void openDetails(backup.backup_id)} type="button">{text.details}</button></td>
             </tr>)}</tbody>
           </table>
           {!loading && backups.length === 0 ? <p className="sidebar-empty-state">{status?.agent_status === "unavailable" ? text.agentUnavailable : text.empty}</p> : null}
@@ -242,7 +349,6 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
       <section className="backup-secondary-grid">
         <AdminCard title={text.scheduleTitle} description={text.scheduleDescription}>
           <dl className="backup-detail-list"><dt>{text.timerInstalled}</dt><dd>{status ? (status.timer.installed ? text.yes : text.no) : text.noData}</dd><dt>{text.timerEnabled}</dt><dd>{status ? (status.timer.enabled ? text.yes : text.no) : text.noData}</dd><dt>{text.timerActive}</dt><dd>{status ? (status.timer.active ? text.yes : text.no) : text.noData}</dd><dt>{text.nextRun}</dt><dd>{formatDate(status?.timer.next_run_at)}</dd><dt>{text.daily}</dt><dd>{status?.retention.daily ?? text.noData}</dd><dt>{text.weekly}</dt><dd>{status?.retention.weekly ?? text.noData}</dd><dt>{text.monthly}</dt><dd>{status?.retention.monthly ?? text.noData}</dd></dl>
-          <p className="note">{text.scheduleFuture}</p>
         </AdminCard>
         <AdminCard title={text.restoreTitle} description={text.restoreDescription}>
           <p className={restoreReady ? "form-success" : "note"}>{restoreReady ? text.restoreReady : text.restoreUnavailable}</p>
@@ -252,7 +358,8 @@ export function AdminBackups({ dictionary, locale }: AdminBackupsProps) {
         </AdminCard>
       </section>
 
-      {selected ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="backup-details-title" aria-modal="true" className="settings-panel backup-details-panel" role="dialog"><div className="dashboard-header"><h2 id="backup-details-title">{text.detailTitle}</h2><button className="secondary-link" onClick={() => setSelected(null)} type="button">{text.close}</button></div><dl className="backup-detail-list"><dt>{text.id}</dt><dd><code>{selected.backup_id}</code></dd><dt>{text.date}</dt><dd>{formatDate(selected.created_at)}</dd><dt>{text.type}</dt><dd>{statusLabel(selected.backup_type)}</dd><dt>{text.size}</dt><dd>{formatBytes(selected.size_bytes)}</dd><dt>{text.version}</dt><dd>{selected.officechat_version ?? text.noData}</dd><dt>{text.buildSha}</dt><dd>{selected.build_sha ?? text.noData}</dd><dt>{text.migration}</dt><dd>{selected.alembic_revision ?? text.noData}</dd><dt>{text.postgresql}</dt><dd>{selected.postgresql_version ?? text.noData}</dd><dt>{text.verification}</dt><dd>{statusLabel(selected.verification_status)}</dd><dt>{text.offsite}</dt><dd>{statusLabel(selected.offsite_status)}</dd><dt>{text.components}</dt><dd>{selected.components.length ? selected.components.join(", ") : text.noData}</dd><dt>{text.protected}</dt><dd>{selected.protected ? text.yes : text.no}</dd></dl>{selected.warnings.length ? <div className="backup-detail-warnings"><strong>{text.systemWarnings}</strong><ul>{selected.warnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}</ul></div> : null}<button className="admin-button" disabled={jobBusy} onClick={() => { setVerificationTarget(selected.backup_id); setSelected(null); setConfirmation("verify"); }} type="button">{text.verifyBackup}</button></section></div> : null}
+      {selected ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="backup-details-title" aria-modal="true" className="settings-panel backup-details-panel" role="dialog"><div className="dashboard-header"><h2 id="backup-details-title">{text.detailTitle}</h2><button className="secondary-link" onClick={() => setSelected(null)} type="button">{text.close}</button></div><dl className="backup-detail-list"><dt>{text.id}</dt><dd><code>{selected.backup_id}</code></dd><dt>{text.date}</dt><dd>{formatDate(selected.created_at)}</dd><dt>{text.type}</dt><dd>{backupTypeLabel(selected.backup_type)}</dd><dt>{text.size}</dt><dd>{formatBytes(selected.size_bytes)}</dd><dt>{text.version}</dt><dd>{selected.officechat_version ?? text.noData}</dd><dt>{text.buildSha}</dt><dd>{selected.build_sha ?? text.noData}</dd><dt>{text.migration}</dt><dd>{selected.alembic_revision ?? text.noData}</dd><dt>{text.postgresql}</dt><dd>{selected.postgresql_version ?? text.noData}</dd><dt>{text.verification}</dt><dd>{statusLabel(selected.verification_status)}</dd><dt>{text.offsite}</dt><dd>{statusLabel(selected.offsite_status)}</dd><dt>{text.components}</dt><dd>{selected.components.length ? selected.components.join(", ") : text.noData}</dd><dt>{text.protected}</dt><dd>{selected.protected ? text.yes : text.no}</dd></dl>{selected.warnings.length ? <div className="backup-detail-warnings"><strong>{text.systemWarnings}</strong><ul>{selected.warnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}</ul></div> : null}<div className="form-actions"><button className="admin-button" disabled={jobBusy} onClick={() => { setVerificationTarget(selected.backup_id); setSelected(null); setConfirmation("verify"); }} type="button">{text.verifyBackup}</button><button className="admin-button admin-button-secondary" disabled={jobBusy || submitting || selected.verification_status !== "passed"} onClick={() => void openRestore(selected.backup_id)} type="button">{text.restoreButton}</button></div></section></div> : null}
+      {restorePreparation ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="restore-confirm-title" aria-modal="true" className="settings-panel backup-confirm-panel" role="dialog"><h2 id="restore-confirm-title">{text.restoreConfirmTitle}</h2><p>{text.restoreConfirmWarning}</p><p>{text.restoreFreshBackup}</p><label>{text.restoreReason}<textarea value={restoreReason} maxLength={1000} onChange={(event) => setRestoreReason(event.target.value)} /></label><p>{text.restoreTypeHost}: <code>{restorePreparation.hostname}</code></p><input aria-label={text.restoreTypeHost} value={confirmHostname} onChange={(event) => setConfirmHostname(event.target.value)} autoComplete="off" /><p>{text.restoreTypeBackup}: <code>{restorePreparation.backup_id}</code></p><input aria-label={text.restoreTypeBackup} value={confirmBackup} onChange={(event) => setConfirmBackup(event.target.value)} autoComplete="off" /><div className="form-actions"><button className="admin-button admin-button-secondary" disabled={submitting} onClick={() => setRestorePreparation(null)} type="button">{text.cancel}</button><button className="admin-button" disabled={submitting || confirmHostname !== restorePreparation.hostname || confirmBackup !== restorePreparation.backup_id || restoreReason.trim().length < 20} onClick={() => void confirmRestore()} type="button">{text.restoreConfirmButton}</button></div></section></div> : null}
       {confirmation ? <div className="settings-backdrop" role="presentation"><section aria-labelledby="backup-confirm-title" aria-modal="true" className="settings-panel backup-confirm-panel" role="dialog"><h2 id="backup-confirm-title">{confirmation === "create" ? text.createConfirmTitle : text.verifyConfirmTitle}</h2><p>{confirmation === "create" ? text.createConfirmDescription : text.verifyConfirmDescription}</p>{confirmation === "create" ? <ul><li>{text.createConfirmDuration}</li><li>{text.createConfirmParallel}</li><li>{text.createConfirmAvailable}</li><li>{text.createConfirmOffsite}</li></ul> : <p className="note">{text.verifyProductionSafe}</p>}<div className="form-actions"><button className="admin-button admin-button-secondary" disabled={submitting} onClick={() => { setConfirmation(null); setVerificationTarget(null); }} type="button">{text.cancel}</button><button className="admin-button" disabled={submitting} onClick={() => void startConfirmedJob()} type="button">{submitting ? text.starting : (confirmation === "create" ? text.confirmCreate : text.confirmVerify)}</button></div></section></div> : null}
     </AdminPageShell>
   );

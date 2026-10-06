@@ -67,6 +67,7 @@ The superadmin-only Backup Center at `/ru/admin/backups` or `/en/admin/backups` 
 - [Резервное копирование и восстановление](docs/BACKUP_RESTORE_RU.md)
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Production installation](docs/deployment/production-installation.md)
+- [Restore to a new server (RU)](docs/deployment/restore-to-new-server_RU.md)
 - [Production update](docs/deployment/production-update_RU.md)
 
 ## Production / Internal HTTPS

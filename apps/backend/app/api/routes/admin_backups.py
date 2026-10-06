@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.api.deps import require_superadmin_user
+from app.api.deps import require_backup_operator, require_superadmin_user
 from app.models.user import User
 from app.schemas.backup import (
     BackupCapacityPublic,
@@ -18,6 +18,13 @@ from app.schemas.backup import (
     BackupRetentionPublic,
     BackupStatusPublic,
     BackupTimerPublic,
+    BackupSettingsPublic,
+    BackupSettingsUpdate,
+    BackupSettingsJobPublic,
+    LatestRestorePublic,
+    RestoreConfirm,
+    RestorePreparationPublic,
+    RestoreRequestPublic,
 )
 from app.services.backup_agent import (
     BackupAgentClient,
@@ -74,6 +81,10 @@ def job_error(exc: Exception) -> JSONResponse:
     if isinstance(exc, BackupAgentUnavailableError):
         return api_error(503, "BACKUP_AGENT_UNAVAILABLE", "Backup agent is unavailable")
     if isinstance(exc, BackupAgentRemoteError):
+        if exc.code == "VERIFY_FAILED":
+            return api_error(409, exc.code, "Backup must be verified before restore")
+        if exc.code == "VERSION_MISMATCH":
+            return api_error(409, exc.code, "Restore requires the same OfficeChat version")
         if exc.code == "JOB_CONFLICT":
             return api_error(409, exc.code, "Another backup operation is already running")
         if exc.code == "AUDIT_BACKLOG_FULL":
@@ -113,7 +124,7 @@ def unavailable_status() -> BackupStatusPublic:
 
 @router.get("/status", response_model=BackupStatusPublic)
 async def get_backup_status(
-    _: Annotated[User, Depends(require_superadmin_user)],
+    _: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
 ) -> BackupStatusPublic:
     await reconcile_backup_job_audits(client)
@@ -121,6 +132,66 @@ async def get_backup_status(
         return BackupStatusPublic.model_validate(await client.request("status"))
     except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError):
         return unavailable_status()
+
+
+@router.get("/settings", response_model=BackupSettingsPublic)
+async def get_backup_settings(
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> BackupSettingsPublic | JSONResponse:
+    try:
+        return BackupSettingsPublic.model_validate(await client.request("get_backup_settings"))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.post("/settings", response_model=BackupSettingsJobPublic, status_code=status.HTTP_202_ACCEPTED)
+async def update_backup_settings(
+    payload: BackupSettingsUpdate,
+    request: Request,
+    actor: Annotated[User, Depends(require_superadmin_user)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> BackupSettingsJobPublic | JSONResponse:
+    await record_audit_event_best_effort(
+        event_type="backup.settings.requested", category="backup", action="update_settings",
+        status="requested", actor=actor, target_type="backup_settings",
+        details={"destination_kind": payload.destination.kind, "schedule_enabled": payload.schedule.enabled,
+                 "replace_existing": getattr(payload.destination, "replace_existing", False)},
+        request=request,
+    )
+    try:
+        data = await client.request("apply_backup_settings", {
+            **payload.model_dump(), "requested_by_user_id": str(actor.id), "requested_by_login": actor.username,
+        })
+        return BackupSettingsJobPublic.model_validate(data)
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.get("/settings/jobs/latest", response_model=dict)
+async def latest_backup_settings_job(
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> dict | JSONResponse:
+    try:
+        data = await client.request("latest_backup_settings")
+        return {"request": BackupSettingsJobPublic.model_validate(data["request"]).model_dump(mode="json") if data["request"] else None}
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.get("/settings/jobs/{request_id}", response_model=BackupSettingsJobPublic)
+async def backup_settings_job_status(
+    request_id: str,
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> BackupSettingsJobPublic | JSONResponse:
+    if len(request_id) > 64 or not JOB_ID_PATTERN.fullmatch(request_id):
+        return api_error(400, "INVALID_JOB_ID", "Backup settings request identifier is invalid")
+    try:
+        return BackupSettingsJobPublic.model_validate(await client.request("backup_settings_status", {"request_id": request_id}))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
 
 
 def parse_pagination(page: str, limit: str) -> tuple[int, int] | JSONResponse:
@@ -136,7 +207,7 @@ def parse_pagination(page: str, limit: str) -> tuple[int, int] | JSONResponse:
 
 @router.get("", response_model=BackupPagePublic)
 async def get_backups(
-    _: Annotated[User, Depends(require_superadmin_user)],
+    _: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
     page: Annotated[str, Query()] = "1",
     limit: Annotated[str, Query()] = "25",
@@ -162,7 +233,7 @@ async def get_backups(
 async def create_backup_job(
     payload: BackupJobCreate,
     request: Request,
-    actor: Annotated[User, Depends(require_superadmin_user)],
+    actor: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
 ) -> BackupJobPublic | JSONResponse:
     await audit_job_event(
@@ -197,7 +268,7 @@ async def create_backup_job(
 
 @router.get("/jobs/active", response_model=ActiveBackupJobPublic)
 async def get_active_backup_job(
-    _: Annotated[User, Depends(require_superadmin_user)],
+    _: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
 ) -> ActiveBackupJobPublic | JSONResponse:
     await reconcile_backup_job_audits(client)
@@ -211,7 +282,7 @@ async def get_active_backup_job(
 async def get_backup_job(
     job_id: str,
     request: Request,
-    actor: Annotated[User, Depends(require_superadmin_user)],
+    actor: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
 ) -> BackupJobPublic | JSONResponse:
     await reconcile_backup_job_audits(client)
@@ -228,7 +299,7 @@ async def get_backup_job(
 async def verify_backup(
     backup_id: str,
     request: Request,
-    actor: Annotated[User, Depends(require_superadmin_user)],
+    actor: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
 ) -> BackupJobPublic | JSONResponse:
     if len(backup_id) > 64 or not BACKUP_ID_PATTERN.fullmatch(backup_id):
@@ -272,10 +343,73 @@ async def verify_backup(
     return job
 
 
+@router.post("/{backup_id}/restore/prepare", response_model=RestorePreparationPublic)
+async def prepare_restore(
+    backup_id: str,
+    actor: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> RestorePreparationPublic | JSONResponse:
+    if not BACKUP_ID_PATTERN.fullmatch(backup_id):
+        return api_error(400, "INVALID_BACKUP_ID", "Backup identifier is invalid")
+    try:
+        return RestorePreparationPublic.model_validate(await client.request("prepare_restore", {
+            "backup_id": backup_id, "requested_by_user_id": str(actor.id),
+        }))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.post("/restores", response_model=RestoreRequestPublic, status_code=status.HTTP_202_ACCEPTED)
+async def start_restore(
+    payload: RestoreConfirm,
+    request: Request,
+    actor: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> RestoreRequestPublic | JSONResponse:
+    await record_audit_event_best_effort(
+        event_type="backup.restore.requested", category="backup", action="restore", status="requested",
+        actor=actor, target_type="backup", target_label=payload.backup_id,
+        details={"backup_id": payload.backup_id, "hostname": payload.confirm_hostname, "reason": payload.reason},
+        request=request,
+    )
+    try:
+        result = RestoreRequestPublic.model_validate(await client.request("start_restore", {
+            **payload.model_dump(), "requested_by_user_id": str(actor.id), "requested_by_login": actor.username,
+        }))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+    return result
+
+
+@router.get("/restores/latest", response_model=LatestRestorePublic)
+async def latest_restore(
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> LatestRestorePublic | JSONResponse:
+    try:
+        return LatestRestorePublic.model_validate(await client.request("latest_restore"))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.get("/restores/{request_id}", response_model=RestoreRequestPublic)
+async def restore_status(
+    request_id: str,
+    _: Annotated[User, Depends(require_backup_operator)],
+    client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
+) -> RestoreRequestPublic | JSONResponse:
+    if not JOB_ID_PATTERN.fullmatch(request_id):
+        return api_error(400, "INVALID_JOB_ID", "Restore request identifier is invalid")
+    try:
+        return RestoreRequestPublic.model_validate(await client.request("restore_status", {"request_id": request_id}))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
 @router.get("/{backup_id}", response_model=BackupItemPublic)
 async def get_backup(
     backup_id: str,
-    _: Annotated[User, Depends(require_superadmin_user)],
+    _: Annotated[User, Depends(require_backup_operator)],
     client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)],
 ) -> BackupItemPublic | JSONResponse:
     await reconcile_backup_job_audits(client)

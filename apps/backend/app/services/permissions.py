@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import ALL_PERMISSION_KEYS, PERMISSION_CATALOG
+from app.core.permissions import ALL_PERMISSION_KEYS, CAN_RESTORE_BACKUP, PERMISSION_CATALOG
 from app.models.permission import Permission, UserPermission
 from app.models.user import User
 from app.schemas.permission import UserPermissionState
@@ -129,6 +129,8 @@ async def replace_user_permissions(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Superadmin permissions are implicit")
 
     desired = set(await validate_permission_keys(session, permission_keys))
+    if CAN_RESTORE_BACKUP in desired and target_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Restore permission requires an admin role")
     existing = set(await get_explicit_permission_keys(session, target_user.id))
     to_grant = sorted(desired - existing)
     to_revoke = sorted(existing - desired)

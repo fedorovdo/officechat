@@ -88,14 +88,21 @@ run cp "${ROOT_DIR}/scripts/backup-production.sh" "${RELEASE_DIR}/backup-product
 run cp "${ROOT_DIR}/scripts/verify-backup.sh" "${RELEASE_DIR}/verify-backup.sh"
 run cp "${ROOT_DIR}/scripts/restore-production.sh" "${RELEASE_DIR}/restore-production.sh"
 run cp "${ROOT_DIR}/scripts/backup_agent.py" "${RELEASE_DIR}/backup-agent.py"
+run cp "${ROOT_DIR}/scripts/backup_settings.py" "${RELEASE_DIR}/backup-settings.py"
+run cp "${ROOT_DIR}/scripts/restore_request.py" "${RELEASE_DIR}/restore-request.py"
 run cp "${ROOT_DIR}/scripts/backup/lib.sh" "${RELEASE_DIR}/backup/lib.sh"
 run cp "${ROOT_DIR}/deploy/backup/officechat-backup.conf.example" "${RELEASE_DIR}/backup/officechat-backup.conf.example"
 run cp "${ROOT_DIR}/deploy/backup/officechat-backup-agent.conf.example" "${RELEASE_DIR}/backup/officechat-backup-agent.conf.example"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.service" "${RELEASE_DIR}/systemd/officechat-backup.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup.timer" "${RELEASE_DIR}/systemd/officechat-backup.timer"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.service" "${RELEASE_DIR}/systemd/officechat-offsite-network.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "${RELEASE_DIR}/systemd/officechat-offsite-network.conf"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" "${RELEASE_DIR}/systemd/officechat-backup-agent.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings-recovery.service" "${RELEASE_DIR}/systemd/officechat-backup-settings-recovery.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings@.service" "${RELEASE_DIR}/systemd/officechat-backup-settings@.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-job.service" "${RELEASE_DIR}/systemd/officechat-backup-job.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-verify@.service" "${RELEASE_DIR}/systemd/officechat-backup-verify@.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-restore@.service" "${RELEASE_DIR}/systemd/officechat-restore@.service"
 run cp "${ROOT_DIR}/docs/BACKUP_RESTORE_RU.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE_RU.md"
 run cp "${ROOT_DIR}/docs/BACKUP_RESTORE.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE.md"
 run cp "${ROOT_DIR}/docs/BACKUP_CENTER_RU.md" "${RELEASE_DIR}/deployment/BACKUP_CENTER_RU.md"
@@ -116,21 +123,26 @@ else
   printf '{\n  "version": "%s",\n  "revision": "%s",\n  "build_date": "%s",\n  "backend_image": "ghcr.io/fedorovdo/officechat-backend:%s",\n  "frontend_image": "ghcr.io/fedorovdo/officechat-frontend:%s"\n}\n' \
     "$VERSION" "$REVISION" "$BUILD_DATE" "$VERSION" "$VERSION" >"${RELEASE_DIR}/RELEASE.json"
 fi
-run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/upgrade-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh" "${RELEASE_DIR}/backup-production.sh" "${RELEASE_DIR}/verify-backup.sh" "${RELEASE_DIR}/restore-production.sh" "${RELEASE_DIR}/backup-agent.py"
+run chmod +x "${RELEASE_DIR}/install-linux.sh" "${RELEASE_DIR}/update-linux.sh" "${RELEASE_DIR}/upgrade-linux.sh" "${RELEASE_DIR}/rollback-linux.sh" "${RELEASE_DIR}/uninstall-linux.sh" "${RELEASE_DIR}/verify-install.sh" "${RELEASE_DIR}/officechatctl" "${RELEASE_DIR}/collect-diagnostics.sh" "${RELEASE_DIR}/backup-production.sh" "${RELEASE_DIR}/verify-backup.sh" "${RELEASE_DIR}/restore-production.sh" "${RELEASE_DIR}/backup-agent.py" "${RELEASE_DIR}/backup-settings.py" "${RELEASE_DIR}/restore-request.py"
 run chmod 0644 \
   "${RELEASE_DIR}/backup/lib.sh" \
   "${RELEASE_DIR}/backup/officechat-backup.conf.example" \
   "${RELEASE_DIR}/backup/officechat-backup-agent.conf.example" \
   "${RELEASE_DIR}/systemd/officechat-backup.service" \
   "${RELEASE_DIR}/systemd/officechat-backup.timer" \
+  "${RELEASE_DIR}/systemd/officechat-offsite-network.service" \
+  "${RELEASE_DIR}/systemd/officechat-offsite-network.conf" \
   "${RELEASE_DIR}/systemd/officechat-backup-agent.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup-settings-recovery.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup-settings@.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-job.service" \
-  "${RELEASE_DIR}/systemd/officechat-backup-verify@.service"
+  "${RELEASE_DIR}/systemd/officechat-backup-verify@.service" \
+  "${RELEASE_DIR}/systemd/officechat-restore@.service"
 
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh upgrade-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh upgrade-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py backup-settings.py restore-request.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
     archive_stage="$(mktemp -d)"
@@ -150,7 +162,9 @@ if [[ "$DRY_RUN" != "1" ]]; then
       "${archive_stage}/release/backup-production.sh" \
       "${archive_stage}/release/verify-backup.sh" \
       "${archive_stage}/release/restore-production.sh" \
-      "${archive_stage}/release/backup-agent.py"
+      "${archive_stage}/release/backup-agent.py" \
+      "${archive_stage}/release/backup-settings.py" \
+      "${archive_stage}/release/restore-request.py"
     tar -C "$archive_stage" -czf "${DIST_DIR}/${ARCHIVE_NAME}" release
     (
       cd "$DIST_DIR"

@@ -681,7 +681,9 @@ if [[ -n "$OFFSITE_ROOT" ]]; then
       )
     fi
     if command -v rsync >/dev/null 2>&1; then
-      rsync_args=(-aHAX --numeric-ids)
+      # Payload tar archives already retain application ACLs/xattrs/SELinux labels.
+      # Do not apply the local repository's host metadata to a NAS filesystem.
+      rsync_args=(-aH --numeric-ids)
       for excluded in "${offsite_excludes[@]}"; do
         rsync_args+=(--exclude="/${excluded}")
       done

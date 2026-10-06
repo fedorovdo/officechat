@@ -623,6 +623,30 @@ BACKUP_PRIVATE_CONFIG=yes
 EOF
 export OFFICECHAT_FAKE_MOUNTPOINT=1
 export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$filtered_offsite_root"
+# Model a NAS that accepts archive bytes but rejects host ACL/xattr requests.
+# Exercise both ordinary backup and --copy-existing with the same destination.
+cat >"${FAKE_BIN}/rsync" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+tar_args=(-C "${@: -2:1}")
+for argument in "$@"; do
+  case "$argument" in
+    --acls|--xattrs|--xattrs=*)
+      echo 'NAS does not support host ACLs or extended attributes' >&2
+      exit 23
+      ;;
+    -[^-]*)
+      if [[ "$argument" == *A* || "$argument" == *X* ]]; then
+        echo 'NAS does not support host ACLs or extended attributes' >&2
+        exit 23
+      fi
+      ;;
+    --exclude=*) tar_args+=("--exclude=./${argument#--exclude=/}") ;;
+  esac
+done
+tar "${tar_args[@]}" -cf - . | tar -C "${@: -1}" -xf -
+EOF
+chmod +x "${FAKE_BIN}/rsync"
 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" >/dev/null
 filtered_local_backup="$(find "$filtered_local_root" -mindepth 1 -maxdepth 1 \
   -type d -name 'officechat-backup-*' -print -quit)"
@@ -636,6 +660,16 @@ filtered_offsite_backup="$(find "$filtered_offsite_root" -mindepth 1 -maxdepth 1
   echo "plaintext private archive leaked to off-site storage" >&2
   exit 1
 }
+cmp "$filtered_local_backup/database/officechat.dump" "$filtered_offsite_backup/database/officechat.dump"
+cmp "$filtered_local_backup/uploads/uploads.tar.gz" "$filtered_offsite_backup/uploads/uploads.tar.gz"
+"${SCRIPT_DIR}/verify-backup.sh" --config "$CONFIG_FILE" "$filtered_offsite_backup" >/dev/null
+python3 - "$STATUS_FILE" <<'PYPORTABLE'
+import json, sys
+status = json.load(open(sys.argv[1]))
+assert status["success"] is True, status
+assert status["offsite_status"] == "copied", status
+assert status["verification_status"] == "passed", status
+PYPORTABLE
 
 # A storage change makes one protected local snapshot, then copies that same
 # snapshot under the executor's inherited flock without dumping the DB again.

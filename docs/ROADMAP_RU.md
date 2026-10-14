@@ -140,3 +140,13 @@ Calendar Events v0.1 добавляет корпоративный календ�
 - Добавлены install/update/rollback/uninstall/verify scripts и `officechatctl`.
 - Добавлены reverse proxy examples для nginx и Caddy.
 - Будущие этапы: подписанные артефакты, обязательный SBOM, offline registry mirror, multi-arch images, systemd unit wrapper.
+
+
+## Объявления: редактор и база шаблонов (подготовлено к CI)
+
+Реализованы ограниченное визуальное форматирование и общие шаблоны для
+`can_broadcast` с изменением/удалением только автором, включая API-проверку.
+Новая миграция `20261014_0027`; описание и приёмка — [BROADCASTS_RU.md](BROADCASTS_RU.md).
+Квалификация резервного копирования RC13.37 вынесена в
+[отдельный отчёт](releases/0.1.0-rc13.37-qualification_RU.md).
+Проверка нового редактора/шаблонов на тестовых ВМ и выпуск ещё не выполнены.

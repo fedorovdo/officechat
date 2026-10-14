@@ -2,11 +2,12 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_can_broadcast
-from app.models.broadcast import BroadcastAnnouncement
+from app.models.broadcast import BroadcastAnnouncement, BroadcastTemplate
 from app.models.user import User
 from app.schemas.broadcast import (
     AnnouncementPage,
@@ -20,6 +21,9 @@ from app.schemas.broadcast import (
     BroadcastSendRequest,
     BroadcastStatsPublic,
     BroadcastUpdate,
+    BroadcastTemplateCreate,
+    BroadcastTemplatePublic,
+    BroadcastTemplatePage,
 )
 from app.services.audit import record_audit_event
 from app.services.broadcasts import (
@@ -28,6 +32,7 @@ from app.services.broadcasts import (
     broadcast_retracted_events,
     build_preview,
     create_broadcast,
+    ensure_sender,
     dismiss_announcement,
     get_sender_broadcast,
     http_error_from_broadcast_error,
@@ -313,3 +318,96 @@ async def post_announcement_dismiss(
     except Exception as exc:
         await session.rollback()
         raise http_error_from_broadcast_error(exc) from exc
+
+
+async def require_template_sender(
+    current_user: Annotated[User, Depends(require_can_broadcast)],
+) -> User:
+    try:
+        ensure_sender(current_user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Permission required") from exc
+    return current_user
+
+
+@router.get("/broadcast-templates", response_model=BroadcastTemplatePage)
+async def get_broadcast_templates(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_template_sender)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> BroadcastTemplatePage:
+    total = int(await session.scalar(select(func.count()).select_from(BroadcastTemplate)) or 0)
+    result = await session.scalars(select(BroadcastTemplate)
+        .order_by(BroadcastTemplate.name, BroadcastTemplate.id)
+        .offset((page - 1) * limit).limit(limit))
+    return BroadcastTemplatePage(items=[BroadcastTemplatePublic.model_validate(item)
+        for item in result.all()], total=total, page=page, limit=limit)
+
+
+async def owned_template(session: AsyncSession, template_id: UUID, actor: User) -> BroadcastTemplate:
+    template = await session.get(BroadcastTemplate, template_id, with_for_update=True)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    # Author-only, including for superadmin; possession of can_broadcast is insufficient.
+    if template.created_by_user_id != actor.id:
+        raise HTTPException(status_code=403, detail="Only the template author can change it")
+    return template
+
+
+async def audit_template(session, request, actor, template, action):
+    await record_audit_event(session, event_type=f"broadcast.template_{action}",
+        category="broadcasts", action=action, status="success", actor=actor,
+        target_type="broadcast_template", target_id=template.id,
+        target_label=str(template.id), request=request)
+
+
+@router.post("/broadcast-templates", response_model=BroadcastTemplatePublic, status_code=201)
+async def post_broadcast_template(
+    payload: BroadcastTemplateCreate,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_template_sender)],
+) -> BroadcastTemplatePublic:
+    template = BroadcastTemplate(created_by_user_id=current_user.id,
+        created_by_display_name=current_user.display_name, **payload.model_dump())
+    session.add(template)
+    await session.flush()
+    await session.refresh(template)
+    await audit_template(session, request, current_user, template, "created")
+    response = BroadcastTemplatePublic.model_validate(template)
+    await session.commit()
+    return response
+
+
+@router.put("/broadcast-templates/{template_id}", response_model=BroadcastTemplatePublic)
+async def put_broadcast_template(
+    template_id: UUID,
+    payload: BroadcastTemplateCreate,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_template_sender)],
+) -> BroadcastTemplatePublic:
+    template = await owned_template(session, template_id, current_user)
+    for key, value in payload.model_dump().items():
+        setattr(template, key, value)
+    await session.flush()
+    await session.refresh(template)
+    await audit_template(session, request, current_user, template, "updated")
+    response = BroadcastTemplatePublic.model_validate(template)
+    await session.commit()
+    return response
+
+
+@router.delete("/broadcast-templates/{template_id}", status_code=204)
+async def delete_broadcast_template(
+    template_id: UUID,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_template_sender)],
+) -> Response:
+    template = await owned_template(session, template_id, current_user)
+    await audit_template(session, request, current_user, template, "deleted")
+    await session.delete(template)
+    await session.commit()
+    return Response(status_code=204)

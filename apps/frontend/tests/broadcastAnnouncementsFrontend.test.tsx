@@ -9,6 +9,7 @@ import { userFactory } from "./factories";
 
 const apiMocks = vi.hoisted(() => ({
   createBroadcast: vi.fn(),
+  getBroadcastTemplates: vi.fn(),
   dismissAnnouncement: vi.fn(),
   getAnnouncement: vi.fn(),
   getAnnouncementUnread: vi.fn(),
@@ -25,6 +26,11 @@ vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
   return { ...actual, ...apiMocks };
 });
+
+vi.mock("../components/AnnouncementEditor", () => ({
+  AnnouncementEditor: ({ body, label, onChange }: { body: string; label: string; onChange: (body: string, document: null) => void }) =>
+    <textarea aria-label={label} value={body} onChange={event => onChange(event.target.value, null)} />
+}));
 
 const en = getDictionary("en");
 const user = userFactory({ id: "user-1", permissions: [] });
@@ -58,6 +64,7 @@ const preview: BroadcastPreview = {
 describe("broadcast announcements panel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMocks.getBroadcastTemplates.mockResolvedValue({ items: [], total: 0, page: 1, limit: 20 });
     apiMocks.getAnnouncements.mockResolvedValue({ items: [], total: 0, page: 1, limit: 20 });
     apiMocks.getAnnouncementUnread.mockResolvedValue({ unread_count: 0 });
     apiMocks.getSentBroadcasts.mockResolvedValue({ items: [], total: 0, page: 1, limit: 20 });
@@ -173,4 +180,29 @@ describe("broadcast announcements panel", () => {
     expect(apiMocks.sendBroadcast.mock.calls[1][2].idempotency_key).toBe(firstKey);
     expect(apiMocks.createBroadcast).toHaveBeenCalledTimes(1);
   });
+  it("using a template resets recipient confirmation and sends a formatted snapshot", async () => {
+    const bodyDoc = { type: "doc", content: [{ type: "paragraph", attrs: { textAlign: "center" },
+      content: [{ type: "text", text: "Water today", marks: [{ type: "bold" }] }] }] };
+    apiMocks.getBroadcastTemplates.mockResolvedValue({ items: [{ id: "template-1", name: "Water", title: "Delivery",
+      body: "Water today", body_doc: bodyDoc, priority: "important", created_by_user_id: "another-user",
+      created_by_display_name: "Another sender" }], total: 1, page: 1, limit: 20 });
+    render(<AnnouncementsPanel currentUser={sender} dictionary={en} groups={groups} locale="en"
+      onUnreadChange={vi.fn()} reloadKey={0} users={[user, sender]} />);
+    fireEvent.change(await screen.findByLabelText(en.announcements.fields.title), { target: { value: "Before" } });
+    fireEvent.change(screen.getByLabelText(en.announcements.fields.body), { target: { value: "Before" } });
+    fireEvent.click(screen.getByLabelText("IT"));
+    fireEvent.click(screen.getByRole("button", { name: en.announcements.preview }));
+    await screen.findByText(en.announcements.recipients.replace("{count}", "2"));
+    fireEvent.click(screen.getByRole("button", { name: en.announcements.templates.use }));
+    expect(screen.getByRole("button", { name: en.announcements.send })).toBeDisabled();
+    expect(apiMocks.sendBroadcast).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: en.announcements.preview }));
+    await screen.findByText(en.announcements.recipients.replace("{count}", "2"));
+    fireEvent.click(screen.getByRole("button", { name: en.announcements.send }));
+    await waitFor(() => expect(apiMocks.createBroadcast).toHaveBeenCalledWith("test-token", {
+      title: "Delivery", body: "Water today", body_doc: bodyDoc, priority: "important",
+      audience_type: "selected_groups", group_ids: ["group-1"], user_ids: []
+    }));
+  });
+
 });

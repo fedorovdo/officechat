@@ -26,7 +26,7 @@ def validate_document(document: dict) -> dict:
             "orderedList": {"type", "attrs", "content"},
             "listItem": {"type", "content"},
         }
-        if kind not in fields or not set(node) <= fields[kind]:
+        if not isinstance(kind, str) or kind not in fields or not set(node) <= fields[kind]:
             raise ValueError("Unsupported announcement formatting")
         attrs = node.get("attrs", {})
         if not isinstance(attrs, dict):
@@ -77,7 +77,8 @@ def validate_document(document: dict) -> dict:
             "bulletList": {"listItem"}, "orderedList": {"listItem"},
             "listItem": {"paragraph", "bulletList", "orderedList"},
         }[kind]
-        if any(not isinstance(child, dict) or child.get("type") not in allowed for child in children):
+        if any(not isinstance(child, dict) or not isinstance(child.get("type"), str)
+               or child["type"] not in allowed for child in children):
             raise ValueError("Invalid document nesting")
         if kind != "paragraph" and not children:
             raise ValueError("Empty document container")

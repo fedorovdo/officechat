@@ -153,6 +153,24 @@ class TemplateHTTPTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/broadcast-templates", json=forged).status_code, 422)
         self.assertEqual(self.client.put(f"/api/broadcast-templates/{uuid4()}", json=self.payload()).status_code, 404)
 
+    def test_invalid_node_types_return_validation_error_without_writing(self):
+        for kind in ([], {}, None, 42):
+            for nested in (False, True):
+                with self.subTest(kind=kind, nested=nested):
+                    invalid_node = {"type": kind}
+                    content = [{"type": "paragraph", "content": [invalid_node]}] if nested else [invalid_node]
+                    payload = {**self.payload(), "body_doc": {"type": "doc", "content": content}}
+                    for method, path in (("post", "/api/broadcast-templates"),
+                                         ("put", f"/api/broadcast-templates/{self.template.id}"),
+                                         ("post", "/api/broadcasts")):
+                        request_payload = payload if "templates" in path else {
+                            "title": payload["title"], "body": payload["body"],
+                            "body_doc": payload["body_doc"], "audience_type": "all_active_users"}
+                        response = getattr(self.client, method)(path, json=request_payload)
+                        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.session.commits, 0)
+        self.audit_mock.assert_not_awaited()
+
 
 class BroadcastFormattingTests(unittest.IsolatedAsyncioTestCase):
     async def test_plain_body_update_clears_stale_formatting_but_title_update_keeps_it(self):

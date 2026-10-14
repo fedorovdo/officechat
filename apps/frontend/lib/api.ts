@@ -1,3 +1,4 @@
+import type { AnnouncementNode } from "./announcement-document";
 import {
   clearStoredAccessToken,
   expireAuthentication,
@@ -998,6 +999,7 @@ export type BroadcastAudiencePayload = {
 export type BroadcastCreatePayload = BroadcastAudiencePayload & {
   title: string;
   body: string;
+  body_doc?: AnnouncementNode | null;
   priority: BroadcastPriority;
   expires_at?: string | null;
 };
@@ -1022,6 +1024,7 @@ export type BroadcastAnnouncement = {
   created_by_display_name: string;
   title: string;
   body: string;
+  body_doc?: AnnouncementNode | null;
   priority: BroadcastPriority;
   status: BroadcastStatus;
   audience_type: BroadcastAudienceType;
@@ -1058,6 +1061,7 @@ export type OfficeChatAnnouncement = {
   id: string;
   title: string;
   body: string | null;
+  body_doc?: AnnouncementNode | null;
   priority: BroadcastPriority;
   status: BroadcastStatus;
   sender: string;
@@ -2664,4 +2668,29 @@ export function downloadDirectAttachment(token: string, downloadUrl: string) {
 
 export function downloadDiscussionAttachment(token: string, downloadUrl: string) {
   return downloadAttachment(token, downloadUrl);
+}
+
+
+export type BroadcastTemplatePayload = {
+  name: string; title: string; body: string; body_doc: AnnouncementNode | null;
+  priority: BroadcastPriority;
+};
+export type BroadcastTemplate = BroadcastTemplatePayload & {
+  id: string; created_by_user_id: string | null; created_by_display_name: string;
+  created_at: string; updated_at: string;
+};
+export type BroadcastTemplatePage = {
+  items: BroadcastTemplate[]; total: number; page: number; limit: number;
+};
+export function getBroadcastTemplates(token: string, page = 1) {
+  return apiFetch<BroadcastTemplatePage>(`/api/broadcast-templates?page=${page}&limit=20`, token);
+}
+export function createBroadcastTemplate(token: string, payload: BroadcastTemplatePayload) {
+  return apiFetch<BroadcastTemplate>("/api/broadcast-templates", token, { method: "POST", body: JSON.stringify(payload) });
+}
+export function updateBroadcastTemplate(token: string, id: string, payload: BroadcastTemplatePayload) {
+  return apiFetch<BroadcastTemplate>(`/api/broadcast-templates/${id}`, token, { method: "PUT", body: JSON.stringify(payload) });
+}
+export function deleteBroadcastTemplate(token: string, id: string) {
+  return apiFetch<void>(`/api/broadcast-templates/${id}`, token, { method: "DELETE" });
 }

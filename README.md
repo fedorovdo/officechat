@@ -68,6 +68,7 @@ The superadmin-only Backup Center at `/ru/admin/backups` or `/en/admin/backups` 
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Production installation](docs/deployment/production-installation.md)
 - [RC13.37 backup qualification: SMB/NFS, reconnect and reboot (RU)](docs/releases/0.1.0-rc13.37-qualification_RU.md)
+- [RC13.38 qualification: announcement editor, templates, Debian/RED OS updates and reboot (RU)](docs/releases/0.1.0-rc13.38-qualification_RU.md)
 - [Restore to a new server (RU)](docs/deployment/restore-to-new-server_RU.md)
 - [Production update](docs/deployment/production-update_RU.md)
 

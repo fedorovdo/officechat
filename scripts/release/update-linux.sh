@@ -76,6 +76,8 @@ elif [[ -f "${SCRIPT_DIR}/backup-agent.py" ]]; then
 fi
 [[ -n "$agent_source" ]] || fail "Backup agent executable not found"
 settings_source=""
+maintenance_source="${SCRIPT_DIR}/backup_maintenance.py"
+[[ ! -f "${SCRIPT_DIR}/../backup_maintenance.py" ]] || maintenance_source="${SCRIPT_DIR}/../backup_maintenance.py"
 if [[ -f "${SCRIPT_DIR}/../backup_settings.py" ]]; then
   settings_source="${SCRIPT_DIR}/../backup_settings.py"
 elif [[ -f "${SCRIPT_DIR}/backup-settings.py" ]]; then
@@ -213,6 +215,8 @@ snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-request.py" restore-request.py
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" backup-production.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
+snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup_maintenance.py" backup-maintenance.py
+snapshot_file /etc/systemd/system/officechat-backup-maintenance@.service backup-maintenance.service
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
 snapshot_file "${OFFICECHAT_INSTALL_DIR}/upgrade-linux.sh" upgrade-linux.sh
@@ -241,6 +245,8 @@ rollback_update() {
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup-production.sh" backup-production.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/verify-backup.sh" verify-backup.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/restore-production.sh" restore-production.sh
+  restore_file "${OFFICECHAT_INSTALL_DIR}/backup_maintenance.py" backup-maintenance.py
+  restore_file /etc/systemd/system/officechat-backup-maintenance@.service backup-maintenance.service
   restore_file "${OFFICECHAT_INSTALL_DIR}/backup/lib.sh" backup-lib.sh
   restore_file "${OFFICECHAT_INSTALL_DIR}/RELEASE.json" RELEASE.json
   restore_file "${OFFICECHAT_INSTALL_DIR}/upgrade-linux.sh" upgrade-linux.sh
@@ -297,6 +303,7 @@ fi
 ensure_backup_agent_group
 ensure_env_value "$OFFICECHAT_ENV_FILE" OFFICECHAT_BACKUP_GID "$OFFICECHAT_BACKUP_GID"
 ensure_env_value "$OFFICECHAT_ENV_FILE" BACKUP_AGENT_RUNTIME_DIR /run/officechat-backup-agent
+install -o root -g root -m 0755 "$maintenance_source" "${OFFICECHAT_INSTALL_DIR}/backup_maintenance.py"
 install -o root -g root -m 0755 "$agent_source" "${OFFICECHAT_INSTALL_DIR}/backup-agent.py"
 install -o root -g root -m 0755 "$settings_source" "${OFFICECHAT_INSTALL_DIR}/backup-settings.py"
 install -o root -g root -m 0755 "$restore_request_source" "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
@@ -332,6 +339,7 @@ install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.co
   "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE"
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings-recovery.service" \
   "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE"
+install -o root -g root -m 0644 "${systemd_source}/officechat-backup-maintenance@.service" /etc/systemd/system/officechat-backup-maintenance@.service
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" \
   /etc/systemd/system/officechat-backup-settings@.service
 install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" \
@@ -380,7 +388,7 @@ if ! wait_for_ready; then
   fail "Readiness failed"
 fi
 
-for backup_doc in BACKUP_CENTER_RU.md BACKUP_CENTER.md BACKUP_RESTORE_RU.md BACKUP_RESTORE.md; do
+for backup_doc in BACKUP_RETENTION_RU.md BACKUP_CENTER_RU.md BACKUP_CENTER.md BACKUP_RESTORE_RU.md BACKUP_RESTORE.md; do
   if [[ -f "${SCRIPT_DIR}/deployment/${backup_doc}" ]]; then
     install -d -m 0755 "${OFFICECHAT_INSTALL_DIR}/docs"
     install -m 0644 "${SCRIPT_DIR}/deployment/${backup_doc}" "${OFFICECHAT_INSTALL_DIR}/docs/${backup_doc}"

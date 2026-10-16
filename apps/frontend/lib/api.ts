@@ -28,6 +28,7 @@ export type BackupVerificationStatus = "not_requested" | "pending" | "passed" | 
 export type BackupOffsiteStatus = "not_configured" | "copied" | "skipped_not_mounted" | "failed" | "unknown";
 
 export type OfficeChatBackup = {
+  locations?: ("local" | "offsite")[];
   backup_id: string;
   created_at: string | null;
   backup_type: BackupType;
@@ -84,7 +85,9 @@ export type OfficeChatBackupStatus = {
     last_trigger_at: string | null;
     unit_name: "officechat-backup.timer";
   };
-  retention: { daily: number | null; weekly: number | null; monthly: number | null };
+  retention: {
+    mode?: "gfs" | "days" | "disabled";
+    days?: number; daily: number | null; weekly: number | null; monthly: number | null };
   offsite: { configured: boolean; required: boolean; status: BackupOffsiteStatus; mounted?: boolean | null };
   warnings: string[];
   error_code?: string | null;
@@ -2693,4 +2696,22 @@ export function updateBroadcastTemplate(token: string, id: string, payload: Broa
 }
 export function deleteBroadcastTemplate(token: string, id: string) {
   return apiFetch<void>(`/api/broadcast-templates/${id}`, token, { method: "DELETE" });
+}
+
+
+export type BackupMaintenance = {
+  request_id: string; operation: "preview_delete" | "preview_retention" | "delete" | "retention";
+  state: "queued" | "running" | "succeeded" | "failed"; requested_at: string; finished_at: string | null;
+  error_code: string | null;
+  targets: { backup_id: string; location: "local" | "offsite"; reason: string | null; protected: boolean; incomplete?: boolean }[];
+  results: { backup_id: string; location: "local" | "offsite"; result: "deleted" | "skipped" | "failed"; reason: string | null }[] | null;
+};
+export function startBackupMaintenance(token: string, action: "deletions/preview" | "deletions" | "retention" | "retention/preview", payload: object) {
+  return apiFetch<BackupMaintenance>(`/api/admin/backups/${action}`, token, { method: "POST", body: JSON.stringify(payload) });
+}
+export function getBackupMaintenance(token: string, id: string) {
+  return apiFetch<BackupMaintenance>(`/api/admin/backups/maintenance/${encodeURIComponent(id)}`, token);
+}
+export function getLatestBackupMaintenance(token: string) {
+  return apiFetch<{ request: BackupMaintenance | null }>("/api/admin/backups/maintenance/latest", token);
 }

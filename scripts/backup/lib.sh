@@ -113,7 +113,7 @@ set_config_value() {
   local value="$2"
   case "$key" in
     BACKUP_FORMAT_VERSION|OFFICECHAT_DIR|OFFICECHAT_DATA_DIR|BACKUP_ROOT|OFFSITE_ROOT|REQUIRE_OFFSITE|\
-    KEEP_DAILY|KEEP_WEEKLY|KEEP_MONTHLY|BACKUP_VALKEY|BACKUP_CADDY_CA|BACKUP_DEPLOYMENT_CONFIG|\
+    RETENTION_MODE|RETENTION_DAYS|KEEP_DAILY|KEEP_WEEKLY|KEEP_MONTHLY|BACKUP_VALKEY|BACKUP_CADDY_CA|BACKUP_DEPLOYMENT_CONFIG|\
     BACKUP_PRIVATE_CONFIG|REQUIRE_ENCRYPTED_PRIVATE|ALLOW_PLAINTEXT_PRIVATE_OFFSITE|AGE_RECIPIENT|\
     HOOK_TIMEOUT_SECONDS|MAX_ARCHIVE_MEMBERS|MAX_ARCHIVE_UNCOMPRESSED_BYTES|\
     VERIFY_AFTER_BACKUP|BACKUP_EXTRA_PATHS|PRE_BACKUP_HOOK|POST_BACKUP_HOOK|POST_RESTORE_HOOK|\
@@ -137,6 +137,8 @@ load_backup_config() {
   require_absolute_safe_path "$config_file"
   validate_secure_file "$config_file" "Backup configuration"
 
+  RETENTION_MODE="gfs"
+  RETENTION_DAYS="30"
   BACKUP_FORMAT_VERSION="1"
   OFFICECHAT_DIR="/opt/officechat"
   OFFICECHAT_DATA_DIR="/var/lib/officechat"
@@ -216,6 +218,8 @@ load_backup_config() {
   if [[ -n "$OFFSITE_ROOT" && -L "$OFFSITE_ROOT" ]]; then
     fail "OFFSITE_ROOT must not be a symlink"
   fi
+  [[ "$RETENTION_MODE" =~ ^(gfs|days|disabled)$ ]] || fail "Invalid RETENTION_MODE"
+  [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]{0,3}$ ]] && ((RETENTION_DAYS <= 3650)) || fail "Invalid RETENTION_DAYS"
   [[ "$KEEP_DAILY" =~ ^[0-9]+$ ]] || fail "KEEP_DAILY must be a non-negative integer"
   [[ "$KEEP_WEEKLY" =~ ^[0-9]+$ ]] || fail "KEEP_WEEKLY must be a non-negative integer"
   [[ "$KEEP_MONTHLY" =~ ^[0-9]+$ ]] || fail "KEEP_MONTHLY must be a non-negative integer"
@@ -541,11 +545,23 @@ run_rotation() {
 
   require_absolute_safe_path "$root"
   [[ -d "$root" ]] || return 0
+  [[ "${RETENTION_MODE:-gfs}" != "disabled" ]] || return 0
+  if [[ "${RETENTION_MODE:-gfs}" == "days" ]]; then
+    local helper
+    helper="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/backup_maintenance.py"
+    local -a options=()
+    [[ "$dry_run" == "1" || "$DRY_RUN" == "1" ]] && options+=(--dry-run)
+    python3 "$helper" --rotate-root "$root" --days "$RETENTION_DAYS" "${options[@]}"
+    return
+  fi
   while IFS= read -r backup; do
     backups+=("$backup")
   done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-????????-??????Z' -print | sort -r)
   ((${#backups[@]} <= 1)) && return 0
 
+  local last_verified helper_path
+  helper_path="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/backup_maintenance.py"
+  last_verified="$(python3 "$helper_path" --last-verified-root "$root")"
   for backup in "${backups[@]}"; do
     [[ ! -L "$backup" && -f "$backup/SUCCESS" ]] || continue
     [[ ! -f "$backup/PROTECTED" ]] || continue
@@ -570,6 +586,7 @@ run_rotation() {
       latest_kept=1
       keep=1
     fi
+    [[ "$name" != "$last_verified" ]] || keep=1
     [[ "$keep" == "1" ]] || delete_candidates+=("$backup")
   done
 

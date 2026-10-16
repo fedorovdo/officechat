@@ -1,6 +1,6 @@
 # OfficeChat Backup Center
 
-Backup Center is available to `superadmin` and administrators granted the separate `can_restore_backup` permission at `/en/admin/backups`. It lists, creates, verifies and can restore a local backup of the **same OfficeChat version**. It cannot delete or download backups or change retention, schedules or off-site settings.
+Backup Center is available to `superadmin` and administrators granted the separate `can_restore_backup` permission at `/en/admin/backups`. It lists, creates, verifies and can restore a local backup of the **same OfficeChat version**. Superadministrators can also configure the destination, schedule and retention, and select backups for deletion with a preview and explicit confirmation. Archive downloads are not provided. See [backup deletion and retention](BACKUP_RETENTION_RU.md).
 
 For storage layout, scheduled backups, external storage, restore, and disaster recovery, use [Backup and Restore](BACKUP_RESTORE.md).
 
@@ -10,7 +10,7 @@ For storage layout, scheduled backups, external storage, restore, and disaster r
 - last run and last successful backup;
 - verification status and latest successful backup size;
 - free space in the local backup repository without revealing its path;
-- next scheduled run and read-only daily/weekly/monthly retention values;
+- next scheduled run and the selected retention mode;
 - external/off-site configuration and the last copy status without a destination path;
 - completed local backups with type, version, build, Alembic/PostgreSQL metadata, components, protection, and warnings;
 - the current or most recently observed browser job.

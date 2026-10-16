@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from uuid import UUID
 
 
 BackupType = Literal["manual", "scheduled", "pre_upgrade", "pre_storage_change", "unknown"]
@@ -69,6 +70,7 @@ class BackupSettingsPublic(BaseModel):
 
 
 class BackupItemPublic(BaseModel):
+    locations: list[Literal["local", "offsite"]] = Field(default_factory=lambda: ["local"])
     backup_id: str = Field(pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
     created_at: datetime | None
     backup_type: BackupType
@@ -122,6 +124,8 @@ class BackupTimerPublic(BaseModel):
 
 
 class BackupRetentionPublic(BaseModel):
+    mode: Literal["gfs", "days", "disabled"] = "gfs"
+    days: int = Field(default=30, ge=1, le=3650)
     daily: int | None = Field(default=None, ge=0)
     weekly: int | None = Field(default=None, ge=0)
     monthly: int | None = Field(default=None, ge=0)
@@ -203,3 +207,56 @@ class RestoreRequestPublic(BaseModel):
 
 class LatestRestorePublic(BaseModel):
     request: RestoreRequestPublic | None
+
+
+class BackupDeletionSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    backup_ids: list[str] = Field(min_length=1, max_length=50)
+    location: Literal["local", "offsite", "both"]
+    include_protected: bool = False
+
+    @field_validator('backup_ids')
+    @classmethod
+    def valid_ids(cls, value):
+        import re
+        if len(set(value)) != len(value) or any(not re.fullmatch(r'officechat-backup-[0-9]{8}-[0-9]{6}Z', key) for key in value):
+            raise ValueError('Invalid backup identifiers')
+        return value
+
+
+class BackupRetentionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["gfs", "days", "disabled"]
+    days: int = Field(ge=1, le=3650, strict=True)
+
+
+class BackupDeletionConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    preview_id: UUID
+    confirm_protected: bool = False
+
+
+class BackupMaintenanceTarget(BaseModel):
+    backup_id: str = Field(pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
+    location: Literal["local", "offsite"]
+    protected: bool
+    incomplete: bool | None = None
+    reason: str | None
+
+
+class BackupMaintenanceResult(BaseModel):
+    backup_id: str = Field(pattern=r"^officechat-backup-[0-9]{8}-[0-9]{6}Z$")
+    location: Literal["local", "offsite"]
+    result: Literal["deleted", "skipped", "failed"]
+    reason: str | None
+
+
+class BackupMaintenancePublic(BaseModel):
+    request_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    operation: Literal["preview_delete", "preview_retention", "delete", "retention"]
+    state: Literal["queued", "running", "succeeded", "failed"]
+    requested_at: datetime
+    finished_at: datetime | None = None
+    error_code: str | None = None
+    targets: list[BackupMaintenanceTarget] = Field(default_factory=list)
+    results: list[BackupMaintenanceResult] | None = None

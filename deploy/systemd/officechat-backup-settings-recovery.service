@@ -11,6 +11,7 @@ Group=root
 UMask=0077
 StateDirectory=officechat-backup-agent
 StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /opt/officechat/backup_maintenance.py --recover-all
 ExecStart=/usr/bin/python3 /opt/officechat/backup-settings.py --recover-pending
 TimeoutStartSec=5min
 PrivateTmp=false

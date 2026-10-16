@@ -89,6 +89,7 @@ run cp "${ROOT_DIR}/scripts/verify-backup.sh" "${RELEASE_DIR}/verify-backup.sh"
 run cp "${ROOT_DIR}/scripts/restore-production.sh" "${RELEASE_DIR}/restore-production.sh"
 run cp "${ROOT_DIR}/scripts/backup_agent.py" "${RELEASE_DIR}/backup-agent.py"
 run cp "${ROOT_DIR}/scripts/backup_settings.py" "${RELEASE_DIR}/backup-settings.py"
+run cp "${ROOT_DIR}/scripts/backup_maintenance.py" "${RELEASE_DIR}/backup_maintenance.py"
 run cp "${ROOT_DIR}/scripts/restore_request.py" "${RELEASE_DIR}/restore-request.py"
 run cp "${ROOT_DIR}/scripts/backup/lib.sh" "${RELEASE_DIR}/backup/lib.sh"
 run cp "${ROOT_DIR}/deploy/backup/officechat-backup.conf.example" "${RELEASE_DIR}/backup/officechat-backup.conf.example"
@@ -100,6 +101,7 @@ run cp "${ROOT_DIR}/deploy/systemd/officechat-offsite-network.conf" "${RELEASE_D
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" "${RELEASE_DIR}/systemd/officechat-backup-agent.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings-recovery.service" "${RELEASE_DIR}/systemd/officechat-backup-settings-recovery.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-settings@.service" "${RELEASE_DIR}/systemd/officechat-backup-settings@.service"
+run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-maintenance@.service" "${RELEASE_DIR}/systemd/officechat-backup-maintenance@.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-job.service" "${RELEASE_DIR}/systemd/officechat-backup-job.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-backup-verify@.service" "${RELEASE_DIR}/systemd/officechat-backup-verify@.service"
 run cp "${ROOT_DIR}/deploy/systemd/officechat-restore@.service" "${RELEASE_DIR}/systemd/officechat-restore@.service"
@@ -107,6 +109,7 @@ run cp "${ROOT_DIR}/docs/BACKUP_RESTORE_RU.md" "${RELEASE_DIR}/deployment/BACKUP
 run cp "${ROOT_DIR}/docs/BACKUP_RESTORE.md" "${RELEASE_DIR}/deployment/BACKUP_RESTORE.md"
 run cp "${ROOT_DIR}/docs/BACKUP_CENTER_RU.md" "${RELEASE_DIR}/deployment/BACKUP_CENTER_RU.md"
 run cp "${ROOT_DIR}/docs/BACKUP_CENTER.md" "${RELEASE_DIR}/deployment/BACKUP_CENTER.md"
+run cp "${ROOT_DIR}/docs/BACKUP_RETENTION_RU.md" "${RELEASE_DIR}/deployment/BACKUP_RETENTION_RU.md"
 run cp "${ROOT_DIR}/deploy/caddy/Caddyfile.example" "${RELEASE_DIR}/caddy/Caddyfile.example"
 run cp "${ROOT_DIR}/deploy/caddy/docker-compose.caddy.yml" "${RELEASE_DIR}/caddy/docker-compose.caddy.yml"
 for deployment_doc in production-installation.md production-update.md production-update_RU.md internal-https.md windows-certificate-installation.md caddy-ca-backup-restore.md; do
@@ -135,6 +138,7 @@ run chmod 0644 \
   "${RELEASE_DIR}/systemd/officechat-backup-agent.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-settings-recovery.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-settings@.service" \
+  "${RELEASE_DIR}/systemd/officechat-backup-maintenance@.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-job.service" \
   "${RELEASE_DIR}/systemd/officechat-backup-verify@.service" \
   "${RELEASE_DIR}/systemd/officechat-restore@.service"
@@ -142,7 +146,7 @@ run chmod 0644 \
 if [[ "$DRY_RUN" != "1" ]]; then
   (
     cd "$RELEASE_DIR"
-    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh upgrade-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py backup-settings.py restore-request.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
+    sha256sum docker-compose.yml .env.example caddy/Caddyfile.example caddy/docker-compose.caddy.yml backup/* systemd/* deployment/*.md install-linux.sh update-linux.sh upgrade-linux.sh rollback-linux.sh uninstall-linux.sh verify-install.sh officechatctl lib.sh collect-diagnostics.sh backup-production.sh verify-backup.sh restore-production.sh backup-agent.py backup-settings.py backup_maintenance.py restore-request.py VERSION RELEASE.json README_INSTALL_RU.md 2>/dev/null >CHECKSUMS.sha256
   )
   (
     archive_stage="$(mktemp -d)"
@@ -164,6 +168,7 @@ if [[ "$DRY_RUN" != "1" ]]; then
       "${archive_stage}/release/restore-production.sh" \
       "${archive_stage}/release/backup-agent.py" \
       "${archive_stage}/release/backup-settings.py" \
+      "${archive_stage}/release/backup_maintenance.py" \
       "${archive_stage}/release/restore-request.py"
     tar -C "$archive_stage" -czf "${DIST_DIR}/${ARCHIVE_NAME}" release
     (

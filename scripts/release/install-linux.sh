@@ -376,6 +376,11 @@ if [[ -f "${SCRIPT_DIR}/../../scripts/backup_settings.py" ]]; then
 elif [[ -f "${SCRIPT_DIR}/backup-settings.py" ]]; then
   as_root cp "${SCRIPT_DIR}/backup-settings.py" "${OFFICECHAT_INSTALL_DIR}/backup-settings.py"
 fi
+if [[ -f "${SCRIPT_DIR}/../../scripts/backup_maintenance.py" ]]; then
+  as_root install -o root -g root -m 0755 "${SCRIPT_DIR}/../../scripts/backup_maintenance.py" "${OFFICECHAT_INSTALL_DIR}/backup_maintenance.py"
+else
+  as_root install -o root -g root -m 0755 "${SCRIPT_DIR}/backup_maintenance.py" "${OFFICECHAT_INSTALL_DIR}/backup_maintenance.py"
+fi
 if [[ -f "${SCRIPT_DIR}/../../scripts/restore_request.py" ]]; then
   as_root cp "${SCRIPT_DIR}/../../scripts/restore_request.py" "${OFFICECHAT_INSTALL_DIR}/restore-request.py"
 elif [[ -f "${SCRIPT_DIR}/restore-request.py" ]]; then
@@ -426,7 +431,7 @@ if [[ ! -f /etc/officechat/backup-agent.conf ]]; then
 fi
 as_root chown root:root /etc/officechat/backup-agent.conf
 as_root chmod 600 /etc/officechat/backup-agent.conf
-for backup_doc in BACKUP_RESTORE_RU.md BACKUP_RESTORE.md BACKUP_CENTER_RU.md BACKUP_CENTER.md; do
+for backup_doc in BACKUP_RETENTION_RU.md BACKUP_RESTORE_RU.md BACKUP_RESTORE.md BACKUP_CENTER_RU.md BACKUP_CENTER.md; do
   if [[ -f "${SCRIPT_DIR}/../../docs/${backup_doc}" ]]; then
     as_root cp "${SCRIPT_DIR}/../../docs/${backup_doc}" "${OFFICECHAT_INSTALL_DIR}/docs/${backup_doc}"
   elif [[ -f "${SCRIPT_DIR}/deployment/${backup_doc}" ]]; then
@@ -448,6 +453,7 @@ if [[ -n "$systemd_source" ]]; then
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-offsite-network.conf" "$OFFICECHAT_OFFSITE_MOUNT_DROPIN_FILE"
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings-recovery.service" "$OFFICECHAT_SETTINGS_RECOVERY_UNIT_FILE"
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-settings@.service" /etc/systemd/system/officechat-backup-settings@.service
+  as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-maintenance@.service" /etc/systemd/system/officechat-backup-maintenance@.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-job.service" /etc/systemd/system/officechat-backup-job.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-backup-verify@.service" /etc/systemd/system/officechat-backup-verify@.service
   as_root install -o root -g root -m 0644 "${systemd_source}/officechat-restore@.service" /etc/systemd/system/officechat-restore@.service

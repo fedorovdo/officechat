@@ -9,6 +9,7 @@ from app.api.deps import require_backup_operator, require_superadmin_user
 from app.models.user import User
 from app.schemas.backup import (
     BackupCapacityPublic,
+    BackupDeletionSelection, BackupDeletionConfirm, BackupRetentionUpdate, BackupMaintenancePublic,
     ActiveBackupJobPublic,
     BackupJobCreate,
     BackupJobPublic,
@@ -120,6 +121,72 @@ def unavailable_status() -> BackupStatusPublic:
         warnings=["BACKUP_AGENT_UNAVAILABLE"],
         error_code="BACKUP_AGENT_UNAVAILABLE",
     )
+
+
+
+async def start_maintenance(operation, payload, request, actor, client):
+    await record_audit_event_best_effort(
+        event_type="backup.maintenance.requested", category="backup", action=operation,
+        status="requested", actor=actor, target_type="backup_maintenance",
+        details=payload.model_dump(mode="json"), request=request,
+    )
+    try:
+        return BackupMaintenancePublic.model_validate(await client.request("backup_maintenance", {
+            "operation": operation, "params": payload.model_dump(mode="json"),
+            "requested_by_user_id": str(actor.id), "requested_by_login": actor.username,
+        }))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.post("/deletions/preview", response_model=BackupMaintenancePublic, status_code=202)
+async def preview_deletion(payload: BackupDeletionSelection, request: Request,
+                           actor: Annotated[User, Depends(require_superadmin_user)],
+                           client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)]):
+    return await start_maintenance("preview_delete", payload, request, actor, client)
+
+
+@router.post("/deletions", response_model=BackupMaintenancePublic, status_code=202)
+async def delete_backups(payload: BackupDeletionConfirm, request: Request,
+                         actor: Annotated[User, Depends(require_superadmin_user)],
+                         client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)]):
+    return await start_maintenance("delete", payload, request, actor, client)
+
+
+@router.post("/retention/preview", response_model=BackupMaintenancePublic, status_code=202)
+async def preview_retention(payload: BackupRetentionUpdate, request: Request,
+                            actor: Annotated[User, Depends(require_superadmin_user)],
+                            client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)]):
+    return await start_maintenance("preview_retention", payload, request, actor, client)
+
+
+@router.post("/retention", response_model=BackupMaintenancePublic, status_code=202)
+async def update_retention(payload: BackupRetentionUpdate, request: Request,
+                           actor: Annotated[User, Depends(require_superadmin_user)],
+                           client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)]):
+    return await start_maintenance("retention", payload, request, actor, client)
+
+
+@router.get("/maintenance/latest", response_model=dict)
+async def latest_maintenance(_: Annotated[User, Depends(require_superadmin_user)],
+                             client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)]):
+    try:
+        data = await client.request("latest_backup_maintenance")
+        return {"request": BackupMaintenancePublic.model_validate(data["request"]).model_dump(mode="json") if data["request"] else None}
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
+
+
+@router.get("/maintenance/{request_id}", response_model=BackupMaintenancePublic)
+async def maintenance_status(request_id: str,
+                             _: Annotated[User, Depends(require_superadmin_user)],
+                             client: Annotated[BackupAgentClient, Depends(get_backup_agent_client)]):
+    if not JOB_ID_PATTERN.fullmatch(request_id):
+        return api_error(400, "INVALID_JOB_ID", "Invalid maintenance request identifier")
+    try:
+        return BackupMaintenancePublic.model_validate(await client.request("backup_maintenance_status", {"request_id": request_id}))
+    except (BackupAgentUnavailableError, BackupAgentProtocolError, BackupAgentRemoteError, ValidationError) as exc:
+        return job_error(exc)
 
 
 @router.get("/status", response_model=BackupStatusPublic)

@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -432,7 +432,7 @@ class BackupInspector:
             return False
         return stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode)
 
-    def backup_item(self, backup_id: str) -> dict[str, Any]:
+    def _local_backup_item(self, backup_id: str) -> dict[str, Any]:
         directory = self._backup_directory(backup_id)
         warnings: list[str] = []
         try:
@@ -492,24 +492,46 @@ class BackupInspector:
             "components": list(dict.fromkeys(components)),
         }
 
+    def _storage_roots(self):
+        result = {"local": self.config.backup_root}
+        external = _parse_simple_config(self.config.backup_config_path).get("OFFSITE_ROOT")
+        if external and offsite_mount_present(external):
+            path = Path(external)
+            if path.is_absolute() and path.resolve() == path and path != self.config.backup_root:
+                result["offsite"] = path
+        return result
+
+    def backup_item(self, backup_id: str) -> dict[str, Any]:
+        locations = []
+        result = None
+        for location, root in self._storage_roots().items():
+            try:
+                item = BackupInspector(replace(self.config, backup_root=root))._local_backup_item(backup_id)
+                locations.append(location)
+                if result is None:
+                    result = item
+            except AgentError as exc:
+                if exc.code != "BACKUP_NOT_FOUND":
+                    raise
+        if result is None:
+            raise AgentError("BACKUP_NOT_FOUND", "Backup was not found")
+        return {**result, "locations": locations}
+
     def list_backups(self, page: int, limit: int) -> dict[str, Any]:
         if page < 1 or limit < 1 or limit > self.config.max_list_limit:
             raise AgentError("INVALID_PAGINATION", "Backup pagination is invalid")
-        backup_ids: list[str] = []
-        try:
-            entries = list(os.scandir(self.config.backup_root))
-        except FileNotFoundError:
-            entries = []
-        except OSError as exc:
-            raise AgentError("BACKUP_ROOT_UNAVAILABLE", "Backup storage is unavailable") from exc
-        for entry in entries:
-            if not BACKUP_ID_PATTERN.fullmatch(entry.name) or entry.is_symlink():
-                continue
+        found = set()
+        for root in self._storage_roots().values():
             try:
-                if entry.is_dir(follow_symlinks=False):
-                    backup_ids.append(entry.name)
-            except OSError:
+                with os.scandir(root) as entries:
+                    for entry in entries:
+                        if BACKUP_ID_PATTERN.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False):
+                            found.add(entry.name)
+            except FileNotFoundError:
                 continue
+            except OSError as exc:
+                raise AgentError("BACKUP_ROOT_UNAVAILABLE", "Backup storage is unavailable") from exc
+        backup_ids = list(found)
         backup_ids.sort(reverse=True)
         total = len(backup_ids)
         offset = (page - 1) * limit
@@ -567,6 +589,8 @@ class BackupInspector:
         for field, key in (("daily", "KEEP_DAILY"), ("weekly", "KEEP_WEEKLY"), ("monthly", "KEEP_MONTHLY")):
             value = simple_config.get(key)
             retention[field] = int(value) if value and value.isdigit() else None
+        retention["mode"] = simple_config.get("RETENTION_MODE", "gfs")
+        retention["days"] = int(simple_config.get("RETENTION_DAYS", "30"))
         offsite_configured = bool(simple_config.get("OFFSITE_ROOT"))
         offsite_required = simple_config.get("REQUIRE_OFFSITE") == "yes"
         mounted = offsite_mount_present(simple_config["OFFSITE_ROOT"]) if offsite_configured else None
@@ -1658,12 +1682,91 @@ class SettingsController:
             return self._public(self._refresh(request_id, self._read(request_id)))
 
 
+class MaintenanceController(SettingsController):
+    """Persistent, actor-bound previews; execution stays in a fixed root systemd unit."""
+
+    def __init__(self, config, jobs, restores, settings):
+        self.directory = config.state_directory / "maintenance"
+        self.directory.mkdir(mode=0o700, exist_ok=True)
+        info = self.directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError("Unsafe backup maintenance directory")
+        os.chmod(self.directory, 0o700)
+        self.jobs, self.restores, self.settings = jobs, restores, settings
+        self._lock = threading.RLock()
+
+    def _read(self, request_id):
+        path = self.directory / f"{validate_job_id(request_id)}.json"
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise AgentError("JOB_RESULT_UNAVAILABLE", "Unsafe maintenance metadata")
+        return _read_bounded_json(path, 524288, missing_code="JOB_NOT_FOUND", corrupt_code="JOB_RESULT_UNAVAILABLE")
+
+    @staticmethod
+    def _public(payload):
+        result = {key: payload.get(key) for key in ("request_id", "operation", "state", "requested_at", "finished_at", "error_code", "results")}
+        result["targets"] = [{key: item.get(key) for key in ("backup_id", "location", "protected", "reason", "incomplete")}
+                             for item in payload.get("targets", [])]
+        return result
+
+    def _refresh(self, request_id, data):
+        if data.get("state") not in {"queued", "running"}:
+            return data
+        try:
+            result = subprocess.run([SYSTEMCTL_PATH, "show", f"officechat-backup-maintenance@{request_id}.service", "--property=ActiveState", "--no-pager"],
+                                    shell=False, env=dict(SAFE_JOB_ENVIRONMENT), stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                    timeout=SYSTEMCTL_COMMAND_TIMEOUT_SECONDS, check=False)
+            inactive = result.returncode == 0 and result.stdout.strip() in {"ActiveState=failed", "ActiveState=inactive"}
+            old = (datetime.now(timezone.utc) - datetime.fromisoformat(data["requested_at"])).total_seconds() > 60
+            if inactive and old:
+                data = self._read(request_id)
+                if data.get("state") not in {"queued", "running"}:
+                    return data
+                data.update(state="failed", error_code="MAINTENANCE_INTERRUPTED", finished_at=_utc_now())
+                self._write(request_id, data)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        return data
+
+    def start(self, params):
+        if set(params) != {"operation", "params", "requested_by_user_id", "requested_by_login"}:
+            raise AgentError("INVALID_PARAMS", "Invalid maintenance request")
+        operation = params["operation"]
+        actor = validate_actor_user_id(params["requested_by_user_id"])
+        login = validate_actor_login(params["requested_by_login"])
+        if operation not in {"preview_delete", "preview_retention", "delete", "retention"} or not isinstance(params["params"], dict) or len(json.dumps(params)) > 12000:
+            raise AgentError("INVALID_PARAMS", "Invalid maintenance request")
+        with self._lock:
+            if self.jobs.active_job() or self.restores._has_active_restore() or self.settings.maintenance_busy() or self.maintenance_busy():
+                raise AgentError("JOB_CONFLICT", "Backup maintenance is busy")
+            request_id = str(uuid.uuid4())
+            data = {**params, "request_id": request_id, "state": "queued", "requested_at": _utc_now(),
+                    "requested_by_user_id": actor, "requested_by_login": login,
+                    "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip()}
+            self._write(request_id, data)
+            try:
+                result = subprocess.run([SYSTEMCTL_PATH, "start", "--no-block", f"officechat-backup-maintenance@{request_id}.service"],
+                                        shell=False, env=dict(SAFE_JOB_ENVIRONMENT), stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        timeout=SYSTEMCTL_COMMAND_TIMEOUT_SECONDS, check=False)
+                if result.returncode:
+                    raise OSError("Maintenance executor unavailable")
+            except (OSError, subprocess.SubprocessError):
+                data.update(state="failed", error_code="EXECUTOR_UNAVAILABLE", finished_at=_utc_now())
+                self._write(request_id, data)
+                raise AgentError("EXECUTOR_UNAVAILABLE", "Backup maintenance executor unavailable")
+            logger.info("backup_maintenance=%s operation=%s actor=%s", request_id, operation, actor)
+            return self._public(data)
+
+
 class AgentProtocol:
     def __init__(self, inspector: BackupInspector, jobs: BackupJobManager | None = None, restores: RestoreController | None = None, settings: SettingsController | None = None) -> None:
         self.inspector = inspector
         self.jobs = jobs
         self.restores = restores
         self.settings = settings
+        self.maintenance = MaintenanceController(inspector.config, jobs, restores, settings) if settings is not None and inspector is not None else None
 
     def handle(self, payload: object) -> dict[str, Any]:
         if not isinstance(payload, dict):
@@ -1683,7 +1786,20 @@ class AgentProtocol:
         params = payload.get("params")
         if not isinstance(params, dict):
             raise AgentError("INVALID_PARAMS", "Request parameters are invalid")
-        if operation == "status":
+        if self.maintenance and operation in {"create_backup", "verify_backup", "prepare_restore", "start_restore", "apply_backup_settings"} and self.maintenance.maintenance_busy():
+            raise AgentError("JOB_CONFLICT", "Backup maintenance is active")
+        if operation in {"backup_maintenance", "latest_backup_maintenance", "backup_maintenance_status"}:
+            if self.maintenance is None:
+                raise AgentError("EXECUTOR_UNAVAILABLE", "Backup maintenance is unavailable")
+            if operation == "backup_maintenance":
+                data = self.maintenance.start(params)
+            elif operation == "latest_backup_maintenance" and not params:
+                data = self.maintenance.latest()
+            elif operation == "backup_maintenance_status" and set(params) == {"request_id"}:
+                data = self.maintenance.status(validate_job_id(params["request_id"]))
+            else:
+                raise AgentError("INVALID_PARAMS", "Invalid maintenance query")
+        elif operation == "status":
             if params:
                 raise AgentError("INVALID_PARAMS", "Status does not accept parameters")
             data = self.inspector.status()

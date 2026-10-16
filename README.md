@@ -48,6 +48,7 @@ Key docs:
 - [docs/BACKUP_RESTORE_RU.md](docs/BACKUP_RESTORE_RU.md)
 - [docs/E2E_TESTS_RU.md](docs/E2E_TESTS_RU.md)
 - [docs/RELEASE_CHECKLIST_RU.md](docs/RELEASE_CHECKLIST_RU.md)
+- [Удаление копий и срок хранения (RU)](docs/BACKUP_RETENTION_RU.md)
 - [Production backup and restore (RU)](docs/BACKUP_RESTORE_RU.md)
 - [Production backup and restore (EN)](docs/BACKUP_RESTORE.md)
 - [Backup Center (RU)](docs/BACKUP_CENTER_RU.md)

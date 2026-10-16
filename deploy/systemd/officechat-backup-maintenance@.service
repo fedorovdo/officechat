@@ -1,0 +1,20 @@
+[Unit]
+Description=OfficeChat backup cleanup request %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/officechat/backup_maintenance.py %i
+ExecStopPost=/usr/bin/python3 /opt/officechat/backup_maintenance.py --recover %i
+TimeoutStartSec=1h
+TimeoutStopSec=1min
+PrivateTmp=false
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/officechat /var/lib/officechat-backup-agent/maintenance
+StandardOutput=journal
+StandardError=journal

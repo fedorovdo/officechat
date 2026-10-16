@@ -13,8 +13,8 @@ import { AdminCard } from "./AdminUI";
 
 const DAYS: BackupScheduleSettings["days"] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export function AdminBackupSettings({ dictionary, locale, canManage, status, onSaved, onActivityChange }: {
-  dictionary: Dictionary; locale: Locale; canManage: boolean;
+export function AdminBackupSettings({ dictionary, locale, canManage, status, onSaved, onActivityChange, externallyBusy = false }: {
+  dictionary: Dictionary; locale: Locale; canManage: boolean; externallyBusy?: boolean;
   status: OfficeChatBackupStatus | null; onSaved: () => Promise<void>;
   onActivityChange: (active: boolean) => void;
 }) {
@@ -106,7 +106,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
   async function save(event: FormEvent) {
     event.preventDefault();
     const token = requireStoredAccessToken(locale);
-    if (!token || !canManage || busy || active || !current) return;
+    if (!token || !canManage || externallyBusy || busy || active || !current) return;
     if (changing && !confirmChange) return;
     if (!changing && schedule.enabled && (status?.last_success?.verification_status !== "passed" ||
         ((kind === "nfs" || kind === "smb") ||
@@ -150,7 +150,7 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
 
   async function reconnect() {
     const token = requireStoredAccessToken(locale);
-    if (!token || !canManage || busy || active || !current) return;
+    if (!token || !canManage || externallyBusy || busy || active || !current) return;
     setBusy(true);
     setError("");
     try {
@@ -179,8 +179,8 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
         {text.connection}: {active ? text.refreshingStatus : status?.offsite.mounted === true ? text.mounted : status?.offsite.mounted === false ? text.unmounted : text.mountUnknown}
       </p>
       {canManage ? <>
-        <button className="admin-button admin-button-secondary" disabled={busy || active || changing} onClick={() => void reconnect()} type="button">{text.reconnect}</button>
-        <button className="admin-button admin-button-secondary" disabled={busy || active || changing} onClick={changeStorage} type="button">{text.changeStorage}</button>
+        <button className="admin-button admin-button-secondary" disabled={externallyBusy || busy || active || changing} onClick={() => void reconnect()} type="button">{text.reconnect}</button>
+        <button className="admin-button admin-button-secondary" disabled={externallyBusy || busy || active || changing} onClick={changeStorage} type="button">{text.changeStorage}</button>
       </> : null}
       <p className="note">{text.reconnectNote}</p>
       <p className="note">{text.migration}</p>
@@ -203,8 +203,8 @@ export function AdminBackupSettings({ dictionary, locale, canManage, status, onS
         <label>{text.time}<input disabled={changing || active} className="field-input" type="time" value={schedule.time} onChange={(event) => setSchedule({ ...schedule, time: event.target.value })} /></label>
         <p className="note">{text.serverTime}</p>
         {changing ? <label className="checkbox-row"><input type="checkbox" disabled={active} checked={confirmChange} onChange={(event) => setConfirmChange(event.target.checked)} />{text.confirmChange}</label> : null}
-        <button className="admin-button" disabled={busy || active || !current || schedule.days.length === 0 || (changing && !confirmChange)} type="submit">{busy ? text.saving : changing ? text.changeSave : text.save}</button>
-        {changing ? <button className="admin-button admin-button-secondary" disabled={busy || active} type="button" onClick={() => { setChanging(false); setConfirmChange(false); setPassword(""); setKind("unchanged"); }}>{text.cancelChange}</button> : null}
+        <button className="admin-button" disabled={externallyBusy || busy || active || !current || schedule.days.length === 0 || (changing && !confirmChange)} type="submit">{busy ? text.saving : changing ? text.changeSave : text.save}</button>
+        {changing ? <button className="admin-button admin-button-secondary" disabled={externallyBusy || busy || active} type="button" onClick={() => { setChanging(false); setConfirmChange(false); setPassword(""); setKind("unchanged"); }}>{text.cancelChange}</button> : null}
       </> : <p className="note">{text.superadminOnly}</p>}
     </form>
   </AdminCard>;

@@ -219,7 +219,8 @@ load_backup_config() {
     fail "OFFSITE_ROOT must not be a symlink"
   fi
   [[ "$RETENTION_MODE" =~ ^(gfs|days|disabled)$ ]] || fail "Invalid RETENTION_MODE"
-  [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]{0,3}$ ]] && ((RETENTION_DAYS <= 3650)) || fail "Invalid RETENTION_DAYS"
+  [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]{0,3}$ ]] || fail "Invalid RETENTION_DAYS"
+  ((RETENTION_DAYS <= 3650)) || fail "Invalid RETENTION_DAYS"
   [[ "$KEEP_DAILY" =~ ^[0-9]+$ ]] || fail "KEEP_DAILY must be a non-negative integer"
   [[ "$KEEP_WEEKLY" =~ ^[0-9]+$ ]] || fail "KEEP_WEEKLY must be a non-negative integer"
   [[ "$KEEP_MONTHLY" =~ ^[0-9]+$ ]] || fail "KEEP_MONTHLY must be a non-negative integer"

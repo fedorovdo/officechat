@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.api.deps import require_superadmin_user
+from app.api.deps import require_backup_operator, require_superadmin_user
 from app.api.routes.admin_backups import (
     create_backup_job,
     get_active_backup_job,
@@ -17,9 +17,13 @@ from app.api.routes.admin_backups import (
     get_backup_job,
     get_backup_status,
     get_backups,
+    latest_restore,
+    prepare_restore,
+    restore_status,
+    start_restore,
     verify_backup,
 )
-from app.schemas.backup import BackupItemPublic, BackupJobCreate, BackupPagePublic, BackupStatusPublic
+from app.schemas.backup import BackupItemPublic, BackupJobCreate, BackupPagePublic, BackupStatusPublic, RestoreConfirm
 from app.services.backup_agent import (
     BackupAgentClient,
     BackupAgentProtocolError,
@@ -177,8 +181,46 @@ class BackupAuthorizationTests(unittest.IsolatedAsyncioTestCase):
                     await require_superadmin_user(request(), actor(role))
             self.assertEqual(raised.exception.status_code, 403)
 
+    @patch("app.api.deps.require_permission", new_callable=AsyncMock)
+    async def test_restore_permission_is_checked_for_admin_backup_access(self, require):
+        operator = actor("admin")
+        self.assertIs(await require_backup_operator(AsyncMock(), operator), operator)
+        require.assert_awaited_once()
+        self.assertEqual(require.await_args.args[2], "can_restore_backup")
+
 
 class BackupApiTests(unittest.IsolatedAsyncioTestCase):
+    @patch("app.api.routes.admin_backups.record_audit_event_best_effort", new_callable=AsyncMock)
+    async def test_restore_confirmation_audits_reason_and_returns_status(self, audit):
+        backup_id = item_payload()["backup_id"]
+        preparation = {"challenge": "x" * 43, "backup_id": backup_id,
+                       "hostname": "officechat-test", "expires_in_seconds": 600}
+        prepared = await prepare_restore(backup_id, actor(), FakeClient(preparation))
+        self.assertEqual(prepared.hostname, "officechat-test")
+        payload = RestoreConfirm(backup_id=backup_id, challenge=preparation["challenge"],
+                                 confirm_hostname="officechat-test", confirm_backup=backup_id,
+                                 reason="Тест восстановления после инцидента")
+        response = {"request_id": str(REQUEST_ID), "backup_id": backup_id,
+                    "hostname": "officechat-test", "state": "queued",
+                    "requested_at": "2026-08-05T10:00:00Z", "started_at": None,
+                    "finished_at": None, "last_error": None}
+        client = FakeClient(response)
+        started = await start_restore(payload, request(), actor(), client)
+        self.assertEqual(started.state, "queued")
+        self.assertEqual(client.calls[0][0], "start_restore")
+        self.assertEqual(client.calls[0][1]["reason"], payload.reason)
+        self.assertEqual(audit.await_args.kwargs["details"]["reason"], payload.reason)
+        self.assertEqual((await restore_status(str(REQUEST_ID), actor(), FakeClient(response))).state, "queued")
+        self.assertEqual((await latest_restore(actor(), FakeClient({"request": response}))).request.state, "queued")
+
+    async def test_restore_invalid_backup_and_version_mismatch_are_safe(self):
+        invalid = await prepare_restore("../private", actor(), FakeClient())
+        self.assertEqual(invalid.status_code, 400)
+        mismatch = await prepare_restore(item_payload()["backup_id"], actor(),
+                                         FakeClient(error=BackupAgentRemoteError("VERSION_MISMATCH")))
+        self.assertEqual(mismatch.status_code, 409)
+        self.assertEqual((await restore_status("../../secret", actor(), FakeClient())).status_code, 400)
+
     async def test_superadmin_status_list_and_detail(self):
         status = await get_backup_status(actor(), FakeClient(status_payload()))
         self.assertIsInstance(status, BackupStatusPublic)

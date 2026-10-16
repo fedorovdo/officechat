@@ -48,6 +48,7 @@ Key docs:
 - [docs/BACKUP_RESTORE_RU.md](docs/BACKUP_RESTORE_RU.md)
 - [docs/E2E_TESTS_RU.md](docs/E2E_TESTS_RU.md)
 - [docs/RELEASE_CHECKLIST_RU.md](docs/RELEASE_CHECKLIST_RU.md)
+- [Удаление копий и срок хранения (RU)](docs/BACKUP_RETENTION_RU.md)
 - [Production backup and restore (RU)](docs/BACKUP_RESTORE_RU.md)
 - [Production backup and restore (EN)](docs/BACKUP_RESTORE.md)
 - [Backup Center (RU)](docs/BACKUP_CENTER_RU.md)
@@ -67,6 +68,9 @@ The superadmin-only Backup Center at `/ru/admin/backups` or `/en/admin/backups` 
 - [Резервное копирование и восстановление](docs/BACKUP_RESTORE_RU.md)
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Production installation](docs/deployment/production-installation.md)
+- [RC13.37 backup qualification: SMB/NFS, reconnect and reboot (RU)](docs/releases/0.1.0-rc13.37-qualification_RU.md)
+- [RC13.38 qualification: announcement editor, templates, Debian/RED OS updates and reboot (RU)](docs/releases/0.1.0-rc13.38-qualification_RU.md)
+- [Restore to a new server (RU)](docs/deployment/restore-to-new-server_RU.md)
 - [Production update](docs/deployment/production-update_RU.md)
 
 ## Production / Internal HTTPS
@@ -119,7 +123,7 @@ OfficeChat has a granular permission foundation in addition to roles. Initial se
 
 Pinned Messages v0.1 lets trusted human users with `can_pin_messages` pin, unpin, and annotate important messages in group, direct, and discussion chats. Admin role alone does not grant this action, and direct/discussion privacy is still enforced. Pinned-message actions are audited and synchronized through the selected chat WebSocket channel. See [docs/PINNED_MESSAGES_RU.md](docs/PINNED_MESSAGES_RU.md).
 
-Broadcast Announcements v0.1 adds a separate corporate announcement inbox and sender flow for trusted users with effective `can_broadcast`. Broadcasts are stored as one announcement plus recipient rows, use preview/confirmation tokens and Valkey rate limiting before send, and deliver `announcement.created/read/retracted` through `/api/ws/me`. Announcement unread counters are separate from chat unread counters. See [docs/BROADCASTS_RU.md](docs/BROADCASTS_RU.md).
+Broadcast Announcements v0.1 adds a separate corporate announcement inbox and sender flow for trusted users with effective `can_broadcast`. Broadcasts are stored as one announcement plus recipient rows, use preview/confirmation tokens and Valkey rate limiting before send, and deliver `announcement.created/read/retracted` through `/api/ws/me`. Announcement unread counters are separate from chat unread counters. The composer supports bounded rich text and a shared template library for broadcast senders; only a template's author may edit or delete it, including when accessed through the API. See [docs/BROADCASTS_RU.md](docs/BROADCASTS_RU.md).
 
 Notifications Center v0.1 adds a separate bell drawer in `/ru/app` for important personal events: mentions, replies, reactions, direct messages, discussion messages, announcements, optional pin notifications, and system notices. Its unread count is independent from chat unread counters and the announcement unread counter. Preferences are stored per user in PostgreSQL and synchronize through the existing `/api/ws/me` channel. See [docs/NOTIFICATIONS_RU.md](docs/NOTIFICATIONS_RU.md).
 

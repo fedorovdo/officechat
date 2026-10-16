@@ -1,0 +1,18 @@
+[Unit]
+Description=Wait for a network route to the OfficeChat backup destination
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /opt/officechat/backup-settings.py --wait-network
+TimeoutStartSec=65s
+User=root
+Group=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

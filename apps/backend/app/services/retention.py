@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -406,8 +407,16 @@ async def get_storage_stats(session: AsyncSession) -> StorageStats:
         asyncio.to_thread(directory_size, uploads_root),
         asyncio.to_thread(directory_size, uploads_root / "avatars"),
     )
+    try:
+        stats = os.statvfs(uploads_root)
+        disk_total = stats.f_blocks * stats.f_frsize
+        disk_free = stats.f_bavail * stats.f_frsize
+    except OSError:
+        disk_total = disk_free = None
     return StorageStats(
         uploads_total_bytes=uploads_total,
+        disk_total_bytes=disk_total,
+        disk_free_bytes=disk_free,
         avatar_bytes=avatar_bytes,
         group_attachment_bytes=group_stats[0],
         direct_attachment_bytes=direct_stats[0],

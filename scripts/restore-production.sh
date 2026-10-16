@@ -317,11 +317,30 @@ require_compose_service "$POSTGRES_SERVICE"
 require_compose_service "$BACKEND_SERVICE"
 
 log "Creating protected pre-restore backup"
+previous_rollback_id="$(python3 - "$STATUS_FILE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding='utf-8') as stream:
+        print(json.load(stream).get('backup_id') or '')
+except (OSError, ValueError):
+    print('')
+PY
+)"
 "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-upgrade
-rollback_backup="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
-  -name 'officechat-backup-????????-??????Z' -exec test -f '{}/PROTECTED' ';' -print |
-  sort -r | head -n 1)"
-[[ -n "$rollback_backup" ]] || fail "Protected pre-restore backup was not published"
+rollback_id="$(python3 - "$STATUS_FILE" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding='utf-8') as stream:
+    status = json.load(stream)
+if status.get('success') is not True or status.get('verification_status') != 'passed':
+    raise SystemExit('Protected pre-restore backup verification did not pass')
+print(status.get('backup_id') or '')
+PY
+)"
+[[ "$rollback_id" =~ ^officechat-backup-[0-9]{8}-[0-9]{6}Z$ && "$rollback_id" != "$previous_rollback_id" ]] ||
+  fail "A fresh protected pre-restore backup was not published"
+rollback_backup="${BACKUP_ROOT%/}/${rollback_id}"
+[[ -d "$rollback_backup" && ! -L "$rollback_backup" && -f "$rollback_backup/SUCCESS" && -f "$rollback_backup/PROTECTED" ]] ||
+  fail "Fresh protected pre-restore backup is incomplete"
 log "Protected rollback backup: ${rollback_backup}"
 acquire_backup_lock
 

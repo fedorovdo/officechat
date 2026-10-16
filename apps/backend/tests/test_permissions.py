@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from app.api.routes.admin_permissions import get_permissions, put_user_permissions
-from app.core.permissions import CAN_BROADCAST, CAN_PIN_MESSAGES
+from app.core.permissions import CAN_BROADCAST, CAN_PIN_MESSAGES, CAN_RESTORE_BACKUP
 from app.schemas.permission import UserPermissionsUpdate
 from app.services import permissions
 
@@ -52,6 +52,14 @@ def request():
 
 
 class PermissionCalculationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restore_permission_can_only_be_granted_to_administrators(self):
+        with patch("app.services.permissions.validate_permission_keys", AsyncMock(return_value=[CAN_RESTORE_BACKUP])):
+            with self.assertRaises(HTTPException):
+                await permissions.replace_user_permissions(
+                    PermissionSession(), actor=user("superadmin"), target_user=user("user"),
+                    permission_keys=[CAN_RESTORE_BACKUP],
+                )
+
     async def test_superadmin_has_all_active_permissions_implicitly(self):
         with patch("app.services.permissions.active_permission_keys", AsyncMock(return_value={CAN_PIN_MESSAGES, CAN_BROADCAST})):
             effective = await permissions.get_effective_permission_keys(AsyncMock(), user("superadmin"))

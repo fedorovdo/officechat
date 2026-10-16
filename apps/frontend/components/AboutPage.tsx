@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { BrandLogo } from "./Brand";
 import { AdminPageHeader, AdminPageShell } from "./AdminUI";
+import { getCurrentUser, getReleaseUpdate, requireStoredAccessToken, type OfficeChatReleaseUpdate } from "../lib/api";
 import { getLocalizedBrand, officeChatBrand } from "../lib/brand";
 import type { Dictionary, Locale } from "../lib/i18n";
 import { buildApiUrl } from "../lib/public-url";
@@ -50,6 +51,7 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
   const localizedBrand = getLocalizedBrand(locale);
   const [frontendHealth, setFrontendHealth] = useState<HealthStatus>(initialHealth);
   const [backendHealth, setBackendHealth] = useState<HealthStatus>(initialHealth);
+  const [releaseUpdate, setReleaseUpdate] = useState<OfficeChatReleaseUpdate | null>(null);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
   const features = useMemo(
@@ -103,6 +105,12 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
 
   useEffect(() => {
     void loadHealth();
+    const token = requireStoredAccessToken(locale);
+    if (token) {
+      void getCurrentUser(token).then((user) => {
+        if (user.role === "superadmin") return getReleaseUpdate(token).then(setReleaseUpdate);
+      }).catch(() => undefined);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -129,6 +137,14 @@ export function AboutPage({ dictionary, locale }: AboutPageProps) {
           description={dictionary.adminUi.pageDescriptions.about}
           title={about.title}
         />
+
+        {releaseUpdate?.status === "update_available" && releaseUpdate.release_url ? (
+          <section className="about-card" aria-label={about.updateAvailable}>
+            <strong>{about.updateAvailable}: {releaseUpdate.latest_version}</strong>{" "}
+            <ExternalLink href={releaseUpdate.release_url}>{about.viewRelease}</ExternalLink>
+          </section>
+        ) : null}
+        {releaseUpdate?.status === "unavailable" ? <p className="note">{about.checkUpdatesUnavailable}</p> : null}
 
         <div className="about-grid">
           <section className="about-card">

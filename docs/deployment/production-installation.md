@@ -234,6 +234,12 @@ curl --fail https://officechat.example.local/ready
 После установки проверьте [Центр резервного копирования](../BACKUP_CENTER_RU.md),
 затем настройте и испытайте полный операторский процесс по документу
 [«Резервное копирование, проверка и восстановление»](../BACKUP_RESTORE_RU.md).
+Для чистого сервера, на который будут переноситься существующие пользователи,
+используйте bootstrap `--no-create-admin` и следуйте
+[процедуре переноса на новый сервер](restore-to-new-server_RU.md).
+Отсутствие приглашения задать пароль в этом режиме ожидаемо; после восстановления
+БД используются прежние логин и пароль. Секрет приложения и CA переносятся
+отдельно с сохранением пароля PostgreSQL и HTTPS origin назначения.
 Также см. [internal-https.md](internal-https.md),
 [windows-certificate-installation.md](windows-certificate-installation.md) и
 [caddy-ca-backup-restore.md](caddy-ca-backup-restore.md).

@@ -1,8 +1,8 @@
 [Unit]
 Description=OfficeChat backup metadata and allowlisted job agent
 Documentation=file:/opt/officechat/docs/BACKUP_CENTER_RU.md
-Requires=docker.service
-After=local-fs.target docker.service
+Requires=docker.service officechat-backup-settings-recovery.service
+After=local-fs.target docker.service officechat-backup-settings-recovery.service
 
 [Service]
 Type=simple

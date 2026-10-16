@@ -79,6 +79,8 @@ class StorageMessageCounts(BaseModel):
 
 class StorageStats(BaseModel):
     uploads_total_bytes: int
+    disk_total_bytes: int | None = None
+    disk_free_bytes: int | None = None
     avatar_bytes: int
     group_attachment_bytes: int
     direct_attachment_bytes: int

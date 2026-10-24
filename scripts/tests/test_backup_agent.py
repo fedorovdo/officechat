@@ -333,6 +333,27 @@ class BackupAgentTestCase(unittest.TestCase):
         self.assertEqual(result["last_success"]["backup_id"], "officechat-backup-20260804-120000Z")
         self.assertNotIn("STATUS_MISSING", result["warnings"])
 
+    @patch.object(backup_agent, "read_timer_status", return_value=({}, []))
+    def test_status_reports_persisted_retention_after_agent_restart(self, _timer) -> None:
+        original = self.backup_config.read_text()
+        for mode, days in (("days", 2), ("disabled", 7), ("gfs", 45)):
+            with self.subTest(mode=mode, days=days):
+                persisted = original + f'RETENTION_MODE="{mode}"\nRETENTION_DAYS={days}\n'
+                self.backup_config.write_text(persisted)
+                inspector = backup_agent.BackupInspector(self.config)
+                for _ in range(2):
+                    retention = inspector.status()["retention"]
+                    self.assertEqual(retention["mode"], mode)
+                    self.assertEqual(retention["days"], days)
+                    self.assertEqual(retention["daily"], 14)
+                self.assertEqual(self.backup_config.read_text(), persisted)
+
+    @patch.object(backup_agent, "read_timer_status", return_value=({}, []))
+    def test_status_uses_legacy_retention_defaults_without_policy_keys(self, _timer) -> None:
+        retention = self.inspector.status()["retention"]
+        self.assertEqual(retention, {"mode": "gfs", "days": 30, "daily": 14,
+                                     "weekly": 8, "monthly": 12})
+
     @patch.object(backup_agent, "read_timer_status", return_value=({"enabled": True}, []))
     def test_mount_state_is_live_even_when_last_copy_succeeded(self, _timer):
         self.write_status()

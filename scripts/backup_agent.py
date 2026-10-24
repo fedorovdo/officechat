@@ -321,7 +321,7 @@ def _parse_simple_config(path: Path) -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        if key in {"KEEP_DAILY", "KEEP_WEEKLY", "KEEP_MONTHLY", "OFFSITE_ROOT", "REQUIRE_OFFSITE"}:
+        if key in {"RETENTION_MODE", "RETENTION_DAYS", "KEEP_DAILY", "KEEP_WEEKLY", "KEEP_MONTHLY", "OFFSITE_ROOT", "REQUIRE_OFFSITE"}:
             result[key] = value.strip().strip("\"'")
     return result
 

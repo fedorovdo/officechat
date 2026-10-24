@@ -1113,6 +1113,10 @@ grep -Fq 'StateDirectoryMode=0700' "${ROOT_DIR}/deploy/systemd/officechat-backup
   echo "Backup agent state directory mode is not private" >&2
   exit 1
 }
+grep -Fxq 'RuntimeDirectoryPreserve=yes' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" || {
+  echo "Backup agent must preserve the runtime directory bind-mounted by backend" >&2
+  exit 1
+}
 if grep -Fq 'ReadWritePaths=' "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service" &&
   grep -Eq 'ReadWritePaths=.*(/var/backups/officechat|/run/lock|/var/lib/officechat([[:space:]]|$))' \
     "${ROOT_DIR}/deploy/systemd/officechat-backup-agent.service"; then

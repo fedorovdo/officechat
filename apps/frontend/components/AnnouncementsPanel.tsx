@@ -25,6 +25,10 @@ import {
   type OfficeChatUser
 } from "../lib/api";
 import type { Dictionary, Locale } from "../lib/i18n";
+import { AnnouncementEditor } from "./AnnouncementEditor";
+import { AnnouncementBody } from "./AnnouncementBody";
+import { AnnouncementTemplates } from "./AnnouncementTemplates";
+import type { AnnouncementNode } from "../lib/announcement-document";
 import { createClientId } from "../lib/client-id";
 
 type AnnouncementsPanelProps = {
@@ -71,6 +75,7 @@ export function AnnouncementsPanel({
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<OfficeChatAnnouncement | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [bodyDoc, setBodyDoc] = useState<AnnouncementNode | null>(null);
   const [priority, setPriority] = useState<(typeof priorities)[number]>("normal");
   const [audienceType, setAudienceType] = useState<BroadcastAudienceType>("selected_groups");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
@@ -188,7 +193,7 @@ export function AnnouncementsPanel({
       let draftId = currentDraftId;
       if (!draftId) {
         try {
-          const draft = await createBroadcast(token, { title, body, priority, ...audiencePayload });
+          const draft = await createBroadcast(token, { title, body, body_doc: bodyDoc, priority, ...audiencePayload });
           draftId = draft.id;
           setCurrentDraftId(draft.id);
         } catch {
@@ -203,6 +208,7 @@ export function AnnouncementsPanel({
       });
       setTitle("");
       setBody("");
+      setBodyDoc(null);
       setPriority("normal");
       setSelectedGroupIds([]);
       setSelectedUserIds([]);
@@ -280,7 +286,7 @@ export function AnnouncementsPanel({
                   {dictionary.appShell.close}
                 </button>
               </div>
-              <pre>{selectedAnnouncement.body ?? t.retracted}</pre>
+              <AnnouncementBody body={selectedAnnouncement.body ?? t.retracted} document={selectedAnnouncement.body === null ? null : selectedAnnouncement.body_doc} />
               <div className="actions">
                 <button className="secondary-link" onClick={() => void dismissSelected()} type="button">
                   {t.dismiss}
@@ -293,24 +299,31 @@ export function AnnouncementsPanel({
         {canBroadcast ? (
           <section className="announcements-card announcements-compose" aria-label={t.compose}>
             <h3>{t.compose}</h3>
+            <AnnouncementTemplates userId={currentUser.id} dictionary={dictionary} getToken={() => getRequiredToken(locale)}
+              draft={{ title, body, body_doc: bodyDoc, priority }} disabled={isBusy}
+              onUse={template => {
+                resetPreview(); setTitle(template.title); setBody(template.body);
+                setBodyDoc(template.body_doc); setPriority(template.priority); setStatus(""); setError("");
+              }} />
             <label className="field">
               <span className="field-label">{t.fields.title}</span>
-              <input className="field-input" maxLength={160} onChange={(event) => { resetPreview(); setTitle(event.target.value); }} value={title} />
+              <input className="field-input" disabled={isBusy} maxLength={160} onChange={(event) => { resetPreview(); setTitle(event.target.value); }} value={title} />
             </label>
-            <label className="field">
+            <div className="field">
               <span className="field-label">{t.fields.body}</span>
-              <textarea className="field-input" rows={6} onChange={(event) => { resetPreview(); setBody(event.target.value); }} value={body} />
-            </label>
+              <AnnouncementEditor body={body} document={bodyDoc} label={t.fields.body} t={t.editor} disabled={isBusy}
+                onChange={(text, doc) => { resetPreview(); setBody(text); setBodyDoc(doc); }} />
+            </div>
             <div className="form-grid">
               <label className="field">
                 <span className="field-label">{t.fields.priority}</span>
-                <select className="field-input" onChange={(event) => { resetPreview(); setPriority(event.target.value as typeof priority); }} value={priority}>
+                <select className="field-input" disabled={isBusy} onChange={(event) => { resetPreview(); setPriority(event.target.value as typeof priority); }} value={priority}>
                   {priorities.map((item) => <option key={item} value={item}>{t.priorities[item]}</option>)}
                 </select>
               </label>
               <label className="field">
                 <span className="field-label">{t.fields.audience}</span>
-                <select className="field-input" onChange={(event) => { resetPreview(); setAudienceType(event.target.value as BroadcastAudienceType); }} value={audienceType}>
+                <select className="field-input" disabled={isBusy} onChange={(event) => { resetPreview(); setAudienceType(event.target.value as BroadcastAudienceType); }} value={audienceType}>
                   {audienceTypes.map((item) => <option key={item} value={item}>{t.audienceTypes[item]}</option>)}
                 </select>
               </label>
@@ -321,6 +334,7 @@ export function AnnouncementsPanel({
                 {groups.filter((group) => group.is_active).map((group) => (
                   <label key={group.id}>
                     <input
+                      disabled={isBusy}
                       checked={selectedGroupIds.includes(group.id)}
                       onChange={() => setSelectedGroupIds((current) => toggleValue(current, group.id))}
                       type="checkbox"
@@ -334,6 +348,7 @@ export function AnnouncementsPanel({
                 {activeHumanUsers.map((user) => (
                   <label key={user.id}>
                     <input
+                      disabled={isBusy}
                       checked={selectedUserIds.includes(user.id)}
                       onChange={() => setSelectedUserIds((current) => toggleValue(current, user.id))}
                       type="checkbox"
@@ -344,7 +359,7 @@ export function AnnouncementsPanel({
             ) : null}
 
             <div className="actions">
-              <button className="secondary-link" disabled={isBusy || !title.trim() || !body.trim()} onClick={() => void previewAudience()} type="button">
+              <button className="secondary-link" disabled={isBusy || !title.trim() || !body.trim() || body.length > 10000} onClick={() => void previewAudience()} type="button">
                 {t.preview}
               </button>
               <button className="primary-button" disabled={isBusy || !preview} onClick={() => void sendCurrentBroadcast()} type="button">

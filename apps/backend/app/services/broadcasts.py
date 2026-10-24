@@ -57,6 +57,7 @@ def serialize_broadcast_public(announcement: BroadcastAnnouncement) -> Broadcast
         created_by_display_name=announcement.created_by_display_name,
         title=announcement.title,
         body=announcement.body,
+        body_doc=getattr(announcement, "body_doc", None),
         priority=announcement.priority,
         status=announcement.status,
         audience_type=announcement.audience_type,
@@ -265,6 +266,7 @@ async def create_broadcast(session: AsyncSession, actor: User, payload: Broadcas
         created_by_display_name=actor.display_name,
         title=payload.title.strip(),
         body=payload.body.strip(),
+        body_doc=payload.body_doc,
         priority=payload.priority,
         status="draft",
         audience_type=payload.audience_type,
@@ -291,6 +293,8 @@ async def update_broadcast(
     validate_expiration(payload.expires_at)
     announcement.title = title.strip()
     announcement.body = body.strip()
+    if "body" in payload.model_fields_set or "body_doc" in payload.model_fields_set:
+        announcement.body_doc = payload.body_doc
     if payload.priority is not None:
         announcement.priority = payload.priority
     if payload.audience_type is not None:
@@ -559,6 +563,7 @@ def serialize_announcement(recipient: BroadcastRecipient) -> AnnouncementPublic:
         id=broadcast.id,
         title=broadcast.title,
         body=body,
+        body_doc=None if is_retracted else getattr(broadcast, "body_doc", None),
         priority=broadcast.priority,
         status=broadcast.status,
         sender=broadcast.created_by_display_name,

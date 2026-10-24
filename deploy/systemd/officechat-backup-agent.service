@@ -1,8 +1,8 @@
 [Unit]
 Description=OfficeChat backup metadata and allowlisted job agent
 Documentation=file:/opt/officechat/docs/BACKUP_CENTER_RU.md
-Requires=docker.service
-After=local-fs.target docker.service
+Requires=docker.service officechat-backup-settings-recovery.service
+After=local-fs.target docker.service officechat-backup-settings-recovery.service
 
 [Service]
 Type=simple
@@ -12,6 +12,8 @@ SupplementaryGroups=officechat-backup
 UMask=0007
 RuntimeDirectory=officechat-backup-agent
 RuntimeDirectoryMode=0755
+# Backend bind-mounts this directory; keep its inode across agent stop/start.
+RuntimeDirectoryPreserve=yes
 StateDirectory=officechat-backup-agent
 StateDirectoryMode=0700
 ExecStart=/usr/bin/python3 /opt/officechat/backup-agent.py --config /etc/officechat/backup-agent.conf

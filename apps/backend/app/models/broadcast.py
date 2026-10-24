@@ -34,6 +34,7 @@ class BroadcastAnnouncement(Base):
     created_by_display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    body_doc: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     priority: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     audience_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -87,3 +88,23 @@ class BroadcastRecipient(Base):
 
     broadcast: Mapped[BroadcastAnnouncement] = relationship(back_populates="recipients")
     user: Mapped[User | None] = relationship()
+
+
+class BroadcastTemplate(Base):
+    __tablename__ = "broadcast_templates"
+    __table_args__ = (
+        CheckConstraint(f"priority IN {BROADCAST_PRIORITIES}", name="ck_broadcast_templates_priority"),
+        Index("ix_broadcast_templates_created_by_user_id", "created_by_user_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    body_doc: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    priority: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

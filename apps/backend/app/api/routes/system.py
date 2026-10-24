@@ -1,8 +1,18 @@
-from fastapi import APIRouter
+from typing import Annotated
 
+from fastapi import APIRouter, Depends
+
+from app.api.deps import require_superadmin_user
 from app.core.config import settings
+from app.models.user import User
+from app.services.release_updates import available_update
 
 router = APIRouter()
+
+
+@router.get("/updates")
+async def release_update(_: Annotated[User, Depends(require_superadmin_user)]) -> dict[str, str | None]:
+    return await available_update(settings.app_version)
 
 
 @router.get("/info")

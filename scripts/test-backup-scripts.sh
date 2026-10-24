@@ -290,6 +290,7 @@ serialized = json.dumps(manifest)
 assert "CANARY_SECRET_DO_NOT_LEAK" not in serialized
 assert "SECRET_TOKEN" not in serialized
 assert manifest["verification_status"] == "passed"
+assert manifest["backup_type"] == "manual"
 assert manifest["consistency"]["database_and_uploads_atomic_together"] is False
 PY
 python3 - "$backup_path/metadata/offsite-receipt.json" <<'PY'
@@ -378,6 +379,25 @@ pre_upgrade_path="$(find "$pre_upgrade_root" -mindepth 1 -maxdepth 1 -type d -na
   echo "pre-upgrade backup is not protected or does not contain configured images" >&2
   exit 1
 }
+python3 - "$pre_upgrade_path/metadata/manifest.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    manifest = json.load(stream)
+assert manifest["backup_type"] == "pre_upgrade"
+PY
+
+scheduled_root="${TMP_DIR}/scheduled-backups"
+write_config "$scheduled_root"
+bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --scheduled >/dev/null
+scheduled_path="$(find "$scheduled_root" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-*' -print -quit)"
+python3 - "$scheduled_path/metadata/manifest.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    manifest = json.load(stream)
+assert manifest["backup_type"] == "scheduled"
+PY
 
 hook_root="${TMP_DIR}/hook-backups"
 hook_marker="${TMP_DIR}/hook-ran"
@@ -603,6 +623,30 @@ BACKUP_PRIVATE_CONFIG=yes
 EOF
 export OFFICECHAT_FAKE_MOUNTPOINT=1
 export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$filtered_offsite_root"
+# Model a NAS that accepts archive bytes but rejects host ACL/xattr requests.
+# Exercise both ordinary backup and --copy-existing with the same destination.
+cat >"${FAKE_BIN}/rsync" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+tar_args=(-C "${@: -2:1}")
+for argument in "$@"; do
+  case "$argument" in
+    --acls|--xattrs|--xattrs=*)
+      echo 'NAS does not support host ACLs or extended attributes' >&2
+      exit 23
+      ;;
+    -[^-]*)
+      if [[ "$argument" == *A* || "$argument" == *X* ]]; then
+        echo 'NAS does not support host ACLs or extended attributes' >&2
+        exit 23
+      fi
+      ;;
+    --exclude=*) tar_args+=("--exclude=./${argument#--exclude=/}") ;;
+  esac
+done
+tar "${tar_args[@]}" -cf - . | tar -C "${@: -1}" -xf -
+EOF
+chmod +x "${FAKE_BIN}/rsync"
 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" >/dev/null
 filtered_local_backup="$(find "$filtered_local_root" -mindepth 1 -maxdepth 1 \
   -type d -name 'officechat-backup-*' -print -quit)"
@@ -616,6 +660,67 @@ filtered_offsite_backup="$(find "$filtered_offsite_root" -mindepth 1 -maxdepth 1
   echo "plaintext private archive leaked to off-site storage" >&2
   exit 1
 }
+cmp "$filtered_local_backup/database/officechat.dump" "$filtered_offsite_backup/database/officechat.dump"
+cmp "$filtered_local_backup/uploads/uploads.tar.gz" "$filtered_offsite_backup/uploads/uploads.tar.gz"
+"${SCRIPT_DIR}/verify-backup.sh" --config "$CONFIG_FILE" "$filtered_offsite_backup" >/dev/null
+python3 - "$STATUS_FILE" <<'PYPORTABLE'
+import json, sys
+status = json.load(open(sys.argv[1]))
+assert status["success"] is True, status
+assert status["offsite_status"] == "copied", status
+assert status["verification_status"] == "passed", status
+PYPORTABLE
+
+# A storage change makes one protected local snapshot, then copies that same
+# snapshot under the executor's inherited flock without dumping the DB again.
+migration_local="${TMP_DIR}/migration-local"
+migration_remote="${TMP_DIR}/migration-remote"
+mkdir -p "$migration_remote/officechat-backup-20200101-000000Z" "$migration_local/officechat-backup-20200101-000000Z"
+write_config "$migration_local"
+cat >>"$CONFIG_FILE" <<EOF
+BACKUP_DEPLOYMENT_CONFIG=yes
+BACKUP_PRIVATE_CONFIG=yes
+EOF
+: >"$FAKE_LOG"
+(
+  exec 8>"$LOCK_FILE"
+  flock -n 8
+  env OFFICECHAT_BACKUP_LOCK_FD=8 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change >/dev/null
+)
+migration_backup="$(find "$migration_local" -mindepth 1 -maxdepth 1 -type d -name 'officechat-backup-*' ! -name 'officechat-backup-20200101-000000Z' -print -quit)"
+migration_id="$(basename "$migration_backup")"
+[[ -f "$migration_backup/PROTECTED" ]]
+python3 - "$migration_backup/metadata/manifest.json" <<'PYTYPE'
+import json, sys
+assert json.load(open(sys.argv[1]))["backup_type"] == "pre_storage_change"
+PYTYPE
+migration_dumps="$(grep -c ' pg_dump ' "$FAKE_LOG")"
+cat >>"$CONFIG_FILE" <<EOF
+OFFSITE_ROOT=${migration_remote}
+REQUIRE_OFFSITE=yes
+EOF
+export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$migration_remote"
+(
+  exec 8>"$LOCK_FILE"
+  flock -n 8
+  env OFFICECHAT_BACKUP_LOCK_FD=8 bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change --copy-existing "$migration_id" >/dev/null
+)
+[[ "$migration_dumps" == "$(grep -c ' pg_dump ' "$FAKE_LOG")" ]] || {
+  echo "storage migration dumped the database twice" >&2
+  exit 1
+}
+[[ -f "$migration_remote/$migration_id/SUCCESS" && -f "$migration_remote/$migration_id/PROTECTED" ]]
+[[ -f "$migration_backup/config/deployment-private.tar.gz" ]]
+[[ ! -e "$migration_remote/$migration_id/config/deployment-private.tar.gz" ]]
+# Ordinary history remains available on both destinations during a migration.
+# Re-copying to an existing target must fail and retain the local protected copy.
+if bash "${SCRIPT_DIR}/backup-production.sh" --config "$CONFIG_FILE" --pre-storage-change --copy-existing "$migration_id" >/dev/null 2>&1; then
+  echo "storage migration overwrote an existing external backup" >&2
+  exit 1
+fi
+[[ -f "$migration_backup/SUCCESS" ]]
+[[ -d "$migration_local/officechat-backup-20200101-000000Z" && -d "$migration_remote/officechat-backup-20200101-000000Z" ]]
+export OFFICECHAT_FAKE_OFFSITE_DEVICE_PATH="$filtered_offsite_root"
 
 cat >"${FAKE_BIN}/rsync" <<'EOF'
 #!/usr/bin/env bash
@@ -791,6 +896,12 @@ done
   (acquire_backup_lock) >/dev/null 2>&1
   lock_status=$?
   set -e
+  OFFICECHAT_BACKUP_LOCK_FD=8 acquire_backup_lock
+  exec 7>"${TMP_DIR}/unrelated-lock"
+  if (OFFICECHAT_BACKUP_LOCK_FD=7 acquire_backup_lock) >/dev/null 2>&1; then
+    echo "unrelated inherited descriptor bypassed the backup lock" >&2
+    exit 1
+  fi
   [[ "$lock_status" == "75" ]] || {
     echo "parallel flock did not return the executor busy status" >&2
     exit 1

@@ -57,3 +57,7 @@ AGE_RECIPIENT=
 # Archive validation limits protect verify/restore from resource-exhaustion payloads.
 MAX_ARCHIVE_MEMBERS=2000000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES=1099511627776
+
+# gfs (existing daily/weekly/monthly), days, or disabled. Protected copies are retained.
+RETENTION_MODE=gfs
+RETENTION_DAYS=30

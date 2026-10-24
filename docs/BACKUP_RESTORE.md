@@ -443,7 +443,7 @@ Before production restore, inspect `metadata/manifest.json`, confirm `officechat
 
 ## Production restore
 
-Restore is CLI-only. For a local repository backup:
+An authorized administrator can restore a verified local backup of the installed OfficeChat version from Backup Center after recording a reason and confirming the hostname and backup ID. The host runs an isolated drill and creates a fresh protected backup before changing production data. CLI remains available for operator recovery and migrations. For a local repository backup:
 
 ```bash
 BACKUP_ID=officechat-backup-YYYYMMDD-HHMMSSZ
@@ -564,3 +564,22 @@ sudo systemctl list-units --all 'officechat-backup-verify@*.service'
 ```
 
 The full confirmed production restore command belongs only in the [Production restore](#production-restore) procedure above.
+
+
+### Backup deletion and retention
+
+Superadministrators can select up to 50 archive IDs, preview deletion from the
+local destination, the currently connected external destination, or both, and
+confirm it explicitly. Protected copies require an additional confirmation.
+The last verified copy in each destination is retained (or the last complete
+copy if none was verified). The list includes copies found only on the current
+external destination; remote-only copies cannot use local verification/restore
+buttons. Disconnected former destinations are not modified.
+
+The default remains existing daily/weekly/monthly (GFS) retention. Administrators
+can select age-based retention (1–3650 days, e.g. 30) or disable automatic cleanup.
+Age mode retains all copies within the window; it replaces GFS, rather than
+combining with it. Settings do not delete backups immediately. Cleanup runs after
+successful backups, independently per destination, retaining protected and the
+last verified copies. Age is calculated in UTC from the archive ID, not file
+modification time. See [the detailed operator guide](BACKUP_RETENTION_RU.md).

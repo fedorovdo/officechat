@@ -11,7 +11,7 @@ from app.services.security import decode_access_token
 from app.services.audit import record_audit_event_best_effort, should_record_security_event, token_fingerprint
 from app.services.permissions import require_permission
 from app.services.users import get_user_by_id
-from app.core.permissions import CAN_BROADCAST, CAN_MANAGE_CALENDAR, CAN_MANAGE_DIRECTORY, CAN_PIN_MESSAGES
+from app.core.permissions import CAN_BROADCAST, CAN_MANAGE_CALENDAR, CAN_MANAGE_DIRECTORY, CAN_PIN_MESSAGES, CAN_RESTORE_BACKUP
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 AdminRoles = {"superadmin", "admin"}
@@ -88,6 +88,14 @@ async def require_superadmin_user(
             )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin role required")
     return current_user
+
+
+async def require_backup_operator(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(require_admin_user)],
+) -> User:
+    await require_permission(session, actor, CAN_RESTORE_BACKUP)
+    return actor
 
 
 async def require_can_broadcast(

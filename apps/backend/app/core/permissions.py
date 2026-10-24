@@ -2,6 +2,7 @@ CAN_BROADCAST = "can_broadcast"
 CAN_PIN_MESSAGES = "can_pin_messages"
 CAN_MANAGE_CALENDAR = "can_manage_calendar"
 CAN_MANAGE_DIRECTORY = "can_manage_directory"
+CAN_RESTORE_BACKUP = "can_restore_backup"
 
 
 PERMISSION_CATALOG = {
@@ -24,6 +25,11 @@ PERMISSION_CATALOG = {
         "category": "directory",
         "description_ru": "Может создавать, изменять, архивировать и восстанавливать записи корпоративного справочника.",
         "description_en": "Can create, edit, archive and restore corporate directory entries.",
+    },
+    CAN_RESTORE_BACKUP: {
+        "category": "backup",
+        "description_ru": "Может запускать восстановление OfficeChat из проверенной резервной копии.",
+        "description_en": "Can start an OfficeChat restore from a verified backup.",
     },
 }
 

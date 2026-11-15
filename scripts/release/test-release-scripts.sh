@@ -168,6 +168,26 @@ EOF_PREFLIGHT_SUDO
     ! -e "${contract_dir}/state/backups" ]] ||
     fail_test "Install dry-run created target directories"
 
+  [[ "$contract_output" != *"Installing SMB/NFS backup mount helpers"* ]] ||
+    fail_test "Manual Docker mode requested OS packages"
+  printf 'ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n' >"${contract_dir}/debian-13"
+  contract_output="$(env \
+    PATH="${contract_dir}/bin:${PATH}" \
+    OFFICECHAT_FAKE_DOCKER_LOG="${contract_dir}/docker.log" \
+    OFFICECHAT_FAKE_MUTATION_LOG="${contract_dir}/mutation.log" \
+    OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/debian-13" \
+    OFFICECHAT_RELEASE_VERSION="$release_version" \
+    OFFICECHAT_INSTALL_DIR="${contract_dir}/state/install" \
+    OFFICECHAT_DATA_DIR="${contract_dir}/state/data" \
+    OFFICECHAT_BACKUP_DIR="${contract_dir}/state/backups" \
+    OFFICECHAT_ENV_FILE="${contract_dir}/state/install/.env" \
+    OFFICECHAT_LOCK_FILE="${contract_dir}/state/install.lock" \
+    bash "${SCRIPT_DIR}/install-linux.sh" --dry-run --install-docker 2>&1)"
+  [[ "$contract_output" == *"apt-get install -y cifs-utils nfs-common"* ]] ||
+    fail_test "Existing Docker skipped Debian backup mount helpers"
+  [[ ! -s "${contract_dir}/mutation.log" ]] ||
+    fail_test "Automatic installer dry-run invoked a mutation command"
+
   for failed_image in \
     "ghcr.io/fedorovdo/officechat-backend:${release_version}" \
     "ghcr.io/fedorovdo/officechat-frontend:${release_version}"; do
@@ -436,6 +456,23 @@ EOF_UNSUPPORTED_OS
   for required_package in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
     [[ "$output" == *"$required_package"* ]] ||
       fail_test "Debian Docker plan omitted ${required_package}"
+  done
+
+  for fixture in rocky-10 redos-8 debian-12 debian-13; do
+    output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/${fixture}" \
+      bash -c '. "$1"; install_backup_mount_helpers' _ "${SCRIPT_DIR}/lib.sh")"
+    case "$fixture" in
+      debian-*)
+        [[ "$output" == *"apt-get install -y cifs-utils nfs-common"* ]] ||
+          fail_test "Debian backup mount helpers are missing"
+        ;;
+      *)
+        [[ "$output" == *"dnf -y install cifs-utils nfs-utils"* ]] ||
+          fail_test "Native RPM backup mount helpers are missing"
+        [[ "$output" != *"download.docker.com"* ]] ||
+          fail_test "Backup helpers added an external Docker repository"
+        ;;
+    esac
   done
 
   for fixture in redos-9 debian-14 unsupported; do

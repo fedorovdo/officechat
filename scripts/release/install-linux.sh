@@ -57,6 +57,7 @@ Production requires HTTPS. --hostname configures the public HTTPS origin for a n
 --start-caddy starts the bundled internal-HTTPS reverse proxy and exports its public CA certificate.
 --create-admin securely prompts twice for the initial superadmin password.
 The password is passed to the backend only through standard input.
+--install-docker also installs SMB/NFS backup mount helpers, including with existing Docker.
 The backup timer is installed but enabled only with --enable-backup-timer.
 EOF_HELP
   exit 0
@@ -331,6 +332,10 @@ if [[ "$START_CADDY" == "1" ]]; then
 fi
 
 preflight_release_image_access "$OFFICECHAT_RELEASE_VERSION"
+
+if [[ "$INSTALL_DOCKER" == "1" ]]; then
+  install_backup_mount_helpers
+fi
 prompt_initial_admin_password
 
 available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"

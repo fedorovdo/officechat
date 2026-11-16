@@ -30,8 +30,8 @@ Usage:
 Options:
   --version VERSION       Exact OfficeChat release version.
   --hostname HOSTNAME     Public HTTPS hostname.
-  --install-docker        Install Docker automatically when missing (default).
-  --no-install-docker     Require an existing Docker Engine and Compose v2.
+  --install-docker        Install Docker when missing and SMB/NFS helpers (default).
+  --no-install-docker     Require existing Docker/Compose; install no OS packages.
   --start-caddy           Start bundled internal HTTPS; requires --hostname.
   --no-start-caddy        Do not start Caddy.
   --create-admin          Create the initial superadmin (default).

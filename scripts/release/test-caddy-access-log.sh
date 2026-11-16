@@ -24,20 +24,47 @@ docker run -d --name "$CONTAINER_NAME" \
   -v "${ROOT_DIR}/deploy/caddy/Caddyfile.example:/etc/caddy/Caddyfile:ro" \
   "$CADDY_IMAGE" >/dev/null
 
+# The isolated proxy has no backend/frontend, so HTTP 502 is expected here.
+# A version command can succeed before the HTTPS listener and CA are ready.
+# Require an actual HTTP response, including for the credential probes below.
+caddy_https_responds() {
+  local response
+  response="$(docker exec "$CONTAINER_NAME" wget -S -T 10 \
+    --no-check-certificate -O /dev/null "$1" 2>&1)" || true
+  [[ "$response" =~ HTTP/[0-9.]+[[:space:]]+[1-5][0-9]{2} ]]
+}
+
+https_ready=0
 for _ in {1..30}; do
-  if docker exec "$CONTAINER_NAME" caddy version >/dev/null 2>&1; then
+  if caddy_https_responds "https://localhost/"; then
+    https_ready=1
     break
   fi
   sleep 1
 done
+[[ "$https_ready" == "1" ]] || {
+  echo "Caddy HTTPS listener did not become ready" >&2
+  exit 1
+}
 
-docker exec "$CONTAINER_NAME" wget -q --no-check-certificate -O /dev/null \
-  "https://localhost/api/ws/me?token=${SYNTHETIC_QUERY_SECRET}&access_token=${SYNTHETIC_SECOND_QUERY_SECRET}&view=all" || true
-docker exec "$CONTAINER_NAME" wget -q --no-check-certificate -O /dev/null \
-  "https://localhost/api/bots/incoming/${SYNTHETIC_PATH_SECRET}" || true
-sleep 1
+caddy_https_responds \
+  "https://localhost/api/ws/me?token=${SYNTHETIC_QUERY_SECRET}&access_token=${SYNTHETIC_SECOND_QUERY_SECRET}&view=all" || {
+  echo "Caddy did not return an HTTP response to the query redaction probe" >&2
+  exit 1
+}
+caddy_https_responds "https://localhost/api/bots/incoming/${SYNTHETIC_PATH_SECRET}" || {
+  echo "Caddy did not return an HTTP response to the path redaction probe" >&2
+  exit 1
+}
 
-logs="$(docker logs "$CONTAINER_NAME" 2>&1)"
+for _ in {1..30}; do
+  logs="$(docker logs "$CONTAINER_NAME" 2>&1)"
+  if [[ "$logs" == *"token=REDACTED"* &&
+        "$logs" == *"/api/bots/incoming/REDACTED"* ]]; then
+    break
+  fi
+  sleep 1
+done
 [[ "$logs" != *"$SYNTHETIC_QUERY_SECRET"* ]] || {
   echo "Caddy logs exposed the synthetic WebSocket token" >&2
   exit 1

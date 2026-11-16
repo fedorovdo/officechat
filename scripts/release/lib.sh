@@ -194,6 +194,24 @@ detect_supported_docker_platform() {
   export OFFICECHAT_OS_VERSION_CODENAME
 }
 
+install_backup_mount_helpers() {
+  detect_supported_docker_platform
+  log "Installing SMB/NFS backup mount helpers from native OS repositories"
+  case "$OFFICECHAT_DOCKER_PLATFORM" in
+    debian)
+      as_root apt-get update
+      as_root apt-get install -y cifs-utils nfs-common
+      ;;
+    rocky|redos)
+      as_root dnf -y install cifs-utils nfs-utils
+      ;;
+  esac
+  if ! is_dry_run; then
+    require_command mount.cifs
+    require_command mount.nfs
+  fi
+}
+
 install_docker_engine() {
   local architecture docker_key_fingerprint key_file platform repo_file
 

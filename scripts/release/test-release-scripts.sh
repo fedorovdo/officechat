@@ -460,7 +460,7 @@ EOF_UNSUPPORTED_OS
 
   for fixture in rocky-10 redos-8 debian-12 debian-13; do
     output="$(env DRY_RUN=1 OFFICECHAT_OS_RELEASE_FILE="${contract_dir}/${fixture}" \
-      bash -c '. "$1"; install_backup_mount_helpers' _ "${SCRIPT_DIR}/lib.sh")"
+      bash -c ". \"\$1\"; install_backup_mount_helpers" _ "${SCRIPT_DIR}/lib.sh")"
     case "$fixture" in
       debian-*)
         [[ "$output" == *"apt-get install -y cifs-utils nfs-common"* ]] ||
